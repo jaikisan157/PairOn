@@ -15,6 +15,9 @@ import {
   Sun,
   Moon,
   MessageCircle,
+  Handshake,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
@@ -22,6 +25,7 @@ import { useMatching } from '@/context/MatchingContext';
 import { useTheme } from '@/context/ThemeContext';
 import { MATCH_MODES } from '@/data/constants';
 import { formatDuration } from '@/lib/utils';
+import { socketService } from '@/lib/socket';
 import type { MatchMode } from '@/types';
 
 const iconMap = {
@@ -36,6 +40,31 @@ export function DashboardPage() {
   const { theme, toggleTheme } = useTheme();
   const { isSearching, searchMatch, currentMatch } = useMatching();
   const navigate = useNavigate();
+
+  // Proposals
+  const [proposals, setProposals] = useState<any[]>([]);
+
+  // Listen for proposals
+  useEffect(() => {
+    socketService.onProposalReceived((proposal: any) => {
+      if (!proposal.isSent) {
+        setProposals(prev => [proposal, ...prev]);
+      }
+    });
+
+    socketService.onProposalAccepted((data: any) => {
+      setProposals(prev => prev.filter(p => p.id !== data.proposalId));
+      navigate('/collaborate');
+    });
+
+    socketService.onProposalDeclined((proposalId: string) => {
+      setProposals(prev => prev.filter(p => p.id !== proposalId));
+    });
+
+    return () => {
+      // Don't removeAllListeners here — other contexts use socket too
+    };
+  }, [navigate]);
 
   // Navigate to collaborate page when match is found
   useEffect(() => {
@@ -224,6 +253,82 @@ export function DashboardPage() {
               )}
             </Button>
           </motion.div>
+
+          {/* Incoming Proposals */}
+          {proposals.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+              className="bg-white dark:bg-gray-800 rounded-[28px] shadow-card p-8 mb-8"
+            >
+              <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <Handshake className="w-5 h-5 text-pairon-accent" />
+                Collaboration Proposals
+                <span className="ml-2 px-2 py-0.5 bg-pairon-accent/10 text-pairon-accent text-sm rounded-full">
+                  {proposals.length}
+                </span>
+              </h2>
+
+              <div className="space-y-4">
+                {proposals.map((p) => (
+                  <div
+                    key={p.id}
+                    className="border border-gray-200 dark:border-gray-700 rounded-2xl p-5"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-pairon-accent/10 flex items-center justify-center">
+                          <span className="font-bold text-pairon-accent">
+                            {p.proposer?.name?.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">{p.proposer?.name}</p>
+                          <p className="text-xs text-gray-500">{p.proposer?.experienceLevel} · ⭐ {p.proposer?.reputation}</p>
+                        </div>
+                      </div>
+                      <span className="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full">
+                        {p.matchScore}% match
+                      </span>
+                    </div>
+
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 mb-3">
+                      <p className="font-medium text-sm text-gray-900 dark:text-white">{p.projectIdea?.title}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{p.projectIdea?.description}</p>
+                    </div>
+
+                    {p.message && (
+                      <p className="text-sm text-gray-600 dark:text-gray-400 italic mb-3">"{p.message}"</p>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => socketService.acceptProposal(p.id)}
+                        className="flex-1 bg-green-500 hover:bg-green-600 text-white flex items-center justify-center gap-1 rounded-xl"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Accept
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          socketService.declineProposal(p.id);
+                          setProposals(prev => prev.filter(pr => pr.id !== p.id));
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1 rounded-xl"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
 
           {/* Recent Activity */}
           <motion.div

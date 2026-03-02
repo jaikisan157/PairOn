@@ -158,54 +158,125 @@ export function findBestMatch(
 }
 
 /**
- * Get project idea based on matched users' skills and interests
+ * Get project ideas based on matched users' skills and interests.
+ * Returns 3 ideas tailored to the users' combined skill set.
  */
+
+interface ProjectTemplate {
+  title: string;
+  description: string;
+  category: string;
+  skills: string[]; // skills that make this template relevant
+}
+
+const PROJECT_TEMPLATES: ProjectTemplate[] = [
+  // Web Development
+  { title: 'Real-time Chat Application', description: 'Build a full-stack chat app with rooms, direct messages, and typing indicators.', category: 'Web Development', skills: ['react', 'node.js', 'socket.io', 'javascript', 'typescript'] },
+  { title: 'E-commerce Dashboard', description: 'Create an admin dashboard with real-time analytics, inventory management, and order tracking.', category: 'Web Development', skills: ['react', 'next.js', 'node.js', 'mongodb', 'postgresql'] },
+  { title: 'Blog Platform with CMS', description: 'Build a modern blog with markdown editor, categories, tags, and SEO optimization.', category: 'Web Development', skills: ['react', 'next.js', 'tailwindcss', 'node.js', 'mongodb'] },
+  { title: 'Task Management Board', description: 'Create a Trello-like kanban board with drag-and-drop, real-time sync, and team features.', category: 'Web Development', skills: ['react', 'typescript', 'node.js', 'socket.io', 'mongodb'] },
+  { title: 'URL Shortener with Analytics', description: 'Build a URL shortener that tracks clicks, geographic data, and referral sources.', category: 'Web Development', skills: ['node.js', 'express', 'mongodb', 'react', 'javascript'] },
+
+  // Mobile
+  { title: 'Fitness Tracker App', description: 'Build a mobile app that tracks workouts, calories, and displays progress charts.', category: 'Mobile Development', skills: ['react native', 'flutter', 'swift', 'kotlin', 'mobile'] },
+  { title: 'Expense Splitter', description: 'Create an app for groups to split bills, track who owes whom, and settle debts.', category: 'Mobile Development', skills: ['react native', 'flutter', 'firebase', 'mobile', 'javascript'] },
+  { title: 'Habit Tracker with Streaks', description: 'Build a habit tracking app with daily reminders, streak tracking, and data visualization.', category: 'Mobile Development', skills: ['react native', 'flutter', 'mobile', 'typescript', 'firebase'] },
+
+  // AI/ML
+  { title: 'Sentiment Analysis Dashboard', description: 'Build a tool that analyzes sentiment from social media posts or product reviews using NLP.', category: 'AI/ML', skills: ['python', 'machine learning', 'nlp', 'tensorflow', 'react'] },
+  { title: 'Image Classification Web App', description: 'Create a web app where users upload images and get AI-powered classifications.', category: 'AI/ML', skills: ['python', 'tensorflow', 'pytorch', 'react', 'flask'] },
+  { title: 'AI-Powered Resume Screener', description: 'Build a tool that parses resumes and scores candidates based on job requirements.', category: 'AI/ML', skills: ['python', 'machine learning', 'nlp', 'node.js', 'react'] },
+  { title: 'Chatbot with Natural Language', description: 'Create an AI chatbot that understands natural language and provides helpful responses.', category: 'AI/ML', skills: ['python', 'nlp', 'machine learning', 'javascript', 'react'] },
+
+  // DevOps / Backend
+  { title: 'CI/CD Pipeline Dashboard', description: 'Build a monitoring dashboard for CI/CD pipelines with build status and deployment history.', category: 'DevOps', skills: ['docker', 'kubernetes', 'aws', 'node.js', 'react'] },
+  { title: 'API Rate Limiter Service', description: 'Create a distributed rate limiting service with Redis and a monitoring dashboard.', category: 'Backend', skills: ['node.js', 'redis', 'docker', 'go', 'python'] },
+  { title: 'Microservices Starter Kit', description: 'Build a template with API gateway, service discovery, and inter-service communication.', category: 'Backend', skills: ['node.js', 'docker', 'kubernetes', 'go', 'python'] },
+
+  // Data / Analytics
+  { title: 'Data Visualization Tool', description: 'Build an interactive dashboard that visualizes CSV/JSON data with charts and filters.', category: 'Data', skills: ['python', 'd3.js', 'react', 'postgresql', 'data science'] },
+  { title: 'Web Scraper with Dashboard', description: 'Create a web scraper that collects data and displays it in a beautiful dashboard.', category: 'Data', skills: ['python', 'node.js', 'react', 'mongodb', 'data science'] },
+
+  // Design / UI
+  { title: 'Design System Library', description: 'Build a reusable component library with documentation, theming, and accessibility.', category: 'Design', skills: ['react', 'ui/ux design', 'css', 'tailwindcss', 'figma'] },
+  { title: 'Portfolio Builder', description: 'Create a tool where users pick templates, customize, and deploy personal portfolios.', category: 'Design', skills: ['react', 'next.js', 'css', 'ui/ux design', 'figma'] },
+
+  // Games
+  { title: 'Multiplayer Quiz Game', description: 'Build a real-time multiplayer quiz game with rooms, scoring, and leaderboards.', category: 'Gaming', skills: ['javascript', 'typescript', 'socket.io', 'react', 'node.js'] },
+  { title: '2D Platformer Game', description: 'Create a browser-based 2D platformer with levels, enemies, and a level editor.', category: 'Gaming', skills: ['javascript', 'game development', 'html5', 'canvas', 'typescript'] },
+
+  // Blockchain
+  { title: 'NFT Marketplace', description: 'Build a marketplace for creating, listing, and trading digital collectibles.', category: 'Blockchain', skills: ['solidity', 'ethereum', 'react', 'web3', 'blockchain'] },
+  { title: 'DeFi Yield Calculator', description: 'Create a tool that compares DeFi yields across protocols and tracks returns.', category: 'Blockchain', skills: ['solidity', 'web3', 'react', 'blockchain', 'javascript'] },
+
+  // Open Source / Tools
+  { title: 'CLI Tool for Developers', description: 'Build a useful CLI utility (code formatter, project scaffolder, or dev workflow tool).', category: 'Tools', skills: ['node.js', 'python', 'go', 'rust', 'typescript'] },
+  { title: 'VS Code Extension', description: 'Create a productivity-boosting VS Code extension with custom commands and UI.', category: 'Tools', skills: ['typescript', 'javascript', 'node.js', 'vscode', 'electron'] },
+  { title: 'Open Source Documentation Site', description: 'Build a beautiful documentation site generator with search, versioning, and themes.', category: 'Open Source', skills: ['react', 'next.js', 'markdown', 'typescript', 'node.js'] },
+
+  // Cybersecurity
+  { title: 'Password Strength Analyzer', description: 'Build a tool that checks password strength, suggests improvements, and detects breaches.', category: 'Security', skills: ['cybersecurity', 'python', 'node.js', 'react', 'javascript'] },
+  { title: 'Network Scanner Dashboard', description: 'Create a web-based network scanning tool with port analysis and vulnerability detection.', category: 'Security', skills: ['cybersecurity', 'python', 'node.js', 'react', 'networking'] },
+
+  // Generic (good for any skill combo)
+  { title: 'Collaborative Whiteboard', description: 'Build a real-time collaborative whiteboard with drawing, sticky notes, and sharing.', category: 'Collaboration', skills: ['react', 'socket.io', 'node.js', 'canvas', 'typescript'] },
+  { title: 'Event Management Platform', description: 'Create a platform for organizing events with RSVP, ticketing, and notifications.', category: 'Web Development', skills: ['react', 'node.js', 'mongodb', 'express', 'javascript'] },
+  { title: 'Social Media Scheduler', description: 'Build a tool to schedule and manage posts across multiple social media platforms.', category: 'Web Development', skills: ['react', 'node.js', 'api', 'mongodb', 'typescript'] },
+];
+
 export function generateProjectIdea(
   user1: IUser,
   user2: IUser
 ): { title: string; description: string; category: string; difficulty: string } {
-  const allSkills = [...user1.skills, ...user2.skills];
-  const allInterests = [...user1.interests, ...user2.interests];
+  const ideas = generateProjectIdeas(user1, user2);
+  return ideas[0];
+}
 
-  // Determine difficulty based on experience levels
+export function generateProjectIdeas(
+  user1: IUser,
+  user2: IUser,
+  count: number = 3
+): Array<{ title: string; description: string; category: string; difficulty: string }> {
+  const allSkills = [...user1.skills, ...user2.skills].map(s => s.toLowerCase());
+  const allInterests = [...user1.interests, ...user2.interests].map(i => i.toLowerCase());
+
+  // Score each template based on skill match
+  const scored = PROJECT_TEMPLATES.map(template => {
+    let score = 0;
+
+    // Skills match (weighted heavily)
+    for (const skill of template.skills) {
+      if (allSkills.some(s => s.includes(skill) || skill.includes(s))) {
+        score += 10;
+      }
+    }
+
+    // Interest/category match
+    if (allInterests.some(i =>
+      template.category.toLowerCase().includes(i) || i.includes(template.category.toLowerCase())
+    )) {
+      score += 5;
+    }
+
+    return { template, score };
+  });
+
+  // Sort by score (best match first), add some randomness to avoid same results
+  scored.sort((a, b) => (b.score + Math.random() * 3) - (a.score + Math.random() * 3));
+
+  // Determine difficulty
   const experienceLevels = ['beginner', 'intermediate', 'advanced', 'expert'];
   const user1Level = experienceLevels.indexOf(user1.experienceLevel);
   const user2Level = experienceLevels.indexOf(user2.experienceLevel);
   const avgLevel = Math.round((user1Level + user2Level) / 2);
-  const difficulty = experienceLevels[avgLevel] || 'medium';
+  const difficulty = avgLevel <= 0 ? 'easy' : avgLevel >= 3 ? 'hard' : 'medium';
 
-  // Determine category based on interests
-  const category = allInterests[0] || 'Web Development';
-
-  // Generate project title based on skills
-  const primarySkill = allSkills[0] || 'Development';
-  const secondarySkill = allSkills[1] || 'Design';
-
-  const projectTemplates = [
-    {
-      title: `${primarySkill} & ${secondarySkill} Collaboration Tool`,
-      description: `Build a tool that combines ${primarySkill} and ${secondarySkill} for better productivity.`,
-    },
-    {
-      title: `${category} Dashboard`,
-      description: `Create a dashboard for ${category.toLowerCase()} with real-time data visualization.`,
-    },
-    {
-      title: `${primarySkill} Learning Platform`,
-      description: `Design a platform to help others learn ${primarySkill} effectively.`,
-    },
-    {
-      title: `${category} Automation Tool`,
-      description: `Build an automation tool to streamline ${category.toLowerCase()} workflows.`,
-    },
-  ];
-
-  const template = projectTemplates[Math.floor(Math.random() * projectTemplates.length)];
-
-  return {
+  // Return top N unique ideas
+  return scored.slice(0, count).map(({ template }) => ({
     title: template.title,
     description: template.description,
-    category,
-    difficulty: difficulty === 'beginner' ? 'easy' : difficulty === 'expert' ? 'hard' : 'medium',
-  };
+    category: template.category,
+    difficulty,
+  }));
 }
+

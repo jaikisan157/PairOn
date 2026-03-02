@@ -134,6 +134,22 @@ export interface IQuickChat extends Document {
   endedAt?: Date;
 }
 
+// Collaboration Proposal Types
+export type ProposalStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+
+export interface ICollabProposal extends Document {
+  proposerId: string;
+  recipientId: string;
+  mode: MatchMode;
+  projectIdea: IProjectIdea;
+  ideaSource: 'user' | 'ai';
+  message?: string;
+  status: ProposalStatus;
+  quickChatId?: string; // reference to the Quick Connect chat it came from
+  createdAt: Date;
+  expiresAt: Date;
+}
+
 // Rating Types
 export type RatingLevel = 'helpful' | 'very-helpful' | 'exceptional';
 
@@ -183,6 +199,11 @@ export interface ServerToClientEvents {
   'quickchat:warning': (data: { warningCount: number; message: string }) => void;
   'quickchat:blocked': (message: string) => void;
   'quickchat:rated': (chatId: string) => void;
+  // Collab Proposals
+  'collab:proposal-received': (proposal: any) => void;
+  'collab:proposal-accepted': (data: { proposalId: string; match: any }) => void;
+  'collab:proposal-declined': (proposalId: string) => void;
+  'collab:ai-ideas': (ideas: IProjectIdea[]) => void;
 }
 
 export interface ClientToServerEvents {
@@ -200,4 +221,9 @@ export interface ClientToServerEvents {
   'quickchat:message': (chatId: string, content: string) => void;
   'quickchat:end': (chatId: string) => void;
   'quickchat:rate': (chatId: string, rating: 'helpful' | 'not-helpful') => void;
+  // Collab Proposals
+  'collab:propose': (data: { recipientId: string; mode: MatchMode; projectIdea: IProjectIdea; ideaSource: 'user' | 'ai'; message?: string; quickChatId?: string }) => void;
+  'collab:accept': (proposalId: string) => void;
+  'collab:decline': (proposalId: string) => void;
+  'collab:generate-ideas': (partnerId: string) => void;
 }

@@ -166,6 +166,47 @@ class SocketService {
         this.socket?.on('quickchat:rated', callback);
     }
 
+    // ===== Collab Proposals =====
+
+    proposeCollab(data: {
+        recipientId: string;
+        mode: string;
+        projectIdea: { title: string; description: string; category: string; difficulty: string };
+        ideaSource: 'user' | 'ai';
+        message?: string;
+        quickChatId?: string;
+    }) {
+        this.socket?.emit('collab:propose', data);
+    }
+
+    acceptProposal(proposalId: string) {
+        this.socket?.emit('collab:accept', proposalId);
+    }
+
+    declineProposal(proposalId: string) {
+        this.socket?.emit('collab:decline', proposalId);
+    }
+
+    generateIdeas(partnerId: string) {
+        this.socket?.emit('collab:generate-ideas', partnerId);
+    }
+
+    onProposalReceived(callback: (proposal: any) => void) {
+        this.socket?.on('collab:proposal-received', callback);
+    }
+
+    onProposalAccepted(callback: (data: any) => void) {
+        this.socket?.on('collab:proposal-accepted', callback);
+    }
+
+    onProposalDeclined(callback: (proposalId: string) => void) {
+        this.socket?.on('collab:proposal-declined', callback);
+    }
+
+    onAiIdeas(callback: (ideas: any[]) => void) {
+        this.socket?.on('collab:ai-ideas', callback);
+    }
+
     // ===== Cleanup =====
 
     removeAllListeners() {

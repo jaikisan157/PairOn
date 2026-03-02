@@ -13,6 +13,8 @@ import {
     AlertTriangle,
     Zap,
     Search,
+    Handshake,
+    Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,6 +55,15 @@ export function QuickConnectPage() {
     const [newMessage, setNewMessage] = useState('');
     const [warning, setWarning] = useState<{ warningCount: number; message: string } | null>(null);
     const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
+
+    // Proposal state
+    const [showProposalModal, setShowProposalModal] = useState(false);
+    const [aiIdeas, setAiIdeas] = useState<Array<{ title: string; description: string; category: string; difficulty: string }>>([]);
+    const [selectedIdea, setSelectedIdea] = useState<{ title: string; description: string; category: string; difficulty: string } | null>(null);
+    const [proposalMode, setProposalMode] = useState<'sprint' | 'challenge' | 'build'>('sprint');
+    const [proposalMessage, setProposalMessage] = useState('');
+    const [loadingIdeas, setLoadingIdeas] = useState(false);
+    const [proposalSent, setProposalSent] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -111,6 +122,12 @@ export function QuickConnectPage() {
             setActiveChat(prev => prev ? { ...prev, rated: true } : prev);
         });
 
+        socketService.onAiIdeas((ideas) => {
+            setAiIdeas(ideas);
+            setLoadingIdeas(false);
+            if (ideas.length > 0) setSelectedIdea(ideas[0]);
+        });
+
         return () => {
             socketService.removeAllListeners();
         };
@@ -151,7 +168,29 @@ export function QuickConnectPage() {
         setChatStatus('idle');
         setMode(null);
         setTopic('');
+        setProposalSent(false);
     }, []);
+
+    const handleOpenProposal = useCallback(() => {
+        if (!activeChat) return;
+        setShowProposalModal(true);
+        setLoadingIdeas(true);
+        socketService.generateIdeas(activeChat.partnerId);
+    }, [activeChat]);
+
+    const handleSendProposal = useCallback(() => {
+        if (!activeChat || !selectedIdea) return;
+        socketService.proposeCollab({
+            recipientId: activeChat.partnerId,
+            mode: proposalMode,
+            projectIdea: selectedIdea,
+            ideaSource: 'ai',
+            message: proposalMessage.trim() || undefined,
+            quickChatId: activeChat.chatId,
+        });
+        setShowProposalModal(false);
+        setProposalSent(true);
+    }, [activeChat, selectedIdea, proposalMode, proposalMessage]);
 
     return (
         <div className="min-h-screen bg-pairon-bg dark:bg-gray-900 flex flex-col">
@@ -181,14 +220,33 @@ export function QuickConnectPage() {
                         </div>
 
                         {chatStatus === 'chatting' && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleEndChat}
-                                className="text-red-600 border-red-200 hover:bg-red-50"
-                            >
-                                End chat
-                            </Button>
+                            <div className="flex gap-2">
+                                {!proposalSent && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleOpenProposal}
+                                        className="text-pairon-accent border-pairon-accent/30 hover:bg-pairon-accent/10 flex items-center gap-1"
+                                    >
+                                        <Handshake className="w-4 h-4" />
+                                        Propose Collab
+                                    </Button>
+                                )}
+                                {proposalSent && (
+                                    <span className="text-xs text-green-500 flex items-center gap-1 px-3">
+                                        <Sparkles className="w-3 h-3" />
+                                        Proposal sent!
+                                    </span>
+                                )}
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleEndChat}
+                                    className="text-red-600 border-red-200 hover:bg-red-50"
+                                >
+                                    End chat
+                                </Button>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -497,6 +555,124 @@ export function QuickConnectPage() {
                     </div>
                 )}
             </main>
+
+            {/* Proposal Modal */}
+            <AnimatePresence>
+                {showProposalModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+                        onClick={() => setShowProposalModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                    <Handshake className="w-5 h-5 text-pairon-accent" />
+                                    Propose Collaboration
+                                </h3>
+                                <button onClick={() => setShowProposalModal(false)}>
+                                    <X className="w-5 h-5 text-gray-400" />
+                                </button>
+                            </div>
+
+                            {/* AI Project Ideas */}
+                            <div className="mb-4">
+                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                                    {loadingIdeas ? '✨ Generating ideas for you two...' : '🧠 AI-Suggested Projects'}
+                                </label>
+                                {loadingIdeas ? (
+                                    <div className="flex justify-center py-8">
+                                        <div className="w-8 h-8 border-4 border-pairon-accent/30 border-t-pairon-accent rounded-full animate-spin" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {aiIdeas.map((idea, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={() => setSelectedIdea(idea)}
+                                                className={`w-full p-4 rounded-xl text-left border-2 transition-all ${selectedIdea?.title === idea.title
+                                                        ? 'border-pairon-accent bg-pairon-accent/5'
+                                                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                                                    }`}
+                                            >
+                                                <div className="flex items-start gap-2">
+                                                    <Sparkles className={`w-4 h-4 mt-0.5 flex-shrink-0 ${selectedIdea?.title === idea.title ? 'text-pairon-accent' : 'text-gray-400'
+                                                        }`} />
+                                                    <div>
+                                                        <p className="font-medium text-sm text-gray-900 dark:text-white">{idea.title}</p>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{idea.description}</p>
+                                                        <div className="flex gap-2 mt-2">
+                                                            <span className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-full">{idea.category}</span>
+                                                            <span className="text-[10px] px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-full">{idea.difficulty}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Mode */}
+                            <div className="mb-4">
+                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                                    Collaboration Mode
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                        { value: 'sprint' as const, label: '⚡ Sprint', desc: '1 hour' },
+                                        { value: 'challenge' as const, label: '🏆 Challenge', desc: '2 hours' },
+                                        { value: 'build' as const, label: '🔨 Build', desc: '3 hours' },
+                                    ].map((m) => (
+                                        <button
+                                            key={m.value}
+                                            onClick={() => setProposalMode(m.value)}
+                                            className={`p-3 rounded-xl text-center border-2 transition-all ${proposalMode === m.value
+                                                    ? 'border-pairon-accent bg-pairon-accent/5'
+                                                    : 'border-gray-200 dark:border-gray-700'
+                                                }`}
+                                        >
+                                            <p className="text-sm font-medium text-gray-900 dark:text-white">{m.label}</p>
+                                            <p className="text-xs text-gray-500">{m.desc}</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Message */}
+                            <div className="mb-6">
+                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                                    Personal message (optional)
+                                </label>
+                                <Input
+                                    value={proposalMessage}
+                                    onChange={(e) => setProposalMessage(e.target.value.slice(0, 200))}
+                                    placeholder="Hey! I think we'd build something great together..."
+                                    className="rounded-xl"
+                                />
+                            </div>
+
+                            {/* Send */}
+                            <Button
+                                onClick={handleSendProposal}
+                                disabled={!selectedIdea}
+                                className="w-full pairon-btn-primary flex items-center justify-center gap-2 py-3 h-auto"
+                            >
+                                <Handshake className="w-5 h-5" />
+                                Send Proposal
+                            </Button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

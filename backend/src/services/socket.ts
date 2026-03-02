@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { User, Match, CollaborationSession } from '../models';
 import { calculateMatchScore, generateProjectIdea } from '../utils/matchingAlgorithm';
 import { setupQuickChatHandlers } from './quickChat';
+import { setupProposalHandlers } from './collabProposal';
 import type { MatchMode, ICollaborationSession, IMessage, ITask, JWTPayload } from '../types';
 
 // Active matchmaking queue
@@ -49,6 +50,9 @@ export function setupSocketHandlers(io: Server) {
 
     // Setup Quick Connect handlers
     setupQuickChatHandlers(io, socket);
+
+    // Setup Collab Proposal handlers
+    setupProposalHandlers(io, socket);
 
     // Matchmaking
     socket.on('match:request', async (data: { mode: MatchMode }) => {
