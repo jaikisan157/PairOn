@@ -22,6 +22,7 @@ for (const envVar of requiredEnvVars) {
 // Import routes
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
+import creditRoutes from './routes/credits';
 
 // Import socket handler
 import { setupSocketHandlers } from './services/socket';
@@ -63,6 +64,7 @@ app.use(express.json({ limit: '1mb' }));
 // Routes with rate limiting
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/users', apiLimiter, userRoutes);
+app.use('/api', apiLimiter, creditRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

@@ -20,13 +20,22 @@ const CreditTransactionSchema = new Schema<ICreditTransaction>(
     source: {
       type: String,
       enum: [
+        // Earning
         'session_complete',
         'submission',
         'positive_feedback',
         'help_user',
+        'quickchat_helpful',
+        'profile_complete',
+        'daily_streak',
+        'onboarding_bonus',
+        // Spending
         'priority_matching',
         'profile_boost',
         'unlock_ideas',
+        'certificate',
+        'skill_badge',
+        'remark_removal',
       ],
       required: true,
     },

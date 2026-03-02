@@ -18,6 +18,7 @@ import {
   Handshake,
   CheckCircle,
   XCircle,
+  Award,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
@@ -111,6 +112,13 @@ export function DashboardPage() {
                   {user?.credits} credits
                 </span>
               </div>
+              <button
+                onClick={() => navigate('/credits')}
+                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Credits & Certificates"
+              >
+                <Award className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              </button>
               <button
                 onClick={() => navigate('/quick-connect')}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"

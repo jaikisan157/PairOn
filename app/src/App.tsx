@@ -10,6 +10,7 @@ import {
   AdminDashboardPage,
   QuickConnectPage,
   OnboardingPage,
+  CreditsPage,
 } from '@/pages';
 import { useAuth } from '@/context/AuthContext';
 
@@ -128,6 +129,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <QuickConnectPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/credits"
+        element={
+          <ProtectedRoute>
+            <CreditsPage />
           </ProtectedRoute>
         }
       />

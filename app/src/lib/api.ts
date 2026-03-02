@@ -95,6 +95,67 @@ class ApiService {
         });
         return this.handleResponse<{ stats: any }>(response);
     }
+
+    // ===== Credits =====
+
+    async getCreditHistory(page = 1) {
+        const response = await fetch(`${this.baseUrl}/api/credits/history?page=${page}`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ transactions: any[]; pagination: any }>(response);
+    }
+
+    async getCreditSummary() {
+        const response = await fetch(`${this.baseUrl}/api/credits/summary`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ balance: number; totalEarned: number; totalSpent: number; reputation: number }>(response);
+    }
+
+    async getCreditPricing() {
+        const response = await fetch(`${this.baseUrl}/api/credits/pricing`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ earning: any; spending: any }>(response);
+    }
+
+    async removeRemark() {
+        const response = await fetch(`${this.baseUrl}/api/credits/remove-remark`, {
+            method: 'POST',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ message: string; credits: number }>(response);
+    }
+
+    // ===== Certificates =====
+
+    async getCertificates() {
+        const response = await fetch(`${this.baseUrl}/api/certificates`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ certificates: any[] }>(response);
+    }
+
+    async generateCertificate(sessionId: string) {
+        const response = await fetch(`${this.baseUrl}/api/certificates/generate`, {
+            method: 'POST',
+            headers: this.getHeaders(),
+            body: JSON.stringify({ sessionId }),
+        });
+        return this.handleResponse<{ certificate: any; message: string }>(response);
+    }
+
+    async verifyCertificate(certificateId: string) {
+        const response = await fetch(`${this.baseUrl}/api/certificates/verify/${certificateId}`, {
+            method: 'GET',
+            headers: this.getHeaders(false),
+        });
+        return this.handleResponse<{ valid: boolean; certificate: any }>(response);
+    }
 }
 
 export const api = new ApiService();
