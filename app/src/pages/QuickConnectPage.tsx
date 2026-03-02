@@ -64,6 +64,7 @@ export function QuickConnectPage() {
     const [proposalMessage, setProposalMessage] = useState('');
     const [loadingIdeas, setLoadingIdeas] = useState(false);
     const [proposalSent, setProposalSent] = useState(false);
+    const [showEndConfirm, setShowEndConfirm] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -133,6 +134,19 @@ export function QuickConnectPage() {
         };
     }, []);
 
+    // Warn before leaving page if chat is active
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (chatStatus === 'chatting') {
+                e.preventDefault();
+                e.returnValue = 'You have an active chat. Leaving will disconnect you.';
+                return e.returnValue;
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [chatStatus]);
+
     const handleStartSearch = useCallback(() => {
         if (!mode) return;
         if (mode === 'doubt' && topic.trim().length === 0) return;
@@ -155,8 +169,18 @@ export function QuickConnectPage() {
 
     const handleEndChat = useCallback(() => {
         if (!activeChat) return;
-        socketService.endQuickChat(activeChat.chatId);
+        setShowEndConfirm(true);
     }, [activeChat]);
+
+    const confirmEndChat = useCallback(() => {
+        if (!activeChat) return;
+        socketService.endQuickChat(activeChat.chatId);
+        setShowEndConfirm(false);
+    }, [activeChat]);
+
+    const cancelEndChat = useCallback(() => {
+        setShowEndConfirm(false);
+    }, []);
 
     const handleRate = useCallback((rating: 'helpful' | 'not-helpful') => {
         if (!activeChat) return;
@@ -599,8 +623,8 @@ export function QuickConnectPage() {
                                                 key={idx}
                                                 onClick={() => setSelectedIdea(idea)}
                                                 className={`w-full p-4 rounded-xl text-left border-2 transition-all ${selectedIdea?.title === idea.title
-                                                        ? 'border-pairon-accent bg-pairon-accent/5'
-                                                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                                                    ? 'border-pairon-accent bg-pairon-accent/5'
+                                                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                                                     }`}
                                             >
                                                 <div className="flex items-start gap-2">
@@ -636,8 +660,8 @@ export function QuickConnectPage() {
                                             key={m.value}
                                             onClick={() => setProposalMode(m.value)}
                                             className={`p-3 rounded-xl text-center border-2 transition-all ${proposalMode === m.value
-                                                    ? 'border-pairon-accent bg-pairon-accent/5'
-                                                    : 'border-gray-200 dark:border-gray-700'
+                                                ? 'border-pairon-accent bg-pairon-accent/5'
+                                                : 'border-gray-200 dark:border-gray-700'
                                                 }`}
                                         >
                                             <p className="text-sm font-medium text-gray-900 dark:text-white">{m.label}</p>
@@ -669,6 +693,50 @@ export function QuickConnectPage() {
                                 <Handshake className="w-5 h-5" />
                                 Send Proposal
                             </Button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* End Chat Confirmation */}
+            <AnimatePresence>
+                {showEndConfirm && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center"
+                        >
+                            <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <AlertTriangle className="w-6 h-6 text-red-500" />
+                            </div>
+                            <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white mb-2">
+                                End this chat?
+                            </h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                                Both you and your partner will be disconnected. This cannot be undone.
+                            </p>
+                            <div className="flex gap-3">
+                                <Button
+                                    variant="outline"
+                                    onClick={cancelEndChat}
+                                    className="flex-1 rounded-xl"
+                                >
+                                    Keep chatting
+                                </Button>
+                                <Button
+                                    onClick={confirmEndChat}
+                                    className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl"
+                                >
+                                    End chat
+                                </Button>
+                            </div>
                         </motion.div>
                     </motion.div>
                 )}

@@ -12,8 +12,16 @@ const quickChatQueue: Map<string, {
     priority: number;
 }> = new Map();
 
+// Track active chats per socket for disconnect handling
+const activeChatsMap: Map<string, Set<string>> = new Map(); // socketId -> Set<chatId>
+
 export function setupQuickChatHandlers(io: Server, socket: Socket) {
     const userId = socket.data.userId;
+
+    // Initialize active chat tracking for this socket
+    if (!activeChatsMap.has(socket.id)) {
+        activeChatsMap.set(socket.id, new Set());
+    }
 
     // ===== Find a chat partner =====
     socket.on('quickchat:find', async (data: { mode: QuickChatMode; topic?: string }) => {
@@ -140,26 +148,7 @@ export function setupQuickChatHandlers(io: Server, socket: Socket) {
     // ===== End chat =====
     socket.on('quickchat:end', async (chatId: string) => {
         try {
-            const chat = await QuickChat.findById(chatId);
-            if (!chat || chat.status !== 'active') return;
-            if (!chat.participants.includes(userId)) return;
-
-            chat.status = 'ended';
-            chat.endedAt = new Date();
-            await chat.save();
-
-            // Notify both participants
-            io.to(`quickchat:${chatId}`).emit('quickchat:ended', chatId);
-
-            // System message
-            const endMessage: IMessage = {
-                id: `qc-sys-${Date.now()}`,
-                senderId: 'system',
-                content: 'Chat ended. Rate your conversation to earn credits!',
-                timestamp: new Date(),
-                type: 'system',
-            };
-            io.to(`quickchat:${chatId}`).emit('quickchat:message', endMessage);
+            await endChat(io, chatId, userId, 'Chat ended by user.');
         } catch (error) {
             console.error('Quick chat end error:', error);
         }
@@ -205,13 +194,57 @@ export function setupQuickChatHandlers(io: Server, socket: Socket) {
         }
     });
 
-    // ===== Cleanup on disconnect =====
-    socket.on('disconnect', () => {
+    // ===== Disconnect: end all active chats and notify partners =====
+    socket.on('disconnect', async () => {
+        // Remove from queue
         quickChatQueue.delete(userId);
+
+        // End all active chats this user is in
+        try {
+            const activeChats = await QuickChat.find({
+                participants: userId,
+                status: 'active',
+            });
+
+            for (const chat of activeChats) {
+                await endChat(io, chat._id.toString(), userId, 'Partner disconnected.');
+            }
+        } catch (err) {
+            console.error('Disconnect cleanup error:', err);
+        }
+
+        activeChatsMap.delete(socket.id);
     });
 }
 
+// ===== End a chat and notify both =====
+async function endChat(io: Server, chatId: string, endedByUserId: string, reason: string) {
+    const chat = await QuickChat.findById(chatId);
+    if (!chat || chat.status !== 'active') return;
+    if (!chat.participants.includes(endedByUserId)) return;
+
+    chat.status = 'ended';
+    chat.endedAt = new Date();
+    await chat.save();
+
+    // System message
+    const endMessage: IMessage = {
+        id: `qc-sys-${Date.now()}`,
+        senderId: 'system',
+        content: reason + ' Rate your conversation to earn credits!',
+        timestamp: new Date(),
+        type: 'system',
+    };
+    io.to(`quickchat:${chatId}`).emit('quickchat:message', endMessage);
+
+    // Notify both participants
+    io.to(`quickchat:${chatId}`).emit('quickchat:ended', chatId);
+}
+
 // ===== Find a Quick Chat Partner =====
+// MATCHING LOGIC:
+// - "doubt" mode users connect with "tech-talk" users (helpers)
+// - "tech-talk" mode users connect with ANYONE in queue (doubt or tech-talk)
 async function findQuickChatPartner(
     io: Server,
     userId: string,
@@ -219,18 +252,26 @@ async function findQuickChatPartner(
     topic: string | undefined,
     socket: Socket
 ): Promise<void> {
-    const candidates: Array<{ userId: string; socketId: string; topic?: string; priority: number }> = [];
+    const candidates: Array<{ userId: string; socketId: string; topic?: string; priority: number; mode: QuickChatMode }> = [];
 
     for (const [id, data] of quickChatQueue.entries()) {
-        if (id !== userId && data.mode === mode) {
-            candidates.push(data);
+        if (id === userId) continue;
+
+        if (mode === 'doubt') {
+            // Doubt askers match with tech-talk people (they can help)
+            if (data.mode === 'tech-talk') {
+                candidates.push({ ...data, mode: data.mode });
+            }
+        } else {
+            // Tech-talk people match with ANYONE available (doubt or tech-talk)
+            candidates.push({ ...data, mode: data.mode });
         }
     }
 
     if (candidates.length === 0) {
         socket.emit('quickchat:waiting', mode === 'doubt'
-            ? 'Looking for someone who can help...'
-            : 'Looking for a tech talk partner...'
+            ? 'Looking for someone who can help with your doubt...'
+            : 'Looking for a chat partner...'
         );
         return;
     }
@@ -244,23 +285,29 @@ async function findQuickChatPartner(
     const partner = await User.findById(best.userId);
     if (!user || !partner) return;
 
-    const systemContent = mode === 'doubt'
-        ? `💡 Doubt chat started! Topic: "${topic || 'General'}"`
+    // Determine the effective chat mode & topic
+    const chatMode = (mode === 'doubt' || best.mode === 'doubt') ? 'doubt' : 'tech-talk';
+    const chatTopic = topic || (best.mode === 'doubt' ? best.topic : undefined);
+
+    const systemContent = chatMode === 'doubt'
+        ? `💡 Doubt chat started! Topic: "${chatTopic || 'General'}"`
         : '🗣️ Tech talk started! Have a great conversation!';
 
     const remarkWarning = (user.permanentRemark || partner.permanentRemark)
         ? '\n⚠️ Note: One or more participants have a community guideline violation remark.'
         : '';
 
+    const guidelines = '\n📋 Keep it professional. Inappropriate content will be blocked and may result in penalties.';
+
     const chat = new QuickChat({
         participants: [userId, best.userId],
-        mode,
-        topic: mode === 'doubt' ? topic : undefined,
+        mode: chatMode,
+        topic: chatTopic,
         messages: [
             {
                 id: `qc-sys-${Date.now()}`,
                 senderId: 'system',
-                content: systemContent + remarkWarning,
+                content: systemContent + remarkWarning + guidelines,
                 timestamp: new Date(),
                 type: 'system',
             },
@@ -279,21 +326,30 @@ async function findQuickChatPartner(
     const partnerSocket = io.sockets.sockets.get(best.socketId);
     partnerSocket?.join(`quickchat:${chat._id}`);
 
+    // Track active chats
+    activeChatsMap.get(socket.id)?.add(chat._id.toString());
+    if (partnerSocket) {
+        if (!activeChatsMap.has(partnerSocket.id)) {
+            activeChatsMap.set(partnerSocket.id, new Set());
+        }
+        activeChatsMap.get(partnerSocket.id)?.add(chat._id.toString());
+    }
+
     // Notify both users
     const matchData1 = {
         chatId: chat._id.toString(),
         partnerId: best.userId,
         partnerName: partner.name,
-        mode,
-        topic,
+        mode: chatMode,
+        topic: chatTopic,
     };
 
     const matchData2 = {
         chatId: chat._id.toString(),
         partnerId: userId,
         partnerName: user.name,
-        mode,
-        topic,
+        mode: chatMode,
+        topic: chatTopic,
     };
 
     socket.emit('quickchat:matched', matchData1);
