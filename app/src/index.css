@@ -1,0 +1,165 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 140 20% 97%;
+    --foreground: 220 14% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 14% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 14% 10%;
+    --primary: 142 71% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 140 20% 94%;
+    --secondary-foreground: 220 14% 10%;
+    --muted: 140 15% 94%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 142 71% 45%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 140 10% 88%;
+    --input: 140 10% 88%;
+    --ring: 142 71% 45%;
+    --radius: 1.125rem;
+    
+    /* Custom PairOn colors */
+    --pairon-bg: #F6F8F7;
+    --pairon-bg-secondary: #E9F3EE;
+    --pairon-accent: #22C55E;
+    --pairon-accent-light: #DCFCE7;
+    --pairon-text: #111827;
+    --pairon-text-secondary: #6B7280;
+    --pairon-card: #FFFFFF;
+  }
+
+  .dark {
+    --background: 220 14% 10%;
+    --foreground: 140 20% 97%;
+    --card: 220 14% 14%;
+    --card-foreground: 140 20% 97%;
+    --popover: 220 14% 14%;
+    --popover-foreground: 140 20% 97%;
+    --primary: 142 71% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 18%;
+    --secondary-foreground: 140 20% 97%;
+    --muted: 220 14% 18%;
+    --muted-foreground: 220 9% 60%;
+    --accent: 142 71% 45%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 14% 20%;
+    --input: 220 14% 20%;
+    --ring: 142 71% 45%;
+    
+    --pairon-bg: #0F1419;
+    --pairon-bg-secondary: #1A202C;
+    --pairon-card: #1A202C;
+    --pairon-text: #F6F8F7;
+    --pairon-text-secondary: #9CA3AF;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 0.95;
+  }
+}
+
+@layer components {
+  .pairon-card {
+    @apply bg-white dark:bg-gray-800 rounded-[28px] shadow-[0_18px_50px_rgba(0,0,0,0.08)] border border-black/[0.06];
+  }
+  
+  .pairon-btn-primary {
+    @apply bg-[#22C55E] text-white px-6 py-3 rounded-full font-medium 
+           hover:bg-[#16A34A] hover:-translate-y-0.5 hover:scale-[1.01]
+           transition-all duration-200 ease-out;
+  }
+  
+  .pairon-btn-secondary {
+    @apply bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-6 py-3 rounded-full font-medium
+           border border-gray-200 dark:border-gray-700
+           hover:-translate-y-0.5 hover:scale-[1.01]
+           transition-all duration-200 ease-out;
+  }
+  
+  .pairon-gradient-spotlight {
+    background: radial-gradient(circle at 70% 30%, rgba(34,197,94,0.10) 0%, rgba(246,248,247,0) 55%);
+  }
+  
+  .pairon-gradient-spotlight-left {
+    background: radial-gradient(circle at 30% 30%, rgba(34,197,94,0.10) 0%, rgba(246,248,247,0) 55%);
+  }
+  
+  .pairon-eyebrow {
+    @apply text-xs font-medium uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400;
+  }
+  
+  .grain-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.04;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .animate-float {
+    animation: float 3.5s ease-in-out infinite;
+  }
+  
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+  
+  .animate-pulse-soft {
+    animation: pulse-soft 2s ease-in-out infinite;
+  }
+  
+  @keyframes pulse-soft {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+}

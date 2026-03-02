@@ -1,0 +1,218 @@
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import type { Match, MatchMode, CollaborationSession } from '@/types';
+import { socketService } from '@/lib/socket';
+
+interface MatchingContextType {
+  isSearching: boolean;
+  currentMatch: Match | null;
+  currentSession: CollaborationSession | null;
+  timeRemaining: number;
+  searchMatch: (mode: MatchMode) => void;
+  cancelSearch: () => void;
+  endSession: () => void;
+  submitProject: (link: string, description: string) => void;
+  sendMessage: (content: string) => void;
+  updateTask: (task: any) => void;
+  error: string | null;
+}
+
+const MatchingContext = createContext<MatchingContextType | undefined>(undefined);
+
+export function MatchingProvider({ children }: { children: React.ReactNode }) {
+  const [isSearching, setIsSearching] = useState(false);
+  const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
+  const [currentSession, setCurrentSession] = useState<CollaborationSession | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Setup socket event listeners
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket) return;
+
+    // Match found
+    socketService.onMatchFound((data: any) => {
+      setIsSearching(false);
+      setError(null);
+
+      const match: Match = {
+        id: data.match.id,
+        user1Id: data.match.user1Id,
+        user2Id: data.match.user2Id,
+        mode: data.match.mode,
+        status: data.match.status,
+        startedAt: new Date(data.match.startedAt),
+        endsAt: new Date(data.match.endsAt),
+        projectIdea: data.match.projectIdea,
+        matchScore: data.match.matchScore,
+      };
+
+      const session: CollaborationSession = {
+        id: data.session.id,
+        matchId: data.session.matchId,
+        participants: data.session.participants,
+        messages: data.session.messages || [],
+        tasks: data.session.tasks || [],
+        status: data.session.status,
+        startedAt: new Date(data.session.startedAt),
+        endsAt: new Date(data.session.endsAt),
+      };
+
+      setCurrentMatch(match);
+      setCurrentSession(session);
+
+      // Calculate initial time remaining
+      const remaining = Math.max(0, Math.floor((session.endsAt.getTime() - Date.now()) / 1000));
+      setTimeRemaining(remaining);
+
+      // Join the session room
+      socketService.joinSession(data.session.id);
+
+      // Start client-side countdown (ticks every second for UI smoothness)
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = setInterval(() => {
+        setTimeRemaining(prev => {
+          if (prev <= 1) {
+            if (timerRef.current) clearInterval(timerRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    });
+
+    // Waiting for match
+    socketService.onMatchWaiting((_msg: string) => {
+      // Still searching — no action needed, UI already shows searching state
+    });
+
+    // Match error
+    socketService.onMatchError((msg: string) => {
+      setIsSearching(false);
+      setError(msg);
+    });
+
+    // Match cancelled
+    socketService.onMatchCancelled((_reason: string) => {
+      setIsSearching(false);
+    });
+
+    // New message from partner
+    socketService.onMessage((message: any) => {
+      setCurrentSession(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          messages: [...prev.messages, message],
+        };
+      });
+    });
+
+    // Task updated
+    socketService.onTaskUpdated((task: any) => {
+      setCurrentSession(prev => {
+        if (!prev) return prev;
+        const existingIndex = prev.tasks.findIndex(t => t.id === task.id);
+        const updatedTasks = [...prev.tasks];
+        if (existingIndex >= 0) {
+          updatedTasks[existingIndex] = task;
+        } else {
+          updatedTasks.push(task);
+        }
+        return { ...prev, tasks: updatedTasks };
+      });
+    });
+
+    // Server timer sync (every 30s)
+    socketService.onTimerUpdate((serverTimeRemaining: number) => {
+      setTimeRemaining(serverTimeRemaining);
+    });
+
+    // Session completed
+    socketService.onSessionCompleted((submission: any) => {
+      setCurrentSession(prev => {
+        if (!prev) return prev;
+        return { ...prev, submission, status: 'completed' };
+      });
+    });
+
+    // Time's up
+    socketService.onTimeUp(() => {
+      setTimeRemaining(0);
+      if (timerRef.current) clearInterval(timerRef.current);
+    });
+
+    return () => {
+      // Cleanup listeners on unmount
+      socketService.removeAllListeners();
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const searchMatch = useCallback((mode: MatchMode) => {
+    setIsSearching(true);
+    setError(null);
+    socketService.requestMatch(mode);
+  }, []);
+
+  const cancelSearch = useCallback(() => {
+    socketService.cancelMatch();
+    setIsSearching(false);
+  }, []);
+
+  const endSession = useCallback(() => {
+    if (currentSession) {
+      socketService.leaveSession(currentSession.id);
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+    setCurrentMatch(null);
+    setCurrentSession(null);
+    setTimeRemaining(0);
+  }, [currentSession]);
+
+  const submitProject = useCallback((link: string, description: string) => {
+    if (!currentSession) return;
+    socketService.submitProject(currentSession.id, link, description);
+  }, [currentSession]);
+
+  const sendMessage = useCallback((content: string) => {
+    if (!currentSession) return;
+    socketService.sendMessage(currentSession.id, content);
+  }, [currentSession]);
+
+  const updateTask = useCallback((task: any) => {
+    if (!currentSession) return;
+    socketService.updateTask(currentSession.id, task);
+  }, [currentSession]);
+
+  return (
+    <MatchingContext.Provider
+      value={{
+        isSearching,
+        currentMatch,
+        currentSession,
+        timeRemaining,
+        searchMatch,
+        cancelSearch,
+        endSession,
+        submitProject,
+        sendMessage,
+        updateTask,
+        error,
+      }}
+    >
+      {children}
+    </MatchingContext.Provider>
+  );
+}
+
+export function useMatching() {
+  const context = useContext(MatchingContext);
+  if (context === undefined) {
+    throw new Error('useMatching must be used within a MatchingProvider');
+  }
+  return context;
+}

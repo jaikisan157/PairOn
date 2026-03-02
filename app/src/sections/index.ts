@@ -1,0 +1,9 @@
+export { HeroSection } from './HeroSection';
+export { HowItWorksSection } from './HowItWorksSection';
+export { MatchModesSection } from './MatchModesSection';
+export { CollaborationSection } from './CollaborationSection';
+export { CreditSystemSection } from './CreditSystemSection';
+export { ReputationSection } from './ReputationSection';
+export { SafetySection } from './SafetySection';
+export { TestimonialsSection } from './TestimonialsSection';
+export { FinalCTASection } from './FinalCTASection';
