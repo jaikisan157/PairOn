@@ -207,6 +207,50 @@ class SocketService {
         this.socket?.on('collab:ai-ideas', callback);
     }
 
+    // ===== Exit Request System =====
+
+    requestExit(sessionId: string, reason: string) {
+        this.socket?.emit('session:request-exit', sessionId, reason);
+    }
+
+    approveExit(sessionId: string) {
+        this.socket?.emit('session:approve-exit', sessionId);
+    }
+
+    declineExit(sessionId: string) {
+        this.socket?.emit('session:decline-exit', sessionId);
+    }
+
+    forceQuit(sessionId: string) {
+        this.socket?.emit('session:force-quit', sessionId);
+    }
+
+    onExitRequested(callback: (data: { sessionId: string; requesterId: string; requesterName: string; reason: string }) => void) {
+        this.socket?.on('session:exit-requested', callback);
+    }
+
+    onExitRequestSent(callback: (data: { sessionId: string }) => void) {
+        this.socket?.on('session:exit-request-sent', callback);
+    }
+
+    onExitApproved(callback: (data: { sessionId: string }) => void) {
+        this.socket?.on('session:exit-approved', callback);
+    }
+
+    onExitDeclined(callback: (data: { sessionId: string }) => void) {
+        this.socket?.on('session:exit-declined', callback);
+    }
+
+    onForceQuit(callback: (data: { sessionId: string; quitterId: string }) => void) {
+        this.socket?.on('session:force-quit', callback);
+    }
+
+    // ===== AI Assistant =====
+
+    askAI(sessionId: string, question: string) {
+        this.socket?.emit('session:ai-help', sessionId, question);
+    }
+
     // ===== Cleanup =====
 
     removeAllListeners() {

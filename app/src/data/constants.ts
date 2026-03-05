@@ -24,6 +24,87 @@ export const MATCH_MODES: MatchModeConfig[] = [
   },
 ];
 
+// Detailed rules shown before starting a challenge
+export const CHALLENGE_RULES: Record<string, {
+  title: string;
+  severity: 'Low' | 'Medium' | 'High';
+  severityColor: string;
+  durationLabel: string;
+  restPolicy: string;
+  rules: string[];
+  warnings: string[];
+  commitmentLevel: string;
+}> = {
+  sprint: {
+    title: '3-Hour Sprint',
+    severity: 'Low',
+    severityColor: 'text-green-500',
+    durationLabel: '3 hours of focused building',
+    restPolicy: 'No rest breaks — it\'s a sprint! Stay focused for the full 3 hours.',
+    commitmentLevel: 'Light commitment. Perfect for a quick prototype or proof of concept.',
+    rules: [
+      'You and your partner will collaborate for exactly 3 hours.',
+      'Both participants must stay active and contribute.',
+      'Communicate clearly about your approach and task division.',
+      'Submit at least a working demo or significant progress by the end.',
+      'Rate your partner honestly after the session.',
+    ],
+    warnings: [
+      'You cannot leave without your partner\'s agreement.',
+      'Force-quitting will reduce your reputation.',
+      'Your abandoned partner will receive 10 credits as compensation.',
+    ],
+  },
+  challenge: {
+    title: '48-Hour Challenge',
+    severity: 'Medium',
+    severityColor: 'text-yellow-500',
+    durationLabel: '48 hours (2 full days)',
+    restPolicy: 'You may take a 30-minute break every 2 hours (optional). Coordinate rest times with your partner.',
+    commitmentLevel: 'Moderate commitment. Plan your weekend around this challenge.',
+    rules: [
+      'This is a 48-hour challenge — plan accordingly before starting.',
+      'You are expected to be available and responsive throughout.',
+      'Coordinate working hours and rest breaks with your partner.',
+      'Take 30-minute breaks every 2 hours if needed — just inform your partner.',
+      'Aim for a fully functional project by the deadline.',
+      'Both partners must contribute meaningfully to the codebase.',
+    ],
+    warnings: [
+      'You CANNOT skip or abandon this challenge once started.',
+      'Leaving requires a formal request that your partner must approve.',
+      'Unapproved exits will significantly reduce your reputation.',
+      'Your abandoned partner will receive 10 credits as compensation.',
+      'Repeated abandonments may result in temporary matchmaking restrictions.',
+    ],
+  },
+  build: {
+    title: '7-Day Build',
+    severity: 'High',
+    severityColor: 'text-red-500',
+    durationLabel: '7 full days of collaboration',
+    restPolicy: 'Take 30-minute breaks every 2 hours (recommended). You can set "away" status for sleep, but stay responsive during working hours.',
+    commitmentLevel: 'High commitment. This is a serious project — treat it like a real team sprint.',
+    rules: [
+      'This is a 7-day build — you are committing to a full week of collaboration.',
+      'Establish a daily working schedule with your partner on Day 1.',
+      'Daily check-ins are required — share progress and blockers.',
+      'Take breaks as needed but communicate your availability.',
+      'The project should be demo-ready by Day 7.',
+      'Both partners must contribute substantially to earn full credits.',
+      'Document your work and create a proper README.',
+    ],
+    warnings: [
+      'This is a HIGH severity commitment — do NOT start unless you can commit for 7 days.',
+      'You CANNOT leave without your partner\'s explicit approval.',
+      'Unauthorized exits will result in major reputation loss.',
+      'Your abandoned partner will receive 10 credits as compensation.',
+      'Multiple abandonments will flag your account for review.',
+      'Completing a 7-day build earns you the highest credits and reputation.',
+    ],
+  },
+};
+
 export const CREDIT_REWARDS: CreditReward[] = [
   { source: 'session_complete', amount: 50, description: 'Complete a sprint' },
   { source: 'submission', amount: 30, description: 'Submit project link' },

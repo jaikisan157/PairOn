@@ -172,6 +172,162 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
+    // ===== Exit Request System =====
+    // Request to leave collaboration
+    socket.on('session:request-exit', async (sessionId: string, reason: string) => {
+      try {
+        const session = await CollaborationSession.findById(sessionId);
+        if (!session || session.status !== 'active') return;
+        if (!session.participants.includes(userId)) return;
+
+        const partnerId = session.participants.find(p => p !== userId);
+        if (!partnerId) return;
+
+        const user = await User.findById(userId);
+
+        // Notify partner of exit request
+        io.to(`user:${partnerId}`).emit('session:exit-requested', {
+          sessionId,
+          requesterId: userId,
+          requesterName: user?.name || 'Partner',
+          reason: reason || 'No reason given',
+        });
+
+        // Notify requester
+        socket.emit('session:exit-request-sent', { sessionId });
+      } catch (error) {
+        console.error('Exit request error:', error);
+      }
+    });
+
+    // Approve exit request
+    socket.on('session:approve-exit', async (sessionId: string) => {
+      try {
+        const session = await CollaborationSession.findById(sessionId) as any;
+        if (!session || session.status !== 'active') return;
+        if (!session.participants.includes(userId)) return;
+
+        // End session normally
+        session.status = 'ended' as any;
+        session.endedAt = new Date();
+        await session.save();
+
+        io.to(`session:${sessionId}`).emit('session:exit-approved', { sessionId });
+
+        // System message
+        const sysMsg = {
+          id: `sys-exit-${Date.now()}`,
+          senderId: 'system',
+          content: 'Both partners agreed to end the collaboration. Good work!',
+          timestamp: new Date(),
+          type: 'system',
+        };
+        io.to(`session:${sessionId}`).emit('session:message', sysMsg);
+      } catch (error) {
+        console.error('Approve exit error:', error);
+      }
+    });
+
+    // Decline exit request
+    socket.on('session:decline-exit', async (sessionId: string) => {
+      try {
+        const session = await CollaborationSession.findById(sessionId);
+        if (!session || session.status !== 'active') return;
+        if (!session.participants.includes(userId)) return;
+
+        const partnerId = session.participants.find(p => p !== userId);
+        if (!partnerId) return;
+
+        io.to(`user:${partnerId}`).emit('session:exit-declined', { sessionId });
+      } catch (error) {
+        console.error('Decline exit error:', error);
+      }
+    });
+
+    // Force quit (penalty)
+    socket.on('session:force-quit', async (sessionId: string) => {
+      try {
+        const session = await CollaborationSession.findById(sessionId) as any;
+        if (!session || session.status !== 'active') return;
+        if (!session.participants.includes(userId)) return;
+
+        const partnerId = session.participants.find((p: string) => p !== userId);
+        if (!partnerId) return;
+
+        // End session
+        session.status = 'ended' as any;
+        session.endedAt = new Date();
+        await session.save();
+
+        // Penalize quitter: reduce reputation (min 0)
+        await User.findByIdAndUpdate(userId, {
+          $inc: { reputation: -5 },
+        });
+        // Ensure reputation doesn't go negative
+        await User.updateOne(
+          { _id: userId, reputation: { $lt: 0 } },
+          { $set: { reputation: 0 } }
+        );
+
+        // Award partner 10 credits
+        await User.findByIdAndUpdate(partnerId, {
+          $inc: { credits: 10 },
+        });
+
+        // Notify both
+        io.to(`session:${sessionId}`).emit('session:force-quit', {
+          sessionId,
+          quitterId: userId,
+        });
+
+        const sysMsg = {
+          id: `sys-fquit-${Date.now()}`,
+          senderId: 'system',
+          content: 'Your partner force-quit the collaboration. You have been awarded 10 credits as compensation.',
+          timestamp: new Date(),
+          type: 'system',
+        };
+        io.to(`user:${partnerId}`).emit('session:message', sysMsg);
+      } catch (error) {
+        console.error('Force quit error:', error);
+      }
+    });
+
+    // ===== AI Assistant in Collaboration Chat =====
+    socket.on('session:ai-help', async (sessionId: string, question: string) => {
+      try {
+        const session = await CollaborationSession.findById(sessionId);
+        if (!session || session.status !== 'active') return;
+        if (!session.participants.includes(userId)) return;
+
+        const user = await User.findById(userId);
+        const userName = user?.name || 'User';
+
+        // Get recent messages for context (last 10)
+        const recentMessages = session.messages.slice(-10).map(m => `${m.senderId === userId ? userName : 'Partner'}: ${m.content}`).join('\n');
+
+        // Generate AI response based on context
+        const aiResponse = generateAIResponse(userName, question, recentMessages, (session as any).projectIdea);
+
+        const aiMsg = {
+          id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          senderId: 'ai-assistant',
+          content: aiResponse,
+          timestamp: new Date(),
+          type: 'ai',
+        };
+
+        // Save to session
+        session.messages.push(aiMsg as any);
+        await session.save();
+
+        // Broadcast to both users
+        io.to(`session:${sessionId}`).emit('session:message', aiMsg);
+      } catch (error) {
+        console.error('AI assistant error:', error);
+      }
+    });
+
     // Disconnect
     socket.on('disconnect', async () => {
       console.log('User disconnected:', socket.id, '| userId:', userId);
@@ -361,3 +517,79 @@ function startSessionTimer(io: Server, sessionId: string, endsAt: Date): void {
 
   activeSessions.set(sessionId, { timer: updateInterval });
 }
+
+// ===== AI Assistant Response Generator =====
+function generateAIResponse(userName: string, question: string, context: string, projectIdea?: any): string {
+  const q = question.toLowerCase();
+
+  // Architecture & design
+  if (q.includes('architect') || q.includes('structure') || q.includes('design') || q.includes('folder')) {
+    return `Hey @${userName}! For your project structure, I'd recommend:\n\n` +
+      `📁 **Suggested Architecture:**\n` +
+      `\`\`\`\n` +
+      `src/\n` +
+      `├── components/    # Reusable UI components\n` +
+      `├── pages/         # Route pages\n` +
+      `├── hooks/         # Custom React hooks\n` +
+      `├── services/      # API & business logic\n` +
+      `├── utils/         # Helper functions\n` +
+      `├── types/         # TypeScript types\n` +
+      `└── styles/        # Global styles\n` +
+      `\`\`\`\n\n` +
+      `Start with the core data models, then build the API layer, then the UI. Divide tasks so one person handles backend and the other frontend!`;
+  }
+
+  // Debugging help
+  if (q.includes('bug') || q.includes('error') || q.includes('fix') || q.includes('debug') || q.includes('not working')) {
+    return `@${userName}, debugging tips:\n\n` +
+      `1. 🔍 **Check the console** — browser DevTools (F12) and terminal for errors\n` +
+      `2. 📝 **Add console.log** at key points to trace the data flow\n` +
+      `3. 🧪 **Isolate the issue** — comment out code sections to find what's breaking\n` +
+      `4. 🔄 **Check types** — TypeScript errors often point to the root cause\n` +
+      `5. 📦 **Clear cache** — try \`npm run dev\` restart or clear node_modules\n\n` +
+      `Share the specific error message here and I can help narrow it down!`;
+  }
+
+  // Tech stack questions
+  if (q.includes('what tech') || q.includes('stack') || q.includes('which framework') || q.includes('use react') || q.includes('use next')) {
+    const idea = projectIdea?.title || 'your project';
+    return `@${userName}, for "${idea}" I'd suggest:\n\n` +
+      `⚡ **Frontend:** React + TypeScript + Tailwind CSS\n` +
+      `🔧 **Backend:** Node.js + Express (or Next.js API routes)\n` +
+      `💾 **Database:** MongoDB (flexible) or PostgreSQL (relational)\n` +
+      `📡 **Real-time:** Socket.io (if needed)\n\n` +
+      `Discuss with your partner what you're both comfortable with!`;
+  }
+
+  // Git/collaboration
+  if (q.includes('git') || q.includes('branch') || q.includes('merge') || q.includes('commit')) {
+    return `@${userName}, here's a quick Git workflow for your pair:\n\n` +
+      `1. Create a shared repo on GitHub\n` +
+      `2. Work on separate branches: \`feature/your-name-task\`\n` +
+      `3. Commit often with clear messages\n` +
+      `4. PR and review each other's code before merging to \`main\`\n` +
+      `5. Pull before starting new work: \`git pull origin main\`\n\n` +
+      `💡 **Pro tip:** Use conventional commits — \`feat:\`, \`fix:\`, \`docs:\``;
+  }
+
+  // How to start
+  if (q.includes('start') || q.includes('begin') || q.includes('first step') || q.includes('how do i') || q.includes('where to')) {
+    return `@${userName}, here's how to kick things off:\n\n` +
+      `1. 📋 **Plan (15 min):** Agree on features, divide tasks, sketch the UI\n` +
+      `2. 🛠️ **Setup (10 min):** Create the repo, init the project, install deps\n` +
+      `3. 🏗️ **Build:** Start with the data model → API → UI\n` +
+      `4. 🔗 **Integrate:** Connect frontend and backend\n` +
+      `5. ✅ **Test & Polish:** Fix bugs, add finishing touches\n\n` +
+      `Remember: done is better than perfect! Ship something working.`;
+  }
+
+  // Default helpful response
+  return `@${userName}, great question! Here are some thoughts:\n\n` +
+    `Based on your conversation, I'd suggest:\n` +
+    `• Break the problem into smaller, testable pieces\n` +
+    `• Discuss the approach with your partner before coding\n` +
+    `• Use clear naming conventions and comments\n` +
+    `• Test as you go — don't wait until the end\n\n` +
+    `Feel free to ask me about architecture, debugging, Git workflow, or tech stack choices! 🚀`;
+}
+

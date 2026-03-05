@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Zap,
   Coins,
@@ -19,12 +19,15 @@ import {
   CheckCircle,
   XCircle,
   Award,
+  Shield,
+  AlertTriangle,
+  Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { useMatching } from '@/context/MatchingContext';
 import { useTheme } from '@/context/ThemeContext';
-import { MATCH_MODES } from '@/data/constants';
+import { MATCH_MODES, CHALLENGE_RULES } from '@/data/constants';
 import { formatDuration } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
 import type { MatchMode } from '@/types';
@@ -39,8 +42,14 @@ export function DashboardPage() {
   const [selectedMode, setSelectedMode] = useState<MatchMode | null>(null);
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { isSearching, searchMatch, currentMatch } = useMatching();
+  const { isSearching, searchMatch, cancelSearch, currentMatch } = useMatching();
   const navigate = useNavigate();
+
+  // Rules modal & timeout
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [rulesAgreed, setRulesAgreed] = useState(false);
+  const [matchTimeout, setMatchTimeout] = useState(false);
+  const matchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Proposals
   const [proposals, setProposals] = useState<any[]>([]);
@@ -70,12 +79,40 @@ export function DashboardPage() {
   // Navigate to collaborate page when match is found
   useEffect(() => {
     if (currentMatch) {
+      // Clear timeout
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+      setMatchTimeout(false);
       navigate('/collaborate');
     }
   }, [currentMatch, navigate]);
 
+  // Matchmaking timeout (60 seconds)
+  useEffect(() => {
+    if (isSearching) {
+      setMatchTimeout(false);
+      matchTimerRef.current = setTimeout(() => {
+        setMatchTimeout(true);
+        cancelSearch();
+      }, 60000); // 60 seconds
+    } else {
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+    }
+    return () => {
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+    };
+  }, [isSearching, cancelSearch]);
+
   const handleStartMatching = () => {
     if (!selectedMode) return;
+    // Show rules modal first
+    setShowRulesModal(true);
+    setRulesAgreed(false);
+  };
+
+  const handleConfirmAndStart = () => {
+    if (!selectedMode || !rulesAgreed) return;
+    setShowRulesModal(false);
+    setMatchTimeout(false);
     searchMatch(selectedMode);
   };
 
@@ -260,6 +297,25 @@ export function DashboardPage() {
                 </>
               )}
             </Button>
+
+            {/* Matchmaking timeout message */}
+            {matchTimeout && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl flex items-start gap-3"
+              >
+                <Clock className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
+                    No collaborators available right now
+                  </p>
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                    Try again in a few minutes or try a different mode.
+                  </p>
+                </div>
+              </motion.div>
+            )}
           </motion.div>
 
           {/* Incoming Proposals */}
@@ -364,6 +420,130 @@ export function DashboardPage() {
           </motion.div>
         </div>
       </main>
+
+      {/* Pre-Challenge Rules Modal */}
+      <AnimatePresence>
+        {showRulesModal && selectedMode && CHALLENGE_RULES[selectedMode] && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
+            >
+              {(() => {
+                const rules = CHALLENGE_RULES[selectedMode];
+                return (
+                  <div className="p-6">
+                    {/* Header */}
+                    <div className="flex items-center gap-3 mb-5">
+                      <div className="w-12 h-12 bg-pairon-accent/10 rounded-xl flex items-center justify-center">
+                        <Shield className="w-6 h-6 text-pairon-accent" />
+                      </div>
+                      <div>
+                        <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white">
+                          {rules.title} — Rules & Commitment
+                        </h3>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-xs font-bold ${rules.severityColor}`}>
+                            {rules.severity} Severity
+                          </span>
+                          <span className="text-xs text-gray-400">•</span>
+                          <span className="text-xs text-gray-500">{rules.durationLabel}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Commitment */}
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl mb-4">
+                      <p className="text-sm text-blue-800 dark:text-blue-300 font-medium">
+                        📌 {rules.commitmentLevel}
+                      </p>
+                    </div>
+
+                    {/* Rest Policy */}
+                    <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl mb-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Clock className="w-4 h-4 text-gray-500" />
+                        <span className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase">Rest Policy</span>
+                      </div>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">{rules.restPolicy}</p>
+                    </div>
+
+                    {/* Rules */}
+                    <div className="mb-4">
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1">
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                        Rules
+                      </h4>
+                      <ul className="space-y-1.5">
+                        {rules.rules.map((rule, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                            <span className="text-gray-400 mt-0.5">•</span>
+                            {rule}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Warnings */}
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl mb-5">
+                      <h4 className="text-sm font-semibold text-red-700 dark:text-red-300 mb-2 flex items-center gap-1">
+                        <AlertTriangle className="w-4 h-4" />
+                        Warnings
+                      </h4>
+                      <ul className="space-y-1.5">
+                        {rules.warnings.map((warn, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+                            <span className="mt-0.5">⚠️</span>
+                            {warn}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Agreement */}
+                    <label className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl mb-4 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rulesAgreed}
+                        onChange={(e) => setRulesAgreed(e.target.checked)}
+                        className="mt-1 w-4 h-4 rounded border-gray-300 text-pairon-accent focus:ring-pairon-accent"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        I have read and agree to the rules. I understand the commitment and consequences of leaving without permission.
+                      </span>
+                    </label>
+
+                    {/* Actions */}
+                    <div className="flex gap-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowRulesModal(false)}
+                        className="flex-1 rounded-xl"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleConfirmAndStart}
+                        disabled={!rulesAgreed}
+                        className="flex-1 pairon-btn-primary rounded-xl"
+                      >
+                        I Agree — Start Matching
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
