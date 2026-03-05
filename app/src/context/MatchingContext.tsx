@@ -26,6 +26,54 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedMatch = localStorage.getItem('pairon_active_match');
+      const savedSession = localStorage.getItem('pairon_active_session');
+      if (savedMatch && savedSession) {
+        const match = JSON.parse(savedMatch);
+        const session = JSON.parse(savedSession);
+        // Rehydrate dates
+        match.startedAt = new Date(match.startedAt);
+        match.endsAt = new Date(match.endsAt);
+        session.startedAt = new Date(session.startedAt);
+        session.endsAt = new Date(session.endsAt);
+
+        // Check if session is still valid (not expired)
+        const remaining = Math.max(0, Math.floor((session.endsAt.getTime() - Date.now()) / 1000));
+        if (remaining > 0 && session.status === 'active') {
+          setCurrentMatch(match);
+          setCurrentSession(session);
+          setTimeRemaining(remaining);
+
+          // Rejoin the session room
+          socketService.joinSession(session.id);
+
+          // Restart countdown
+          if (timerRef.current) clearInterval(timerRef.current);
+          timerRef.current = setInterval(() => {
+            setTimeRemaining(prev => {
+              if (prev <= 1) {
+                if (timerRef.current) clearInterval(timerRef.current);
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        } else {
+          // Session expired, clean up
+          localStorage.removeItem('pairon_active_match');
+          localStorage.removeItem('pairon_active_session');
+        }
+      }
+    } catch {
+      // Invalid data, clean up
+      localStorage.removeItem('pairon_active_match');
+      localStorage.removeItem('pairon_active_session');
+    }
+  }, []);
+
   // Setup socket event listeners
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -61,6 +109,10 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
 
       setCurrentMatch(match);
       setCurrentSession(session);
+
+      // Persist to localStorage for session recovery on refresh
+      localStorage.setItem('pairon_active_match', JSON.stringify(match));
+      localStorage.setItem('pairon_active_session', JSON.stringify(session));
 
       // Calculate initial time remaining
       const remaining = Math.max(0, Math.floor((session.endsAt.getTime() - Date.now()) / 1000));
@@ -171,6 +223,10 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
     setCurrentMatch(null);
     setCurrentSession(null);
     setTimeRemaining(0);
+
+    // Clear persisted session
+    localStorage.removeItem('pairon_active_match');
+    localStorage.removeItem('pairon_active_session');
   }, [currentSession]);
 
   const submitProject = useCallback((link: string, description: string) => {

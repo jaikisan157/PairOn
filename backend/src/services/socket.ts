@@ -36,9 +36,25 @@ export function setupSocketHandlers(io: Server) {
     }
   });
 
+  // Track active sockets per user (single session enforcement)
+  const userSockets: Map<string, string> = new Map(); // userId -> socketId
+
   io.on('connection', (socket: Socket) => {
     const userId = socket.data.userId;
     console.log('User connected:', socket.id, '| userId:', userId);
+
+    // ===== Single Session Enforcement =====
+    // If user already has an active socket, disconnect the old one
+    const existingSocketId = userSockets.get(userId);
+    if (existingSocketId && existingSocketId !== socket.id) {
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket) {
+        existingSocket.emit('session:force-logout', 'You logged in from another device/tab.');
+        existingSocket.disconnect(true);
+        console.log('Force-disconnected previous session for userId:', userId);
+      }
+    }
+    userSockets.set(userId, socket.id);
 
     // Auto-join user's personal room and set online
     socket.join(`user:${userId}`);
@@ -334,6 +350,11 @@ export function setupSocketHandlers(io: Server) {
 
       // Remove from matchmaking queue
       matchmakingQueue.delete(userId);
+
+      // Clean up user socket tracking
+      if (userSockets.get(userId) === socket.id) {
+        userSockets.delete(userId);
+      }
 
       // Update user offline status
       try {

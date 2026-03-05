@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
   Clock,
@@ -10,12 +10,16 @@ import {
   Link2,
   X,
   ArrowLeft,
+  AlertTriangle,
+  LogOut,
+  Bot,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { useMatching } from '@/context/MatchingContext';
 import { formatTime } from '@/lib/utils';
+import { socketService } from '@/lib/socket';
 import type { TaskStatus } from '@/types';
 
 export function CollaborationPage() {
@@ -36,26 +40,130 @@ export function CollaborationPage() {
   const [submissionLink, setSubmissionLink] = useState('');
   const [submissionDescription, setSubmissionDescription] = useState('');
 
+  // Exit request system state
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [exitReason, setExitReason] = useState('');
+  const [exitRequestSent, setExitRequestSent] = useState(false);
+  const [incomingExitRequest, setIncomingExitRequest] = useState<{
+    requesterName: string;
+    reason: string;
+  } | null>(null);
+  const [exitDeclined, setExitDeclined] = useState(false);
+  const [showForceQuitConfirm, setShowForceQuitConfirm] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Redirect if no active session
+  // Redirect only if no session AND no saved session in localStorage
   useEffect(() => {
     if (!currentSession) {
-      navigate('/dashboard');
+      const saved = localStorage.getItem('pairon_active_session');
+      if (!saved) {
+        navigate('/dashboard');
+      }
     }
   }, [currentSession, navigate]);
 
-  // Auto-scroll messages when new ones arrive
+  // beforeunload warning during active session
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (currentSession?.status === 'active') {
+        e.preventDefault();
+        e.returnValue = 'You have an active collaboration session. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [currentSession]);
+
+  // Listen for exit request events
+  useEffect(() => {
+    socketService.onExitRequested((data) => {
+      setIncomingExitRequest({
+        requesterName: data.requesterName,
+        reason: data.reason,
+      });
+    });
+
+    socketService.onExitRequestSent(() => {
+      setExitRequestSent(true);
+    });
+
+    socketService.onExitApproved(() => {
+      endSession();
+      navigate('/dashboard');
+    });
+
+    socketService.onExitDeclined(() => {
+      setExitRequestSent(false);
+      setExitDeclined(true);
+      setTimeout(() => setExitDeclined(false), 5000);
+    });
+
+    socketService.onForceQuit((data) => {
+      if (data.quitterId !== user?.id) {
+        // Partner force-quit, end our session
+        endSession();
+        navigate('/dashboard');
+      }
+    });
+
+    // Force logout from another device
+    socketService.getSocket()?.on('session:force-logout', () => {
+      endSession();
+      navigate('/login');
+    });
+  }, [endSession, navigate, user?.id]);
+
+  // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentSession?.messages]);
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
-    sendMessage(newMessage.trim());
+
+    const msg = newMessage.trim();
+
+    // Check for @ai mention
+    if (msg.toLowerCase().startsWith('@ai ') && currentSession) {
+      const question = msg.substring(4).trim();
+      if (question) {
+        socketService.askAI(currentSession.id, question);
+      }
+    }
+
+    // Always send the user's message too
+    sendMessage(msg);
     setNewMessage('');
-  };
+  }, [newMessage, currentSession, sendMessage]);
+
+  const handleRequestExit = useCallback(() => {
+    if (!currentSession) return;
+    socketService.requestExit(currentSession.id, exitReason || 'Personal reasons');
+    setShowExitModal(false);
+  }, [currentSession, exitReason]);
+
+  const handleApproveExit = useCallback(() => {
+    if (!currentSession) return;
+    socketService.approveExit(currentSession.id);
+    setIncomingExitRequest(null);
+  }, [currentSession]);
+
+  const handleDeclineExit = useCallback(() => {
+    if (!currentSession) return;
+    socketService.declineExit(currentSession.id);
+    setIncomingExitRequest(null);
+  }, [currentSession]);
+
+  const handleForceQuit = useCallback(() => {
+    if (!currentSession) return;
+    socketService.forceQuit(currentSession.id);
+    setShowForceQuitConfirm(false);
+    endSession();
+    navigate('/dashboard');
+  }, [currentSession, endSession, navigate]);
 
   const handleTaskStatusChange = (taskId: string, newStatus: TaskStatus) => {
     const task = currentSession?.tasks.find((t) => t.id === taskId);
@@ -79,7 +187,6 @@ export function CollaborationPage() {
   const inProgressTasks = tasks.filter((t) => t.status === 'in-progress');
   const doneTasks = tasks.filter((t) => t.status === 'done');
 
-  // Determine partner ID
   const partnerId = currentMatch.user1Id === user?.id
     ? currentMatch.user2Id
     : currentMatch.user1Id;
@@ -92,11 +199,9 @@ export function CollaborationPage() {
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
               <button
-                onClick={() => {
-                  endSession();
-                  navigate('/dashboard');
-                }}
+                onClick={() => setShowExitModal(true)}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Request to leave"
               >
                 <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
@@ -119,17 +224,15 @@ export function CollaborationPage() {
                 </span>
               </div>
 
-              {/* End Session */}
+              {/* Request to Leave (not direct end) */}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  endSession();
-                  navigate('/dashboard');
-                }}
+                onClick={() => setShowExitModal(true)}
                 className="text-red-600 border-red-200 hover:bg-red-50"
               >
-                End session
+                <LogOut className="w-4 h-4 mr-1" />
+                Request to leave
               </Button>
             </div>
           </div>
@@ -140,11 +243,20 @@ export function CollaborationPage() {
       <main className="flex-1 flex overflow-hidden">
         {/* Chat Panel */}
         <div className="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700">
+          {/* AI hint */}
+          <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center gap-2">
+            <Bot className="w-4 h-4 text-blue-500" />
+            <span className="text-xs text-blue-600 dark:text-blue-400">
+              Type <strong>@ai your question</strong> to ask the AI assistant for help. Both you and your partner will see the response.
+            </span>
+          </div>
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map((message) => {
               const isMe = message.senderId === user?.id;
               const isSystem = message.type === 'system';
+              const isAI = message.senderId === 'ai-assistant' || message.type === 'ai';
 
               if (isSystem) {
                 return (
@@ -156,6 +268,23 @@ export function CollaborationPage() {
                 );
               }
 
+              if (isAI) {
+                return (
+                  <div key={message.id} className="flex justify-start">
+                    <div className="max-w-[80%] px-4 py-3 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 border border-blue-200 dark:border-blue-800 rounded-bl-md">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Bot className="w-3.5 h-3.5 text-blue-500" />
+                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">AI Assistant</span>
+                      </div>
+                      <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{message.content}</p>
+                      <span className="text-xs text-gray-400 mt-1">
+                        {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={message.id}
@@ -163,8 +292,8 @@ export function CollaborationPage() {
                 >
                   <div
                     className={`max-w-[70%] px-4 py-2 rounded-2xl ${isMe
-                        ? 'bg-pairon-accent text-white rounded-br-md'
-                        : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-bl-md shadow-sm'
+                      ? 'bg-pairon-accent text-white rounded-br-md'
+                      : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-bl-md shadow-sm'
                       }`}
                   >
                     <p>{message.content}</p>
@@ -193,7 +322,7 @@ export function CollaborationPage() {
               <Input
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Type a message..."
+                placeholder="Type a message... (or @ai your question)"
                 className="flex-1 rounded-full"
               />
               <Button
@@ -396,6 +525,190 @@ export function CollaborationPage() {
           </motion.div>
         </div>
       )}
+
+      {/* Exit Request Modal */}
+      <AnimatePresence>
+        {showExitModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6"
+            >
+              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-6 h-6 text-yellow-500" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">
+                Request to leave?
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-4">
+                Your partner must approve your request. If they decline, you can force-quit but your <strong className="text-red-500">reputation will decrease</strong> and your partner will receive <strong className="text-green-500">10 credits</strong>.
+              </p>
+
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Reason (optional)
+                </label>
+                <Input
+                  value={exitReason}
+                  onChange={(e) => setExitReason(e.target.value)}
+                  placeholder="Why do you want to leave?"
+                  className="rounded-xl text-sm"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowExitModal(false)}
+                  className="flex-1 rounded-xl"
+                >
+                  Stay
+                </Button>
+                <Button
+                  onClick={handleRequestExit}
+                  className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl"
+                >
+                  Send request
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Incoming Exit Request Modal */}
+      <AnimatePresence>
+        {incomingExitRequest && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center"
+            >
+              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <LogOut className="w-6 h-6 text-orange-500" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white mb-2">
+                Partner wants to leave
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                <strong>{incomingExitRequest.requesterName}</strong> has requested to end the collaboration.
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-4 italic">
+                Reason: "{incomingExitRequest.reason}"
+              </p>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={handleDeclineExit}
+                  className="flex-1 rounded-xl"
+                >
+                  Decline
+                </Button>
+                <Button
+                  onClick={handleApproveExit}
+                  className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-xl"
+                >
+                  Approve
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Exit Request Sent Banner */}
+      {exitRequestSent && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-yellow-100 dark:bg-yellow-900/50 border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
+          >
+            <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+            Waiting for partner to approve your exit request...
+          </motion.div>
+        </div>
+      )}
+
+      {/* Exit Declined Banner */}
+      {exitDeclined && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-red-100 dark:bg-red-900/50 border border-red-300 dark:border-red-700 text-red-800 dark:text-red-300 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            <span>Your exit request was declined.</span>
+            <Button
+              size="sm"
+              onClick={() => setShowForceQuitConfirm(true)}
+              className="bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs px-3"
+            >
+              Force quit (-reputation)
+            </Button>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Force Quit Confirm */}
+      <AnimatePresence>
+        {showForceQuitConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center"
+            >
+              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white mb-2">
+                Force quit?
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                This will <strong className="text-red-500">reduce your reputation by 5</strong> and award your partner <strong className="text-green-500">10 credits</strong>. This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowForceQuitConfirm(false)}
+                  className="flex-1 rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleForceQuit}
+                  className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl"
+                >
+                  Force quit
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
