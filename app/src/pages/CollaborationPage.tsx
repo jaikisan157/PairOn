@@ -29,6 +29,9 @@ export function CollaborationPage() {
     currentMatch,
     currentSession,
     timeRemaining,
+    partnerName,
+    timeExpired,
+    sessionEnded,
     endSession,
     submitProject,
     sendMessage,
@@ -51,7 +54,60 @@ export function CollaborationPage() {
   const [exitDeclined, setExitDeclined] = useState(false);
   const [showForceQuitConfirm, setShowForceQuitConfirm] = useState(false);
 
+  // Activity check state
+  const [showActivityCheck, setShowActivityCheck] = useState(false);
+  const [sliderValue, setSliderValue] = useState(0);
+  const [targetZone, setTargetZone] = useState({ min: 60, max: 80 });
+  const [activityCheckTimer, setActivityCheckTimer] = useState(60);
+  const activityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activityCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Activity check — every 15 minutes during active session
+  useEffect(() => {
+    if (!currentSession || currentSession.status !== 'active' || timeExpired) return;
+
+    activityIntervalRef.current = setInterval(() => {
+      // Random target zone
+      const min = Math.floor(Math.random() * 50) + 20; // 20-70
+      const max = min + 15; // 15% wide zone
+      setTargetZone({ min, max });
+      setSliderValue(0);
+      setActivityCheckTimer(60);
+      setShowActivityCheck(true);
+
+      // Countdown
+      activityCountdownRef.current = setInterval(() => {
+        setActivityCheckTimer(prev => {
+          if (prev <= 1) {
+            if (activityCountdownRef.current) clearInterval(activityCountdownRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }, 15 * 60 * 1000); // 15 minutes
+
+    return () => {
+      if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
+      if (activityCountdownRef.current) clearInterval(activityCountdownRef.current);
+    };
+  }, [currentSession, timeExpired]);
+
+  const handleActivityVerified = useCallback(() => {
+    if (sliderValue >= targetZone.min && sliderValue <= targetZone.max) {
+      setShowActivityCheck(false);
+      if (activityCountdownRef.current) clearInterval(activityCountdownRef.current);
+    }
+  }, [sliderValue, targetZone]);
+
+  // Redirect if session ended (approved exit or force-quit handled by context)
+  useEffect(() => {
+    if (sessionEnded) {
+      navigate('/dashboard');
+    }
+  }, [sessionEnded, navigate]);
 
   // Redirect only if no session AND no saved session in localStorage
   useEffect(() => {
@@ -76,7 +132,7 @@ export function CollaborationPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [currentSession]);
 
-  // Listen for exit request events
+  // Listen for exit request events (page-level UI only)
   useEffect(() => {
     socketService.onExitRequested((data) => {
       setIncomingExitRequest({
@@ -89,23 +145,10 @@ export function CollaborationPage() {
       setExitRequestSent(true);
     });
 
-    socketService.onExitApproved(() => {
-      endSession();
-      navigate('/dashboard');
-    });
-
     socketService.onExitDeclined(() => {
       setExitRequestSent(false);
       setExitDeclined(true);
       setTimeout(() => setExitDeclined(false), 5000);
-    });
-
-    socketService.onForceQuit((data) => {
-      if (data.quitterId !== user?.id) {
-        // Partner force-quit, end our session
-        endSession();
-        navigate('/dashboard');
-      }
     });
 
     // Force logout from another device
@@ -113,7 +156,7 @@ export function CollaborationPage() {
       endSession();
       navigate('/login');
     });
-  }, [endSession, navigate, user?.id]);
+  }, [endSession, navigate]);
 
   // Auto-scroll messages
   useEffect(() => {
@@ -210,7 +253,7 @@ export function CollaborationPage() {
                   {currentMatch.projectIdea?.title}
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Partner: {partnerId.substring(0, 8)}...
+                  Partner: {partnerName || partnerId.substring(0, 8) + '...'}
                 </p>
               </div>
             </div>
@@ -714,6 +757,156 @@ export function CollaborationPage() {
                   className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl"
                 >
                   Force quit
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Activity Check Overlay */}
+      <AnimatePresence>
+        {showActivityCheck && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center"
+            >
+              <div className="w-14 h-14 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                <span className="text-2xl">🎯</span>
+              </div>
+              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white mb-1">
+                Activity Check
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Slide to the <strong className="text-green-500">green zone</strong> to verify you're active
+              </p>
+
+              {/* Timer */}
+              <div className="flex items-center justify-center gap-1 mb-4">
+                <Clock className="w-4 h-4 text-gray-400" />
+                <span className={`text-sm font-mono font-semibold ${activityCheckTimer <= 10 ? 'text-red-500' : 'text-gray-500'}`}>
+                  {activityCheckTimer}s
+                </span>
+              </div>
+
+              {/* Slider track with target zone */}
+              <div className="relative mb-4">
+                <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded-full relative overflow-hidden">
+                  {/* Target zone highlight */}
+                  <div
+                    className="absolute top-0 bottom-0 bg-green-200 dark:bg-green-800/50 border-l-2 border-r-2 border-green-500"
+                    style={{
+                      left: `${targetZone.min}%`,
+                      width: `${targetZone.max - targetZone.min}%`,
+                    }}
+                  />
+                  {/* Current position indicator */}
+                  <div
+                    className={`absolute top-0 bottom-0 w-2 rounded-full transition-all ${sliderValue >= targetZone.min && sliderValue <= targetZone.max
+                        ? 'bg-green-500 shadow-lg shadow-green-500/50'
+                        : 'bg-pairon-accent'
+                      }`}
+                    style={{ left: `${sliderValue}%` }}
+                  />
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={sliderValue}
+                  onChange={(e) => setSliderValue(Number(e.target.value))}
+                  className="w-full absolute top-0 left-0 h-8 opacity-0 cursor-pointer"
+                />
+              </div>
+
+              {/* Status */}
+              <p className={`text-sm font-medium mb-4 ${sliderValue >= targetZone.min && sliderValue <= targetZone.max
+                  ? 'text-green-500'
+                  : 'text-gray-400'
+                }`}>
+                {sliderValue >= targetZone.min && sliderValue <= targetZone.max
+                  ? '✅ Perfect! Click verify!'
+                  : `Slide to the green zone (${targetZone.min}% - ${targetZone.max}%)`
+                }
+              </p>
+
+              <Button
+                onClick={handleActivityVerified}
+                disabled={sliderValue < targetZone.min || sliderValue > targetZone.max}
+                className="w-full pairon-btn-primary rounded-xl"
+              >
+                Verify
+              </Button>
+
+              {activityCheckTimer === 0 && (
+                <p className="text-xs text-red-500 mt-3">
+                  ⚠️ Time's up! Your partner has been notified you may be inactive.
+                </p>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Time Expired Overlay */}
+      <AnimatePresence>
+        {timeExpired && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center"
+            >
+              <div className="w-16 h-16 bg-pairon-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Clock className="w-8 h-8 text-pairon-accent" />
+              </div>
+              <h3 className="font-display text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                ⏰ Time's Up!
+              </h3>
+              <p className="text-gray-500 dark:text-gray-400 mb-2">
+                Your collaboration session has ended. Great work!
+              </p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mb-6">
+                {currentSession?.submission
+                  ? '✅ Your project has been submitted.'
+                  : '💡 You can still submit your project before leaving.'}
+              </p>
+
+              <div className="flex gap-3">
+                {!currentSession?.submission && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowSubmitModal(true);
+                    }}
+                    className="flex-1 rounded-xl"
+                  >
+                    <Link2 className="w-4 h-4 mr-1" />
+                    Submit project
+                  </Button>
+                )}
+                <Button
+                  onClick={() => {
+                    endSession();
+                    navigate('/dashboard');
+                  }}
+                  className="flex-1 pairon-btn-primary rounded-xl"
+                >
+                  Exit session
                 </Button>
               </div>
             </motion.div>

@@ -385,6 +385,12 @@ async function findMatch(
 
   for (const [id, data] of matchmakingQueue.entries()) {
     if (id !== userId && data.mode === mode) {
+      // Verify the socket is still connected (clean stale entries)
+      const candidateSocket = io.sockets.sockets.get(data.socketId);
+      if (!candidateSocket) {
+        matchmakingQueue.delete(id);
+        continue;
+      }
       const candidate = await User.findById(id);
       if (candidate) {
         candidates.push({ userId: id, socketId: data.socketId, user: candidate });
@@ -483,8 +489,8 @@ async function findMatch(
   matchmakingQueue.delete(userId);
   matchmakingQueue.delete(bestMatch.userId);
 
-  // Notify both users
-  const matchData = {
+  // Notify both users — include partner names
+  const matchData1 = {
     match: {
       id: match._id,
       user1Id: match.user1Id,
@@ -495,6 +501,7 @@ async function findMatch(
       endsAt: match.endsAt,
       projectIdea: match.projectIdea,
       matchScore: match.matchScore,
+      partnerName: bestMatch.user.name,
     },
     session: {
       id: session._id,
@@ -508,15 +515,40 @@ async function findMatch(
     },
   };
 
-  socket.emit('match:found', matchData);
-  io.to(bestMatch.socketId).emit('match:found', matchData);
+  const matchData2 = {
+    match: {
+      id: match._id,
+      user1Id: match.user1Id,
+      user2Id: match.user2Id,
+      mode: match.mode,
+      status: match.status,
+      startedAt: match.startedAt,
+      endsAt: match.endsAt,
+      projectIdea: match.projectIdea,
+      matchScore: match.matchScore,
+      partnerName: user.name,
+    },
+    session: {
+      id: session._id,
+      matchId: session.matchId,
+      participants: session.participants,
+      messages: session.messages,
+      tasks: session.tasks,
+      status: session.status,
+      startedAt: session.startedAt,
+      endsAt: session.endsAt,
+    },
+  };
+
+  socket.emit('match:found', matchData1);
+  io.to(bestMatch.socketId).emit('match:found', matchData2);
 
   // Start session timer
-  startSessionTimer(io, session._id.toString(), session.endsAt);
+  startSessionTimer(io, session._id.toString(), session.endsAt, session.participants);
 }
 
-// Start session countdown timer — emits every 30s instead of every 1s for scalability
-function startSessionTimer(io: Server, sessionId: string, endsAt: Date): void {
+// Start session countdown timer
+function startSessionTimer(io: Server, sessionId: string, endsAt: Date, participants: string[]): void {
   const updateInterval = setInterval(async () => {
     const now = new Date();
     const timeRemaining = Math.max(0, Math.floor((endsAt.getTime() - now.getTime()) / 1000));
@@ -532,9 +564,13 @@ function startSessionTimer(io: Server, sessionId: string, endsAt: Date): void {
         status: 'completed',
       });
 
+      // Emit to session room AND to each user's personal room (backup delivery)
       io.to(`session:${sessionId}`).emit('session:time-up');
+      for (const pid of participants) {
+        io.to(`user:${pid}`).emit('session:time-up');
+      }
     }
-  }, 30000); // Every 30 seconds instead of every 1 second
+  }, 30000);
 
   activeSessions.set(sessionId, { timer: updateInterval });
 }

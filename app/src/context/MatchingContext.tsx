@@ -7,6 +7,9 @@ interface MatchingContextType {
   currentMatch: Match | null;
   currentSession: CollaborationSession | null;
   timeRemaining: number;
+  partnerName: string;
+  timeExpired: boolean;
+  sessionEnded: boolean;
   searchMatch: (mode: MatchMode) => void;
   cancelSearch: () => void;
   endSession: () => void;
@@ -24,6 +27,9 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
   const [currentSession, setCurrentSession] = useState<CollaborationSession | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [partnerName, setPartnerName] = useState('');
+  const [timeExpired, setTimeExpired] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Restore session from localStorage on mount
@@ -46,6 +52,7 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
           setCurrentMatch(match);
           setCurrentSession(session);
           setTimeRemaining(remaining);
+          setPartnerName(localStorage.getItem('pairon_partner_name') || '');
 
           // Rejoin the session room
           socketService.joinSession(session.id);
@@ -95,6 +102,12 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
         projectIdea: data.match.projectIdea,
         matchScore: data.match.matchScore,
       };
+
+      // Store partner name
+      if (data.match.partnerName) {
+        setPartnerName(data.match.partnerName);
+        localStorage.setItem('pairon_partner_name', data.match.partnerName);
+      }
 
       const session: CollaborationSession = {
         id: data.session.id,
@@ -189,10 +202,39 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
       });
     });
 
-    // Time's up
+    // Time's up — mark session as completed
     socketService.onTimeUp(() => {
       setTimeRemaining(0);
+      setTimeExpired(true);
       if (timerRef.current) clearInterval(timerRef.current);
+      setCurrentSession(prev => {
+        if (!prev) return prev;
+        return { ...prev, status: 'completed' };
+      });
+    });
+
+    // Exit approved — both users can leave
+    socketService.onExitApproved(() => {
+      setSessionEnded(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      setCurrentMatch(null);
+      setCurrentSession(null);
+      setTimeRemaining(0);
+      localStorage.removeItem('pairon_active_match');
+      localStorage.removeItem('pairon_active_session');
+      localStorage.removeItem('pairon_partner_name');
+    });
+
+    // Force quit by partner
+    socketService.onForceQuit(() => {
+      setSessionEnded(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      setCurrentMatch(null);
+      setCurrentSession(null);
+      setTimeRemaining(0);
+      localStorage.removeItem('pairon_active_match');
+      localStorage.removeItem('pairon_active_session');
+      localStorage.removeItem('pairon_partner_name');
     });
 
     return () => {
@@ -223,10 +265,14 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
     setCurrentMatch(null);
     setCurrentSession(null);
     setTimeRemaining(0);
+    setTimeExpired(false);
+    setSessionEnded(false);
+    setPartnerName('');
 
     // Clear persisted session
     localStorage.removeItem('pairon_active_match');
     localStorage.removeItem('pairon_active_session');
+    localStorage.removeItem('pairon_partner_name');
   }, [currentSession]);
 
   const submitProject = useCallback((link: string, description: string) => {
@@ -251,6 +297,9 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
         currentMatch,
         currentSession,
         timeRemaining,
+        partnerName,
+        timeExpired,
+        sessionEnded,
         searchMatch,
         cancelSearch,
         endSession,
