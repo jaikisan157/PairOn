@@ -56,10 +56,12 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 // Auto-close if expired or stale (no endsAt = old system leftover)
                 const isExpired = !activeSession.endsAt || new Date(activeSession.endsAt).getTime() < Date.now();
                 if (isExpired) {
-                    activeSession.status = 'completed';
-                    activeSession.endedAt = new Date();
-                    await activeSession.save();
-                    console.log(`[Challenge] Auto-closed stale session ${activeSession._id} for user ${userId}`);
+                    // Close ALL stale sessions for this user
+                    await CollaborationSession.updateMany(
+                        { participants: userId, status: 'active' },
+                        { $set: { status: 'completed' } }
+                    );
+                    console.log(`[Challenge] Auto-closed all stale sessions for user ${userId}`);
                 } else {
                     socket.emit('challenge:error', 'You already have an active challenge. Finish it before starting a new one.');
                     return;
@@ -202,22 +204,22 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 .join('\n');
 
             let aiResponse: string;
-            const grokApiKey = process.env.GROK_API_KEY;
+            const groqApiKey = process.env.GROK_API_KEY; // works with Groq key too
 
-            if (grokApiKey) {
+            if (groqApiKey) {
                 try {
-                    const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
+                    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${grokApiKey}`,
+                            'Authorization': `Bearer ${groqApiKey}`,
                         },
                         body: JSON.stringify({
-                            model: 'grok-3-mini',
+                            model: 'llama-3.3-70b-versatile',
                             messages: [
                                 {
                                     role: 'system',
-                                    content: `You are an AI pair programming assistant. Two developers are collaborating. Help with code, architecture, debugging. Be concise and give working code examples. Project: ${(session as any).projectIdea?.title || 'unknown'}.\nRecent chat:\n${recentMessages}`,
+                                    content: `You are an AI pair programming assistant. Two developers are collaborating on a project. Help with code, architecture, debugging, and suggestions. Be concise and give working code examples when asked. Project: ${(session as any).projectIdea?.title || 'unknown'}.\nRecent chat:\n${recentMessages}`,
                                 },
                                 { role: 'user', content: question },
                             ],
@@ -226,11 +228,13 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                         }),
                     });
 
-                    if (grokRes.ok) {
-                        const grokData: any = await grokRes.json();
-                        aiResponse = `@${userName}, ${grokData.choices?.[0]?.message?.content || 'Could not generate response.'}`;
+                    if (groqRes.ok) {
+                        const groqData: any = await groqRes.json();
+                        aiResponse = groqData.choices?.[0]?.message?.content || 'Could not generate response.';
                     } else {
-                        aiResponse = `@${userName}, AI is temporarily unavailable. Try again in a moment.`;
+                        const errText = await groqRes.text();
+                        console.error('[Challenge AI] Groq error:', groqRes.status, errText);
+                        aiResponse = `AI is temporarily unavailable (${groqRes.status}). Try again in a moment.`;
                     }
                 } catch {
                     aiResponse = `@${userName}, AI is temporarily unavailable. Try again in a moment.`;
@@ -326,13 +330,14 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
     // ===== Approve exit =====
     socket.on('challenge:approve-exit', async (sessionId: string) => {
         try {
-            const session = await CollaborationSession.findById(sessionId) as any;
+            const session = await CollaborationSession.findById(sessionId);
             if (!session || session.status !== 'active') return;
             if (!session.participants.includes(userId)) return;
 
-            session.status = 'completed';
-            session.endedAt = new Date();
-            await session.save();
+            // Use findByIdAndUpdate to guarantee DB write
+            await CollaborationSession.findByIdAndUpdate(sessionId, {
+                $set: { status: 'completed' }
+            });
 
             clearSessionTimer(sessionId);
 
@@ -374,20 +379,21 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
     // ===== Force quit (penalty) =====
     socket.on('challenge:force-quit', async (sessionId: string) => {
         try {
-            const session = await CollaborationSession.findById(sessionId) as any;
+            const session = await CollaborationSession.findById(sessionId);
             if (!session || session.status !== 'active') return;
             if (!session.participants.includes(userId)) return;
 
             const partnerId = session.participants.find((p: string) => p !== userId);
             if (!partnerId) return;
 
-            session.status = 'abandoned';
-            session.endedAt = new Date();
-            await session.save();
+            // Use findByIdAndUpdate to guarantee DB write
+            await CollaborationSession.findByIdAndUpdate(sessionId, {
+                $set: { status: 'abandoned' }
+            });
 
             clearSessionTimer(sessionId);
 
-            // Penalize quitter (reputation only, NOT credits)
+            // Penalize quitter
             await User.findByIdAndUpdate(userId, { $inc: { reputation: -5 } });
             await User.updateOne({ _id: userId, reputation: { $lt: 0 } }, { $set: { reputation: 0 } });
 

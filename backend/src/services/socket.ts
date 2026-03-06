@@ -433,19 +433,19 @@ export function setupSocketHandlers(io: Server) {
         const recentMessages = session.messages.slice(-10).map(m => `${m.senderId === userId ? userName : 'Partner'}: ${m.content}`).join('\n');
 
         let aiResponse: string;
-        const grokApiKey = process.env.GROK_API_KEY;
+        const groqApiKey = process.env.GROK_API_KEY;
 
-        if (grokApiKey) {
-          // Use Grok API (xAI)
+        if (groqApiKey) {
+          // Use Groq API
           try {
-            const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${grokApiKey}`,
+                'Authorization': `Bearer ${groqApiKey}`,
               },
               body: JSON.stringify({
-                model: 'grok-3-mini',
+                model: 'llama-3.3-70b-versatile',
                 messages: [
                   {
                     role: 'system',
@@ -461,15 +461,15 @@ export function setupSocketHandlers(io: Server) {
               }),
             });
 
-            if (grokRes.ok) {
-              const grokData: any = await grokRes.json();
-              aiResponse = `@${userName}, ${grokData.choices?.[0]?.message?.content || 'Sorry, I couldn\'t generate a response.'}`;
+            if (groqRes.ok) {
+              const groqData: any = await groqRes.json();
+              aiResponse = `@${userName}, ${groqData.choices?.[0]?.message?.content || 'Sorry, I couldn\'t generate a response.'}`;
             } else {
-              console.error('Grok API error:', grokRes.status);
+              console.error('Groq API error:', groqRes.status);
               aiResponse = generateAIResponse(userName, question, recentMessages, (session as any).projectIdea);
             }
-          } catch (grokError) {
-            console.error('Grok API call failed:', grokError);
+          } catch (groqError) {
+            console.error('Groq API call failed:', groqError);
             aiResponse = generateAIResponse(userName, question, recentMessages, (session as any).projectIdea);
           }
         } else {
