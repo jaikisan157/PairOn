@@ -81,164 +81,183 @@ export function MatchingProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Setup socket event listeners
+  // Setup socket event listeners — wait for socket to be ready
   useEffect(() => {
-    const socket = socketService.getSocket();
-    if (!socket) return;
+    let cleanedUp = false;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-    // Match found
-    socketService.onMatchFound((data: any) => {
-      setIsSearching(false);
-      setError(null);
+    function setupListeners() {
+      const socket = socketService.getSocket();
+      if (!socket || cleanedUp) return false;
 
-      const match: Match = {
-        id: data.match.id,
-        user1Id: data.match.user1Id,
-        user2Id: data.match.user2Id,
-        mode: data.match.mode,
-        status: data.match.status,
-        startedAt: new Date(data.match.startedAt),
-        endsAt: new Date(data.match.endsAt),
-        projectIdea: data.match.projectIdea,
-        matchScore: data.match.matchScore,
-      };
+      // Match found
+      socket.on('match:found', (data: any) => {
+        setIsSearching(false);
+        setError(null);
 
-      // Store partner name
-      if (data.match.partnerName) {
-        setPartnerName(data.match.partnerName);
-        localStorage.setItem('pairon_partner_name', data.match.partnerName);
-      }
-
-      const session: CollaborationSession = {
-        id: data.session.id,
-        matchId: data.session.matchId,
-        participants: data.session.participants,
-        messages: data.session.messages || [],
-        tasks: data.session.tasks || [],
-        status: data.session.status,
-        startedAt: new Date(data.session.startedAt),
-        endsAt: new Date(data.session.endsAt),
-      };
-
-      setCurrentMatch(match);
-      setCurrentSession(session);
-
-      // Persist to localStorage for session recovery on refresh
-      localStorage.setItem('pairon_active_match', JSON.stringify(match));
-      localStorage.setItem('pairon_active_session', JSON.stringify(session));
-
-      // Calculate initial time remaining
-      const remaining = Math.max(0, Math.floor((session.endsAt.getTime() - Date.now()) / 1000));
-      setTimeRemaining(remaining);
-
-      // Join the session room
-      socketService.joinSession(data.session.id);
-
-      // Start client-side countdown (ticks every second for UI smoothness)
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = setInterval(() => {
-        setTimeRemaining(prev => {
-          if (prev <= 1) {
-            if (timerRef.current) clearInterval(timerRef.current);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    });
-
-    // Waiting for match
-    socketService.onMatchWaiting((_msg: string) => {
-      // Still searching — no action needed, UI already shows searching state
-    });
-
-    // Match error
-    socketService.onMatchError((msg: string) => {
-      setIsSearching(false);
-      setError(msg);
-    });
-
-    // Match cancelled
-    socketService.onMatchCancelled((_reason: string) => {
-      setIsSearching(false);
-    });
-
-    // New message from partner
-    socketService.onMessage((message: any) => {
-      setCurrentSession(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          messages: [...prev.messages, message],
+        const match: Match = {
+          id: data.match.id,
+          user1Id: data.match.user1Id,
+          user2Id: data.match.user2Id,
+          mode: data.match.mode,
+          status: data.match.status,
+          startedAt: new Date(data.match.startedAt),
+          endsAt: new Date(data.match.endsAt),
+          projectIdea: data.match.projectIdea,
+          matchScore: data.match.matchScore,
         };
-      });
-    });
 
-    // Task updated
-    socketService.onTaskUpdated((task: any) => {
-      setCurrentSession(prev => {
-        if (!prev) return prev;
-        const existingIndex = prev.tasks.findIndex(t => t.id === task.id);
-        const updatedTasks = [...prev.tasks];
-        if (existingIndex >= 0) {
-          updatedTasks[existingIndex] = task;
-        } else {
-          updatedTasks.push(task);
+        // Store partner name
+        if (data.match.partnerName) {
+          setPartnerName(data.match.partnerName);
+          localStorage.setItem('pairon_partner_name', data.match.partnerName);
         }
-        return { ...prev, tasks: updatedTasks };
+
+        const session: CollaborationSession = {
+          id: data.session.id,
+          matchId: data.session.matchId,
+          participants: data.session.participants,
+          messages: data.session.messages || [],
+          tasks: data.session.tasks || [],
+          status: data.session.status,
+          startedAt: new Date(data.session.startedAt),
+          endsAt: new Date(data.session.endsAt),
+        };
+
+        setCurrentMatch(match);
+        setCurrentSession(session);
+
+        // Persist to localStorage for session recovery on refresh
+        localStorage.setItem('pairon_active_match', JSON.stringify(match));
+        localStorage.setItem('pairon_active_session', JSON.stringify(session));
+
+        // Calculate initial time remaining
+        const remaining = Math.max(0, Math.floor((session.endsAt.getTime() - Date.now()) / 1000));
+        setTimeRemaining(remaining);
+
+        // Join the session room
+        socketService.joinSession(data.session.id);
+
+        // Start client-side countdown
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = setInterval(() => {
+          setTimeRemaining(prev => {
+            if (prev <= 1) {
+              if (timerRef.current) clearInterval(timerRef.current);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
       });
-    });
 
-    // Server timer sync (every 30s)
-    socketService.onTimerUpdate((serverTimeRemaining: number) => {
-      setTimeRemaining(serverTimeRemaining);
-    });
-
-    // Session completed
-    socketService.onSessionCompleted((submission: any) => {
-      setCurrentSession(prev => {
-        if (!prev) return prev;
-        return { ...prev, submission, status: 'completed' };
+      // Waiting for match
+      socket.on('match:waiting', () => {
+        // Still searching — no action needed
       });
-    });
 
-    // Time's up — mark session as completed
-    socketService.onTimeUp(() => {
-      setTimeRemaining(0);
-      setTimeExpired(true);
-      if (timerRef.current) clearInterval(timerRef.current);
-      setCurrentSession(prev => {
-        if (!prev) return prev;
-        return { ...prev, status: 'completed' };
+      // Match error
+      socket.on('match:error', (msg: string) => {
+        setIsSearching(false);
+        setError(msg);
       });
-    });
 
-    // Exit approved — both users can leave
-    socketService.onExitApproved(() => {
-      setSessionEnded(true);
-      if (timerRef.current) clearInterval(timerRef.current);
-      setCurrentMatch(null);
-      setCurrentSession(null);
-      setTimeRemaining(0);
-      localStorage.removeItem('pairon_active_match');
-      localStorage.removeItem('pairon_active_session');
-      localStorage.removeItem('pairon_partner_name');
-    });
+      // Match cancelled
+      socket.on('match:cancelled', () => {
+        setIsSearching(false);
+      });
 
-    // Force quit by partner
-    socketService.onForceQuit(() => {
-      setSessionEnded(true);
-      if (timerRef.current) clearInterval(timerRef.current);
-      setCurrentMatch(null);
-      setCurrentSession(null);
-      setTimeRemaining(0);
-      localStorage.removeItem('pairon_active_match');
-      localStorage.removeItem('pairon_active_session');
-      localStorage.removeItem('pairon_partner_name');
-    });
+      // New message from partner
+      socket.on('session:message', (message: any) => {
+        setCurrentSession(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            messages: [...prev.messages, message],
+          };
+        });
+      });
+
+      // Task updated
+      socket.on('session:task-updated', (task: any) => {
+        setCurrentSession(prev => {
+          if (!prev) return prev;
+          const existingIndex = prev.tasks.findIndex(t => t.id === task.id);
+          const updatedTasks = [...prev.tasks];
+          if (existingIndex >= 0) {
+            updatedTasks[existingIndex] = task;
+          } else {
+            updatedTasks.push(task);
+          }
+          return { ...prev, tasks: updatedTasks };
+        });
+      });
+
+      // Server timer sync
+      socket.on('session:timer-update', (serverTimeRemaining: number) => {
+        setTimeRemaining(serverTimeRemaining);
+      });
+
+      // Session completed
+      socket.on('session:completed', (submission: any) => {
+        setCurrentSession(prev => {
+          if (!prev) return prev;
+          return { ...prev, submission, status: 'completed' };
+        });
+      });
+
+      // Time's up
+      socket.on('session:time-up', () => {
+        setTimeRemaining(0);
+        setTimeExpired(true);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setCurrentSession(prev => {
+          if (!prev) return prev;
+          return { ...prev, status: 'completed' };
+        });
+      });
+
+      // Exit approved
+      socket.on('session:exit-approved', () => {
+        setSessionEnded(true);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setCurrentMatch(null);
+        setCurrentSession(null);
+        setTimeRemaining(0);
+        localStorage.removeItem('pairon_active_match');
+        localStorage.removeItem('pairon_active_session');
+        localStorage.removeItem('pairon_partner_name');
+      });
+
+      // Force quit by partner
+      socket.on('session:force-quit', () => {
+        setSessionEnded(true);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setCurrentMatch(null);
+        setCurrentSession(null);
+        setTimeRemaining(0);
+        localStorage.removeItem('pairon_active_match');
+        localStorage.removeItem('pairon_active_session');
+        localStorage.removeItem('pairon_partner_name');
+      });
+
+      return true; // listeners registered
+    }
+
+    // Try immediately
+    if (!setupListeners()) {
+      // Socket not ready — poll every 500ms until it's available
+      pollTimer = setInterval(() => {
+        if (setupListeners()) {
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }, 500);
+    }
 
     return () => {
-      // Cleanup listeners on unmount
+      cleanedUp = true;
+      if (pollTimer) clearInterval(pollTimer);
       socketService.removeAllListeners();
       if (timerRef.current) clearInterval(timerRef.current);
     };

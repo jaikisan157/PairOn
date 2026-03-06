@@ -608,75 +608,242 @@ function startSessionTimer(io: Server, sessionId: string, endsAt: Date, particip
 // ===== AI Assistant Response Generator =====
 function generateAIResponse(userName: string, question: string, context: string, projectIdea?: any): string {
   const q = question.toLowerCase();
+  const projectTitle = projectIdea?.title || 'your project';
+  const projectDesc = projectIdea?.description || '';
 
-  // Architecture & design
-  if (q.includes('architect') || q.includes('structure') || q.includes('design') || q.includes('folder')) {
-    return `Hey @${userName}! For your project structure, I'd recommend:\n\n` +
-      `📁 **Suggested Architecture:**\n` +
-      `\`\`\`\n` +
-      `src/\n` +
-      `├── components/    # Reusable UI components\n` +
-      `├── pages/         # Route pages\n` +
-      `├── hooks/         # Custom React hooks\n` +
-      `├── services/      # API & business logic\n` +
+  // ===== Code Generation =====
+  // React component
+  if (q.includes('react component') || q.includes('create component') || q.includes('make a component') || q.includes('build component')) {
+    const componentName = extractName(question) || 'MyComponent';
+    return `@${userName}, here's a React component template:\n\n` +
+      `\`\`\`tsx\nimport React, { useState } from 'react';\n\n` +
+      `interface ${componentName}Props {\n  title: string;\n  onAction?: () => void;\n}\n\n` +
+      `export function ${componentName}({ title, onAction }: ${componentName}Props) {\n` +
+      `  const [isActive, setIsActive] = useState(false);\n\n` +
+      `  return (\n` +
+      `    <div className="p-4 rounded-lg border">\n` +
+      `      <h2 className="text-lg font-bold">{title}</h2>\n` +
+      `      <button\n` +
+      `        onClick={() => { setIsActive(!isActive); onAction?.(); }}\n` +
+      `        className="mt-2 px-4 py-2 bg-blue-500 text-white rounded"\n` +
+      `      >\n` +
+      `        {isActive ? 'Active' : 'Click me'}\n` +
+      `      </button>\n` +
+      `    </div>\n` +
+      `  );\n}\n\`\`\`\n\nCustomize the props and state to fit your needs!`;
+  }
+
+  // API endpoint / Express route
+  if (q.includes('api') || q.includes('endpoint') || q.includes('route') || q.includes('express')) {
+    return `@${userName}, here's an Express API route:\n\n` +
+      `\`\`\`typescript\nimport { Router, Request, Response } from 'express';\n\n` +
+      `const router = Router();\n\n` +
+      `// GET all items\nrouter.get('/', async (req: Request, res: Response) => {\n` +
+      `  try {\n    const items = await Item.find();\n    res.json({ success: true, data: items });\n` +
+      `  } catch (error) {\n    res.status(500).json({ success: false, error: 'Server error' });\n  }\n});\n\n` +
+      `// POST create item\nrouter.post('/', async (req: Request, res: Response) => {\n` +
+      `  try {\n    const { name, description } = req.body;\n` +
+      `    if (!name) return res.status(400).json({ error: 'Name required' });\n` +
+      `    const item = await Item.create({ name, description });\n    res.status(201).json({ success: true, data: item });\n` +
+      `  } catch (error) {\n    res.status(500).json({ success: false, error: 'Server error' });\n  }\n});\n\n` +
+      `export default router;\n\`\`\`\n\nReplace \`Item\` with your actual model!`;
+  }
+
+  // MongoDB / Mongoose model
+  if (q.includes('mongoose') || q.includes('model') || q.includes('schema') || q.includes('mongodb') || q.includes('database')) {
+    return `@${userName}, here's a Mongoose model:\n\n` +
+      `\`\`\`typescript\nimport mongoose, { Schema, Document } from 'mongoose';\n\n` +
+      `interface IItem extends Document {\n  name: string;\n  description: string;\n  status: 'active' | 'archived';\n  createdBy: string;\n  createdAt: Date;\n}\n\n` +
+      `const ItemSchema = new Schema({\n` +
+      `  name: { type: String, required: true, trim: true },\n` +
+      `  description: { type: String, default: '' },\n` +
+      `  status: { type: String, enum: ['active', 'archived'], default: 'active' },\n` +
+      `  createdBy: { type: String, required: true },\n` +
+      `}, { timestamps: true });\n\n` +
+      `export const Item = mongoose.model<IItem>('Item', ItemSchema);\n\`\`\`\n\nAdjust fields based on "${projectTitle}"!`;
+  }
+
+  // Authentication
+  if (q.includes('auth') || q.includes('login') || q.includes('jwt') || q.includes('token') || q.includes('password')) {
+    return `@${userName}, here's a JWT auth pattern:\n\n` +
+      `\`\`\`typescript\nimport jwt from 'jsonwebtoken';\nimport bcrypt from 'bcryptjs';\n\n` +
+      `// Login handler\nasync function login(email: string, password: string) {\n` +
+      `  const user = await User.findOne({ email });\n` +
+      `  if (!user) throw new Error('User not found');\n\n` +
+      `  const isValid = await bcrypt.compare(password, user.password);\n` +
+      `  if (!isValid) throw new Error('Invalid password');\n\n` +
+      `  const token = jwt.sign(\n    { userId: user._id, email: user.email },\n` +
+      `    process.env.JWT_SECRET!,\n    { expiresIn: '7d' }\n  );\n\n` +
+      `  return { token, user: { id: user._id, name: user.name, email: user.email } };\n}\n\n` +
+      `// Middleware\nfunction authMiddleware(req, res, next) {\n` +
+      `  const token = req.headers.authorization?.split(' ')[1];\n` +
+      `  if (!token) return res.status(401).json({ error: 'No token' });\n` +
+      `  try {\n    const decoded = jwt.verify(token, process.env.JWT_SECRET!);\n    req.userId = decoded.userId;\n    next();\n` +
+      `  } catch { return res.status(401).json({ error: 'Invalid token' }); }\n}\n\`\`\``;
+  }
+
+  // CSS / Styling
+  if (q.includes('css') || q.includes('style') || q.includes('tailwind') || q.includes('design') || q.includes('responsive') || q.includes('layout')) {
+    return `@${userName}, here's a responsive layout approach:\n\n` +
+      `\`\`\`css\n/* Modern responsive grid */\n.container {\n  display: grid;\n  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));\n  gap: 1.5rem;\n  padding: 2rem;\n}\n\n` +
+      `/* Card with hover effect */\n.card {\n  background: white;\n  border-radius: 12px;\n  padding: 1.5rem;\n  box-shadow: 0 2px 8px rgba(0,0,0,0.1);\n  transition: transform 0.2s, box-shadow 0.2s;\n}\n.card:hover {\n  transform: translateY(-2px);\n  box-shadow: 0 8px 24px rgba(0,0,0,0.15);\n}\n\n` +
+      `/* Responsive breakpoints */\n@media (max-width: 768px) {\n  .container { padding: 1rem; gap: 1rem; }\n}\n\`\`\`\n\n` +
+      `Or with **Tailwind**: \`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6\``;
+  }
+
+  // useState / useEffect / hooks
+  if (q.includes('usestate') || q.includes('useeffect') || q.includes('hook') || q.includes('state management')) {
+    return `@${userName}, here's common React hooks usage:\n\n` +
+      `\`\`\`tsx\nimport { useState, useEffect, useCallback } from 'react';\n\n` +
+      `function useData(endpoint: string) {\n` +
+      `  const [data, setData] = useState<any[]>([]);\n` +
+      `  const [loading, setLoading] = useState(true);\n` +
+      `  const [error, setError] = useState<string | null>(null);\n\n` +
+      `  useEffect(() => {\n    let cancelled = false;\n    setLoading(true);\n\n` +
+      `    fetch(endpoint)\n      .then(res => res.json())\n      .then(json => {\n` +
+      `        if (!cancelled) { setData(json.data); setLoading(false); }\n      })\n` +
+      `      .catch(err => {\n        if (!cancelled) { setError(err.message); setLoading(false); }\n      });\n\n` +
+      `    return () => { cancelled = true; };\n  }, [endpoint]);\n\n` +
+      `  const refetch = useCallback(() => {\n    setLoading(true);\n    // re-trigger fetch...\n  }, []);\n\n` +
+      `  return { data, loading, error, refetch };\n}\n\`\`\``;
+  }
+
+  // Fetch / API call from frontend
+  if (q.includes('fetch') || q.includes('axios') || q.includes('api call') || q.includes('http request') || q.includes('get data')) {
+    return `@${userName}, here's how to make API calls:\n\n` +
+      `\`\`\`typescript\n// API service\nconst API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';\n\n` +
+      `async function apiCall<T>(endpoint: string, options?: RequestInit): Promise<T> {\n` +
+      `  const token = localStorage.getItem('token');\n` +
+      `  const res = await fetch(\`\${API_URL}\${endpoint}\`, {\n` +
+      `    headers: {\n      'Content-Type': 'application/json',\n      ...(token ? { Authorization: \`Bearer \${token}\` } : {}),\n    },\n` +
+      `    ...options,\n  });\n` +
+      `  if (!res.ok) throw new Error(\`API error: \${res.status}\`);\n  return res.json();\n}\n\n` +
+      `// Usage\nconst items = await apiCall<{ data: Item[] }>('/items');\n` +
+      `await apiCall('/items', { method: 'POST', body: JSON.stringify({ name: 'New' }) });\n\`\`\``;
+  }
+
+  // Socket.io
+  if (q.includes('socket') || q.includes('real-time') || q.includes('realtime') || q.includes('websocket') || q.includes('emit')) {
+    return `@${userName}, here's a Socket.io setup:\n\n` +
+      `**Server:**\n\`\`\`typescript\nimport { Server } from 'socket.io';\n\n` +
+      `const io = new Server(httpServer, { cors: { origin: '*' } });\n\n` +
+      `io.on('connection', (socket) => {\n  console.log('User connected:', socket.id);\n\n` +
+      `  socket.on('message:send', (data) => {\n    io.to(data.room).emit('message:new', data);\n  });\n\n` +
+      `  socket.on('disconnect', () => console.log('Disconnected:', socket.id));\n});\n\`\`\`\n\n` +
+      `**Client:**\n\`\`\`typescript\nimport { io } from 'socket.io-client';\n\n` +
+      `const socket = io('http://localhost:5000');\nsocket.on('message:new', (msg) => console.log(msg));\nsocket.emit('message:send', { room: 'room1', text: 'Hello!' });\n\`\`\``;
+  }
+
+  // Architecture / structure (keep this one)
+  if (q.includes('architect') || q.includes('structure') || q.includes('folder') || q.includes('organize')) {
+    return `@${userName}, here's a project structure for "${projectTitle}":\n\n` +
+      `\`\`\`\nsrc/\n├── components/    # Reusable UI (Button, Card, Modal)\n` +
+      `├── pages/         # Route pages (Home, Dashboard, Profile)\n` +
+      `├── hooks/         # Custom hooks (useAuth, useData)\n` +
+      `├── services/      # API calls & business logic\n` +
+      `├── context/       # React Context providers\n` +
+      `├── types/         # TypeScript interfaces\n` +
       `├── utils/         # Helper functions\n` +
-      `├── types/         # TypeScript types\n` +
-      `└── styles/        # Global styles\n` +
-      `\`\`\`\n\n` +
-      `Start with the core data models, then build the API layer, then the UI. Divide tasks so one person handles backend and the other frontend!`;
+      `└── styles/        # Global CSS\n\`\`\`\n\n` +
+      `**Divide work:** One of you handles \`services/\` + \`context/\` (data layer), the other does \`components/\` + \`pages/\` (UI layer).`;
   }
 
-  // Debugging help
-  if (q.includes('bug') || q.includes('error') || q.includes('fix') || q.includes('debug') || q.includes('not working')) {
-    return `@${userName}, debugging tips:\n\n` +
-      `1. 🔍 **Check the console** — browser DevTools (F12) and terminal for errors\n` +
-      `2. 📝 **Add console.log** at key points to trace the data flow\n` +
-      `3. 🧪 **Isolate the issue** — comment out code sections to find what's breaking\n` +
-      `4. 🔄 **Check types** — TypeScript errors often point to the root cause\n` +
-      `5. 📦 **Clear cache** — try \`npm run dev\` restart or clear node_modules\n\n` +
-      `Share the specific error message here and I can help narrow it down!`;
+  // Form handling
+  if (q.includes('form') || q.includes('input') || q.includes('validation') || q.includes('submit')) {
+    return `@${userName}, here's a form with validation:\n\n` +
+      `\`\`\`tsx\nfunction ContactForm() {\n  const [form, setForm] = useState({ name: '', email: '', message: '' });\n` +
+      `  const [errors, setErrors] = useState<Record<string, string>>({});\n\n` +
+      `  const validate = () => {\n    const e: Record<string, string> = {};\n` +
+      `    if (!form.name.trim()) e.name = 'Name required';\n` +
+      `    if (!form.email.includes('@')) e.email = 'Valid email required';\n` +
+      `    if (form.message.length < 10) e.message = 'Min 10 characters';\n    setErrors(e);\n` +
+      `    return Object.keys(e).length === 0;\n  };\n\n` +
+      `  const handleSubmit = async (e: React.FormEvent) => {\n` +
+      `    e.preventDefault();\n    if (!validate()) return;\n` +
+      `    await fetch('/api/contact', { method: 'POST', body: JSON.stringify(form),\n` +
+      `      headers: { 'Content-Type': 'application/json' } });\n  };\n\n` +
+      `  return (\n    <form onSubmit={handleSubmit}>\n` +
+      `      <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} />\n` +
+      `      {errors.name && <span className="text-red-500">{errors.name}</span>}\n      {/* ...more fields */}\n` +
+      `      <button type="submit">Submit</button>\n    </form>\n  );\n}\n\`\`\``;
   }
 
-  // Tech stack questions
-  if (q.includes('what tech') || q.includes('stack') || q.includes('which framework') || q.includes('use react') || q.includes('use next')) {
-    const idea = projectIdea?.title || 'your project';
-    return `@${userName}, for "${idea}" I'd suggest:\n\n` +
-      `⚡ **Frontend:** React + TypeScript + Tailwind CSS\n` +
-      `🔧 **Backend:** Node.js + Express (or Next.js API routes)\n` +
-      `💾 **Database:** MongoDB (flexible) or PostgreSQL (relational)\n` +
-      `📡 **Real-time:** Socket.io (if needed)\n\n` +
-      `Discuss with your partner what you're both comfortable with!`;
+  // Testing
+  if (q.includes('test') || q.includes('jest') || q.includes('testing')) {
+    return `@${userName}, here's how to test:\n\n` +
+      `\`\`\`typescript\n// Unit test\nimport { render, screen, fireEvent } from '@testing-library/react';\n\n` +
+      `describe('Button', () => {\n  it('calls onClick when clicked', () => {\n` +
+      `    const onClick = jest.fn();\n    render(<Button onClick={onClick}>Click</Button>);\n` +
+      `    fireEvent.click(screen.getByText('Click'));\n    expect(onClick).toHaveBeenCalledTimes(1);\n  });\n});\n\n` +
+      `// API test\ndescribe('GET /api/items', () => {\n` +
+      `  it('returns items', async () => {\n    const res = await request(app).get('/api/items');\n` +
+      `    expect(res.status).toBe(200);\n    expect(res.body.data).toBeInstanceOf(Array);\n  });\n});\n\`\`\``;
   }
 
-  // Git/collaboration
-  if (q.includes('git') || q.includes('branch') || q.includes('merge') || q.includes('commit')) {
-    return `@${userName}, here's a quick Git workflow for your pair:\n\n` +
-      `1. Create a shared repo on GitHub\n` +
-      `2. Work on separate branches: \`feature/your-name-task\`\n` +
-      `3. Commit often with clear messages\n` +
-      `4. PR and review each other's code before merging to \`main\`\n` +
-      `5. Pull before starting new work: \`git pull origin main\`\n\n` +
-      `💡 **Pro tip:** Use conventional commits — \`feat:\`, \`fix:\`, \`docs:\``;
+  // Deployment
+  if (q.includes('deploy') || q.includes('hosting') || q.includes('build') || q.includes('production') || q.includes('vercel') || q.includes('render')) {
+    return `@${userName}, deployment checklist:\n\n` +
+      `**Frontend (Vercel):**\n\`\`\`bash\nnpm run build\nvercel deploy --prod\n\`\`\`\n\n` +
+      `**Backend (Render):**\n` +
+      `1. Push to GitHub\n2. Connect repo on render.com\n3. Set env vars: \`MONGODB_URI\`, \`JWT_SECRET\`, \`PORT\`\n` +
+      `4. Build command: \`npm install && npm run build\`\n5. Start command: \`npm start\`\n\n` +
+      `**Don't forget:**\n• Set \`CORS_ORIGIN\` to your frontend URL\n• Use \`process.env.PORT\` in server\n• Add \`.env.example\` to repo (without real values)`;
   }
 
-  // How to start
-  if (q.includes('start') || q.includes('begin') || q.includes('first step') || q.includes('how do i') || q.includes('where to')) {
-    return `@${userName}, here's how to kick things off:\n\n` +
-      `1. 📋 **Plan (15 min):** Agree on features, divide tasks, sketch the UI\n` +
-      `2. 🛠️ **Setup (10 min):** Create the repo, init the project, install deps\n` +
-      `3. 🏗️ **Build:** Start with the data model → API → UI\n` +
-      `4. 🔗 **Integrate:** Connect frontend and backend\n` +
-      `5. ✅ **Test & Polish:** Fix bugs, add finishing touches\n\n` +
-      `Remember: done is better than perfect! Ship something working.`;
+  // Bug / error / not working
+  if (q.includes('bug') || q.includes('error') || q.includes('fix') || q.includes('debug') || q.includes('not working') || q.includes('broke') || q.includes('crash')) {
+    return `@${userName}, let's debug this:\n\n` +
+      `\`\`\`typescript\n// 1. Add logging at the point of failure\nconsole.log('DEBUG:', { variable, state, props });\n\n` +
+      `// 2. Try-catch to find the exact error\ntry {\n  // your code here\n} catch (error) {\n` +
+      `  console.error('Error details:', error);\n  console.trace(); // shows call stack\n}\n\n` +
+      `// 3. Check network tab for API issues\n// F12 → Network → look for red requests\n\n` +
+      `// 4. TypeScript: run 'npx tsc --noEmit' to find type errors\n\`\`\`\n\n` +
+      `**Common fixes:**\n• \`Cannot read property of undefined\` → check if data loaded before accessing\n• \`CORS error\` → add cors middleware with correct origin\n• \`404\` → check API route URL and method\n\nShare the error message and I'll help narrow it down!`;
   }
 
-  // Default helpful response
-  return `@${userName}, great question! Here are some thoughts:\n\n` +
-    `Based on your conversation, I'd suggest:\n` +
-    `• Break the problem into smaller, testable pieces\n` +
-    `• Discuss the approach with your partner before coding\n` +
-    `• Use clear naming conventions and comments\n` +
-    `• Test as you go — don't wait until the end\n\n` +
-    `Feel free to ask me about architecture, debugging, Git workflow, or tech stack choices! 🚀`;
+  // Contextual response based on conversation + project idea
+  if (projectDesc) {
+    return `@${userName}, regarding your question about "${question}":\n\n` +
+      `Since you're building **"${projectTitle}"** (${projectDesc}), here's what I'd suggest:\n\n` +
+      `1. **Break it down** — Identify the core feature your question relates to\n` +
+      `2. **Start simple** — Get a basic version working first, then iterate\n` +
+      `3. **Divide work** — One person can handle this while the other works on another feature\n\n` +
+      `\`\`\`typescript\n// Quick starter for your feature\nimport { useState, useEffect } from 'react';\n\n` +
+      `function Feature() {\n` +
+      `  const [data, setData] = useState(null);\n  const [loading, setLoading] = useState(true);\n\n` +
+      `  useEffect(() => {\n    // Fetch your data\n    fetch('/api/your-endpoint')\n` +
+      `      .then(r => r.json())\n      .then(d => { setData(d); setLoading(false); });\n  }, []);\n\n` +
+      `  if (loading) return <div>Loading...</div>;\n  return <div>{JSON.stringify(data)}</div>;\n}\n\`\`\`\n\n` +
+      `Need more specific help? Tell me exactly what you're trying to build! 🚀`;
+  }
+
+  // Generic but still useful
+  return `@${userName}, here's what I can help with — just ask:\n\n` +
+    `📝 **"create a React component for [X]"** — I'll generate the code\n` +
+    `🔧 **"write an API route for [X]"** — Express endpoint with error handling\n` +
+    `💾 **"create a database model for [X]"** — Mongoose schema\n` +
+    `🔐 **"how to do authentication"** — JWT auth pattern\n` +
+    `🎨 **"CSS for [layout/card/grid]"** — Responsive styles\n` +
+    `🐛 **"debug [error message]"** — Debugging strategies\n` +
+    `📡 **"socket.io setup"** — Real-time communication\n` +
+    `🚀 **"how to deploy"** — Deployment checklist\n\n` +
+    `Try asking something specific like: \`@ai create a React component for user profile card\``;
+}
+
+// Helper to extract a name from the question
+function extractName(question: string): string | null {
+  // Try to extract "for X" or "called X" or "named X"
+  const patterns = [
+    /(?:called|named|for)\s+(\w+)/i,
+    /component\s+(\w+)/i,
+    /create\s+(\w+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = question.match(pattern);
+    if (match && match[1] && match[1].length > 2) {
+      return match[1].charAt(0).toUpperCase() + match[1].slice(1);
+    }
+  }
+  return null;
 }
 
