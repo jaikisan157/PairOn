@@ -98,6 +98,19 @@ export function QuickConnectPage() {
         socketService.onQuickChatMessage((message: QuickMessage) => {
             setActiveChat(prev => {
                 if (!prev) return prev;
+                // Replace optimistic message with server version
+                const isDupe = prev.messages.some(
+                    m => m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
+                );
+                if (isDupe) {
+                    return {
+                        ...prev,
+                        messages: prev.messages.map(m =>
+                            m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
+                                ? message : m
+                        ),
+                    };
+                }
                 return { ...prev, messages: [...prev.messages, message] };
             });
         });
@@ -208,9 +221,25 @@ export function QuickConnectPage() {
     const handleSendMessage = useCallback((e: React.FormEvent) => {
         e.preventDefault();
         if (!newMessage.trim() || !activeChat) return;
-        socketService.sendQuickMessage(activeChat.chatId, newMessage.trim());
+
+        const msg = newMessage.trim();
+
+        // Optimistic update — show message instantly
+        const optimisticMsg: QuickMessage = {
+            id: `opt-${Date.now()}`,
+            senderId: user?.id || '',
+            content: msg,
+            timestamp: new Date(),
+            type: 'text',
+        };
+        setActiveChat(prev => {
+            if (!prev) return prev;
+            return { ...prev, messages: [...prev.messages, optimisticMsg] };
+        });
+
+        socketService.sendQuickMessage(activeChat.chatId, msg);
         setNewMessage('');
-    }, [newMessage, activeChat]);
+    }, [newMessage, activeChat, user?.id]);
 
     const handleEndChat = useCallback(() => {
         if (!activeChat) return;

@@ -170,10 +170,25 @@ export function CollaborationPage() {
       setStatus('idle');
     });
 
-    // Incoming message
+    // Incoming message (skip if already added optimistically)
     socket.on('challenge:message', (message: ChallengeMessage) => {
       setSession(prev => {
         if (!prev) return prev;
+        // Skip if we already have an optimistic version of this message
+        const isDuplicate = prev.messages.some(
+          m => m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
+        );
+        if (isDuplicate) {
+          // Replace optimistic with server version
+          return {
+            ...prev,
+            messages: prev.messages.map(m =>
+              m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
+                ? message
+                : m
+            ),
+          };
+        }
         return { ...prev, messages: [...prev.messages, message] };
       });
     });
@@ -458,6 +473,19 @@ export function CollaborationPage() {
 
     const msg = newMessage.trim();
 
+    // Optimistic update — show message instantly
+    const optimisticMsg: ChallengeMessage = {
+      id: `opt-${Date.now()}`,
+      senderId: user?.id || '',
+      content: msg,
+      timestamp: new Date(),
+      type: 'text',
+    };
+    setSession(prev => {
+      if (!prev) return prev;
+      return { ...prev, messages: [...prev.messages, optimisticMsg] };
+    });
+
     // @ai command
     if (msg.toLowerCase().startsWith('@ai ')) {
       const question = msg.substring(4).trim();
@@ -466,10 +494,10 @@ export function CollaborationPage() {
       }
     }
 
-    // Send user message
+    // Send user message to server
     socketService.getSocket()?.emit('challenge:message', session.sessionId, msg);
     setNewMessage('');
-  }, [newMessage, session]);
+  }, [newMessage, session, user?.id]);
 
   const handleRequestExit = useCallback(() => {
     if (!session || !exitReason.trim()) return;
@@ -545,9 +573,18 @@ export function CollaborationPage() {
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
               <button
-                onClick={() => setShowExitModal(true)}
+                onClick={() => {
+                  if (session.mode === 'challenge' || session.mode === 'build') {
+                    // Long sessions: just go back, session persists
+                    gracefulEndRef.current = true;
+                    navigate('/dashboard');
+                  } else {
+                    // Sprint: request to leave
+                    setShowExitModal(true);
+                  }
+                }}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title="Request to leave"
+                title={session.mode === 'sprint' ? 'Request to leave' : 'Back to Dashboard (session continues)'}
               >
                 <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>

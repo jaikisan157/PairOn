@@ -148,6 +148,41 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
+    // ===== Session History =====
+    socket.on('dashboard:get-history', async () => {
+      try {
+        const recentSessions = await CollaborationSession.find({
+          participants: userId,
+        })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .lean();
+
+        const history = [];
+        for (const sess of recentSessions) {
+          const match = await Match.findById(sess.matchId).lean();
+          const partnerId = (sess.participants as string[]).find(p => p !== userId) || '';
+          const partner = await User.findById(partnerId).select('name reputation').lean();
+          history.push({
+            sessionId: (sess as any)._id.toString(),
+            partnerName: partner?.name || 'Unknown',
+            partnerReputation: (partner as any)?.reputation || 0,
+            mode: match?.mode || 'sprint',
+            projectIdea: (sess as any).projectIdea || match?.projectIdea,
+            status: sess.status, // active, completed, abandoned, ended
+            startedAt: sess.startedAt,
+            endsAt: sess.endsAt,
+            tasksTotal: (sess.tasks as any[])?.length || 0,
+            tasksDone: (sess.tasks as any[])?.filter((t: any) => t.status === 'done').length || 0,
+          });
+        }
+
+        socket.emit('dashboard:history', history);
+      } catch (error) {
+        console.error('[Dashboard History] error:', error);
+      }
+    });
+
     // Matchmaking
     socket.on('match:request', async (data: { mode: MatchMode }) => {
       try {

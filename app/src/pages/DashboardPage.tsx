@@ -60,6 +60,9 @@ export function DashboardPage() {
   // Active long-running sessions (24hr/7day)
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
 
+  // Session history
+  const [sessionHistory, setSessionHistory] = useState<any[]>([]);
+
   // Listen for challenge events
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -68,17 +71,24 @@ export function DashboardPage() {
     // Cleanup expired sessions when landing on dashboard
     socket.emit('dashboard:cleanup');
 
+    // Fetch session history
+    socket.emit('dashboard:get-history');
+
     // Receive active long-running sessions after cleanup
     socket.on('dashboard:cleanup-done', (data: { activeSessions: any[] }) => {
       if (data?.activeSessions?.length > 0) {
         setActiveSessions(data.activeSessions);
-        // If there's an active long session, save the first one to localStorage
         const first = data.activeSessions[0];
         localStorage.setItem('challenge_session', JSON.stringify(first));
       } else {
         setActiveSessions([]);
         localStorage.removeItem('challenge_session');
       }
+    });
+
+    // Receive session history
+    socket.on('dashboard:history', (history: any[]) => {
+      setSessionHistory(history);
     });
 
     // Matched — save data and navigate
@@ -142,6 +152,7 @@ export function DashboardPage() {
         socket.removeAllListeners('challenge:error');
         socket.removeAllListeners('challenge:cancelled');
         socket.removeAllListeners('dashboard:cleanup-done');
+        socket.removeAllListeners('dashboard:history');
       }
     };
   }, [navigate]);
@@ -542,7 +553,7 @@ export function DashboardPage() {
             </motion.div>
           )}
 
-          {/* Recent Activity */}
+          {/* Recent Sessions */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -551,20 +562,80 @@ export function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white">
-                Recent sessions
+                Recent Sessions
               </h2>
-              <button className="text-sm text-pairon-accent hover:underline flex items-center gap-1">
-                View all
-                <ArrowRight className="w-4 h-4" />
-              </button>
             </div>
 
-            <div className="text-center py-8">
-              <History className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-              <p className="text-gray-500 dark:text-gray-400">
-                No sessions yet. Start matching to build your first project!
-              </p>
-            </div>
+            {sessionHistory.length === 0 ? (
+              <div className="text-center py-8">
+                <History className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                <p className="text-gray-500 dark:text-gray-400">
+                  No sessions yet. Start matching to build your first project!
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {sessionHistory.map((sess: any) => {
+                  const modeLabels: Record<string, string> = { sprint: 'Sprint', challenge: '24hr', build: '7-Day' };
+                  const statusColors: Record<string, string> = {
+                    active: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+                    completed: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+                    abandoned: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+                    ended: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+                  };
+                  const statusLabels: Record<string, string> = {
+                    active: '🟢 Active',
+                    completed: '✅ Completed',
+                    abandoned: '❌ Abandoned',
+                    ended: '⏹ Ended',
+                  };
+                  const isActive = sess.status === 'active' && new Date(sess.endsAt) > new Date();
+
+                  return (
+                    <div
+                      key={sess.sessionId}
+                      className={`flex items-center justify-between p-4 rounded-xl border ${isActive ? 'border-green-300 dark:border-green-700 bg-green-50/50 dark:bg-green-900/10' : 'border-gray-200 dark:border-gray-700'}`}
+                    >
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div>
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                              {sess.projectIdea?.title || 'Untitled'}
+                            </p>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[sess.status] || statusColors.ended}`}>
+                              {isActive ? '🟢 Active' : (statusLabels[sess.status] || sess.status)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {modeLabels[sess.mode]} · with {sess.partnerName}
+                            <span className="text-yellow-500 ml-1">⭐ {sess.partnerReputation}</span>
+                            {sess.tasksTotal > 0 && <span className="ml-2">· {sess.tasksDone}/{sess.tasksTotal} tasks</span>}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 ml-3">
+                        <span className="text-xs text-gray-400 whitespace-nowrap">
+                          {new Date(sess.startedAt).toLocaleDateString()}
+                        </span>
+                        {isActive && (
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              localStorage.setItem('challenge_session', JSON.stringify(sess));
+                              navigate('/collaborate');
+                            }}
+                            className="bg-green-600 hover:bg-green-700 text-white text-xs"
+                          >
+                            <Play className="w-3 h-3 mr-1 fill-current" /> Continue
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </motion.div>
         </div>
       </main>
