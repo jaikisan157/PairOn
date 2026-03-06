@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -47,11 +47,60 @@ export function DashboardPage() {
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [rulesAgreed, setRulesAgreed] = useState(false);
 
+  // Searching state
+  const [isSearching, setIsSearching] = useState(false);
+  const [matchTimeout, setMatchTimeout] = useState(false);
+  const matchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Proposals
   const [proposals, setProposals] = useState<any[]>([]);
 
-  // Listen for proposals
+  // Listen for challenge events
   useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket) return;
+
+    // Matched — save data and navigate
+    socket.on('challenge:matched', (data: any) => {
+      setIsSearching(false);
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+      setMatchTimeout(false);
+
+      // Save session to localStorage for CollaborationPage to pick up
+      localStorage.setItem('challenge_session', JSON.stringify({
+        sessionId: data.sessionId,
+        matchId: data.matchId,
+        partnerId: data.partnerId,
+        partnerName: data.partnerName,
+        mode: data.mode,
+        projectIdea: data.projectIdea,
+        endsAt: data.endsAt,
+        startedAt: data.startedAt,
+        messages: data.messages || [],
+        tasks: data.tasks || [],
+      }));
+
+      navigate('/collaborate');
+    });
+
+    // Waiting — still searching
+    socket.on('challenge:waiting', () => {
+      // No-op, keep searching
+    });
+
+    // Error
+    socket.on('challenge:error', (msg: string) => {
+      setIsSearching(false);
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+      alert(msg);
+    });
+
+    // Cancelled
+    socket.on('challenge:cancelled', () => {
+      setIsSearching(false);
+    });
+
+    // Proposals
     socketService.onProposalReceived((proposal: any) => {
       if (!proposal.isSent) {
         setProposals(prev => [proposal, ...prev]);
@@ -67,11 +116,36 @@ export function DashboardPage() {
       setProposals(prev => prev.filter(p => p.id !== proposalId));
     });
 
-    return () => { };
+    return () => {
+      if (socket) {
+        socket.removeAllListeners('challenge:matched');
+        socket.removeAllListeners('challenge:waiting');
+        socket.removeAllListeners('challenge:error');
+        socket.removeAllListeners('challenge:cancelled');
+      }
+    };
   }, [navigate]);
+
+  // Matchmaking timeout (60 seconds)
+  useEffect(() => {
+    if (isSearching) {
+      setMatchTimeout(false);
+      matchTimerRef.current = setTimeout(() => {
+        setMatchTimeout(true);
+        setIsSearching(false);
+        socketService.getSocket()?.emit('challenge:cancel');
+      }, 60000);
+    } else {
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+    }
+    return () => {
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+    };
+  }, [isSearching]);
 
   const handleStartMatching = () => {
     if (!selectedMode) return;
+    // Always show rules modal before matching
     setShowRulesModal(true);
     setRulesAgreed(false);
   };
@@ -79,8 +153,15 @@ export function DashboardPage() {
   const handleConfirmAndStart = () => {
     if (!selectedMode || !rulesAgreed) return;
     setShowRulesModal(false);
-    // Navigate to collaboration page with mode — matching happens THERE
-    navigate(`/collaborate?mode=${selectedMode}`);
+    setMatchTimeout(false);
+    setIsSearching(true);
+    socketService.getSocket()?.emit('challenge:find', { mode: selectedMode });
+  };
+
+  const handleCancelSearch = () => {
+    socketService.getSocket()?.emit('challenge:cancel');
+    setIsSearching(false);
+    if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
   };
 
   const stats = [
@@ -219,11 +300,12 @@ export function DashboardPage() {
                 return (
                   <button
                     key={mode.id}
-                    onClick={() => setSelectedMode(mode.id)}
+                    onClick={() => !isSearching && setSelectedMode(mode.id)}
+                    disabled={isSearching}
                     className={`p-6 rounded-2xl border-2 text-left transition-all ${isSelected
                       ? 'border-pairon-accent bg-pairon-accent-light dark:bg-pairon-accent/10'
                       : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                      }`}
+                      } ${isSearching ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <div
                       className={`w-10 h-10 rounded-xl flex items-center justify-center mb-4 ${isSelected
@@ -247,15 +329,45 @@ export function DashboardPage() {
               })}
             </div>
 
-            <Button
-              onClick={handleStartMatching}
-              disabled={!selectedMode}
-              className="w-full pairon-btn-primary py-4 h-auto text-base"
-            >
-              Start matching
-              <ArrowRight className="ml-2 w-5 h-5" />
-            </Button>
+            {isSearching ? (
+              <div className="text-center py-4">
+                <div className="w-10 h-10 border-4 border-pairon-accent/30 border-t-pairon-accent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                  Looking for a {MATCH_MODES.find(m => m.id === selectedMode)?.name} partner...
+                </p>
+                <Button variant="outline" onClick={handleCancelSearch} className="rounded-xl">
+                  Cancel search
+                </Button>
+              </div>
+            ) : (
+              <Button
+                onClick={handleStartMatching}
+                disabled={!selectedMode}
+                className="w-full pairon-btn-primary py-4 h-auto text-base"
+              >
+                Start matching
+                <ArrowRight className="ml-2 w-5 h-5" />
+              </Button>
+            )}
 
+            {/* Matchmaking timeout message */}
+            {matchTimeout && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl flex items-start gap-3"
+              >
+                <Clock className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
+                    No collaborators available right now
+                  </p>
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                    Try again in a few minutes or try a different mode.
+                  </p>
+                </div>
+              </motion.div>
+            )}
 
           </motion.div>
 

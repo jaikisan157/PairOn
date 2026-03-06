@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
@@ -65,7 +65,6 @@ const MODE_LABELS: Record<ChallengeMode, string> = {
 
 export function CollaborationPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { user } = useAuth();
 
   // Core state (like QuickConnectPage pattern)
@@ -283,23 +282,46 @@ export function CollaborationPage() {
     };
   }, []);
 
-  // ===== Restore session on refresh =====
+  // ===== Load session from localStorage (set by Dashboard) or rejoin on refresh =====
   useEffect(() => {
     const saved = localStorage.getItem('challenge_session');
     if (saved && status === 'idle') {
       const data = JSON.parse(saved);
-      // Rejoin the session on the backend
-      socketService.getSocket()?.emit('challenge:rejoin', data.sessionId);
-    }
-  }, [status]);
 
-  // ===== Auto-start matching from URL params =====
-  useEffect(() => {
-    const mode = searchParams.get('mode') as ChallengeMode | null;
-    if (mode && ['sprint', 'challenge', 'build'].includes(mode) && status === 'idle') {
-      handleStartSearch(mode);
+      if (data.sessionId) {
+        // Set session state
+        setStatus('matched');
+        setSession({
+          sessionId: data.sessionId,
+          matchId: data.matchId || '',
+          partnerId: data.partnerId || '',
+          partnerName: data.partnerName || 'Partner',
+          mode: data.mode || 'sprint',
+          projectIdea: data.projectIdea || null,
+          messages: data.messages || [],
+          tasks: data.tasks || [],
+          submission: null,
+          endsAt: data.endsAt,
+          startedAt: data.startedAt,
+        });
+
+        // Start countdown
+        if (data.endsAt) {
+          const remaining = Math.max(0, Math.floor((new Date(data.endsAt).getTime() - Date.now()) / 1000));
+          setTimeRemaining(remaining);
+          startCountdown(new Date(data.endsAt));
+        }
+
+        // Rejoin socket room
+        socketService.getSocket()?.emit('challenge:rejoin', data.sessionId);
+      } else {
+        navigate('/dashboard');
+      }
+    } else if (!saved && status === 'idle') {
+      // No session at all — go back to dashboard
+      navigate('/dashboard');
     }
-  }, [searchParams]);
+  }, [status, navigate]);
 
   // ===== Auto-scroll messages =====
   useEffect(() => {
@@ -379,16 +401,6 @@ export function CollaborationPage() {
   }
 
   // ===== Actions =====
-  const handleStartSearch = useCallback((mode: ChallengeMode) => {
-    setStatus('searching');
-    socketService.getSocket()?.emit('challenge:find', { mode });
-  }, []);
-
-  const handleCancelSearch = useCallback(() => {
-    socketService.getSocket()?.emit('challenge:cancel');
-    setStatus('idle');
-  }, []);
-
   const handleSendMessage = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !session) return;
@@ -455,69 +467,13 @@ export function CollaborationPage() {
     }
   };
 
-  // ===== RENDER: Idle / Searching =====
+  // ===== RENDER: Loading (session not yet loaded from localStorage) =====
   if (status !== 'matched' || !session) {
     return (
-      <div className="min-h-screen bg-pairon-bg dark:bg-gray-900 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg">
-          <div className="text-center mb-8">
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="inline-flex items-center gap-2 text-gray-500 hover:text-gray-700 mb-6"
-            >
-              <ArrowLeft className="w-4 h-4" /> Back to Dashboard
-            </button>
-            <h1 className="font-display text-3xl font-bold text-gray-900 dark:text-white">
-              Collaboration Challenges
-            </h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-2">
-              Pick a challenge mode — you'll be matched with someone who chose the same one.
-            </p>
-          </div>
-
-          {status === 'searching' ? (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white dark:bg-gray-800 rounded-2xl p-8 text-center shadow-xl"
-            >
-              <div className="w-16 h-16 border-4 border-pairon-accent/30 border-t-pairon-accent rounded-full animate-spin mx-auto mb-6" />
-              <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                Finding a partner...
-              </h2>
-              <p className="text-gray-500 dark:text-gray-400 mb-6">
-                Looking for someone who chose the same challenge mode
-              </p>
-              <Button
-                variant="outline"
-                onClick={handleCancelSearch}
-                className="rounded-xl"
-              >
-                Cancel search
-              </Button>
-            </motion.div>
-          ) : (
-            <div className="grid gap-4">
-              {(['sprint', 'challenge', 'build'] as ChallengeMode[]).map((mode) => (
-                <motion.button
-                  key={mode}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => handleStartSearch(mode)}
-                  className="bg-white dark:bg-gray-800 rounded-2xl p-6 text-left shadow-lg hover:shadow-xl transition-shadow border border-gray-100 dark:border-gray-700"
-                >
-                  <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white">
-                    {MODE_LABELS[mode]}
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {mode === 'sprint' && 'Quick collaboration — build something in 3 hours'}
-                    {mode === 'challenge' && 'Full-day project — 24 hours to ship'}
-                    {mode === 'build' && 'Week-long sprint — build something meaningful in 7 days'}
-                  </p>
-                </motion.button>
-              ))}
-            </div>
-          )}
+      <div className="min-h-screen bg-pairon-bg dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-pairon-accent/30 border-t-pairon-accent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-500 dark:text-gray-400">Loading session...</p>
         </div>
       </div>
     );
@@ -634,8 +590,8 @@ export function CollaborationPage() {
                   </div>
                 ) : (
                   <div className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${msg.senderId === user?.id
-                      ? 'bg-pairon-accent text-white rounded-br-md'
-                      : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-md shadow-sm'
+                    ? 'bg-pairon-accent text-white rounded-br-md'
+                    : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-md shadow-sm'
                     }`}>
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                     <span className={`text-[10px] mt-1 block ${msg.senderId === user?.id ? 'text-white/60' : 'text-gray-400'}`}>
