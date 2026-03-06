@@ -224,15 +224,26 @@ export function CollaborationPage() {
                 </span>
               </div>
 
-              {/* Request to Leave (not direct end) */}
+              {/* Request to Leave */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setShowExitModal(true)}
-                className="text-red-600 border-red-200 hover:bg-red-50"
+                className="text-yellow-600 border-yellow-200 hover:bg-yellow-50"
               >
                 <LogOut className="w-4 h-4 mr-1" />
                 Request to leave
+              </Button>
+
+              {/* Force Leave (always available) */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowForceQuitConfirm(true)}
+                className="text-red-600 border-red-200 hover:bg-red-50"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Force leave
               </Button>
             </div>
           </div>
