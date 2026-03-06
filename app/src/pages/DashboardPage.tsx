@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
-import { useMatching } from '@/context/MatchingContext';
 import { useTheme } from '@/context/ThemeContext';
 import { MATCH_MODES, CHALLENGE_RULES } from '@/data/constants';
 import { formatDuration } from '@/lib/utils';
@@ -42,14 +41,11 @@ export function DashboardPage() {
   const [selectedMode, setSelectedMode] = useState<MatchMode | null>(null);
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { isSearching, searchMatch, cancelSearch, currentMatch } = useMatching();
   const navigate = useNavigate();
 
-  // Rules modal & timeout
+  // Rules modal
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [rulesAgreed, setRulesAgreed] = useState(false);
-  const [matchTimeout, setMatchTimeout] = useState(false);
-  const matchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Proposals
   const [proposals, setProposals] = useState<any[]>([]);
@@ -71,40 +67,11 @@ export function DashboardPage() {
       setProposals(prev => prev.filter(p => p.id !== proposalId));
     });
 
-    return () => {
-      // Don't removeAllListeners here — other contexts use socket too
-    };
+    return () => { };
   }, [navigate]);
-
-  // Navigate to collaborate page when match is found
-  useEffect(() => {
-    if (currentMatch) {
-      // Clear timeout
-      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
-      setMatchTimeout(false);
-      navigate('/collaborate');
-    }
-  }, [currentMatch, navigate]);
-
-  // Matchmaking timeout (60 seconds)
-  useEffect(() => {
-    if (isSearching) {
-      setMatchTimeout(false);
-      matchTimerRef.current = setTimeout(() => {
-        setMatchTimeout(true);
-        cancelSearch();
-      }, 60000); // 60 seconds
-    } else {
-      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
-    }
-    return () => {
-      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
-    };
-  }, [isSearching, cancelSearch]);
 
   const handleStartMatching = () => {
     if (!selectedMode) return;
-    // Show rules modal first
     setShowRulesModal(true);
     setRulesAgreed(false);
   };
@@ -112,8 +79,8 @@ export function DashboardPage() {
   const handleConfirmAndStart = () => {
     if (!selectedMode || !rulesAgreed) return;
     setShowRulesModal(false);
-    setMatchTimeout(false);
-    searchMatch(selectedMode);
+    // Navigate to collaboration page with mode — matching happens THERE
+    navigate(`/collaborate?mode=${selectedMode}`);
   };
 
   const stats = [
@@ -282,40 +249,14 @@ export function DashboardPage() {
 
             <Button
               onClick={handleStartMatching}
-              disabled={!selectedMode || isSearching}
+              disabled={!selectedMode}
               className="w-full pairon-btn-primary py-4 h-auto text-base"
             >
-              {isSearching ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
-                  Finding match...
-                </>
-              ) : (
-                <>
-                  Start matching
-                  <ArrowRight className="ml-2 w-5 h-5" />
-                </>
-              )}
+              Start matching
+              <ArrowRight className="ml-2 w-5 h-5" />
             </Button>
 
-            {/* Matchmaking timeout message */}
-            {matchTimeout && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl flex items-start gap-3"
-              >
-                <Clock className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
-                    No collaborators available right now
-                  </p>
-                  <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
-                    Try again in a few minutes or try a different mode.
-                  </p>
-                </div>
-              </motion.div>
-            )}
+
           </motion.div>
 
           {/* Incoming Proposals */}

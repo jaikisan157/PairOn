@@ -10,9 +10,9 @@ export const MATCH_MODES: MatchModeConfig[] = [
   },
   {
     id: 'challenge',
-    name: '48-Hour Challenge',
-    duration: 48,
-    description: 'Weekend build for more substantial projects.',
+    name: '24-Hour Challenge',
+    duration: 24,
+    description: 'Full-day build for more substantial projects.',
     icon: 'target',
   },
   {
@@ -56,14 +56,14 @@ export const CHALLENGE_RULES: Record<string, {
     ],
   },
   challenge: {
-    title: '48-Hour Challenge',
+    title: '24-Hour Challenge',
     severity: 'Medium',
     severityColor: 'text-yellow-500',
-    durationLabel: '48 hours (2 full days)',
+    durationLabel: '24 hours (1 full day)',
     restPolicy: 'You may take a 30-minute break every 2 hours (optional). Coordinate rest times with your partner.',
-    commitmentLevel: 'Moderate commitment. Plan your weekend around this challenge.',
+    commitmentLevel: 'Moderate commitment. Plan your day around this challenge.',
     rules: [
-      'This is a 48-hour challenge — plan accordingly before starting.',
+      'This is a 24-hour challenge — plan accordingly before starting.',
       'You are expected to be available and responsive throughout.',
       'Coordinate working hours and rest breaks with your partner.',
       'Take 30-minute breaks every 2 hours if needed — just inform your partner.',

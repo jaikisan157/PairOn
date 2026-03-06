@@ -4,6 +4,7 @@ import { User, Match, CollaborationSession } from '../models';
 import { calculateMatchScore, generateProjectIdea } from '../utils/matchingAlgorithm';
 import { moderateMessage } from '../utils/contentModeration';
 import { setupQuickChatHandlers } from './quickChat';
+import { setupChallengeHandlers } from './challenge';
 import { setupProposalHandlers } from './collabProposal';
 import type { MatchMode, ICollaborationSession, IMessage, ITask, JWTPayload } from '../types';
 
@@ -70,6 +71,9 @@ export function setupSocketHandlers(io: Server) {
 
     // Setup Quick Connect handlers
     setupQuickChatHandlers(io, socket);
+
+    // Setup Challenge handlers (3hr/24hr/7day)
+    setupChallengeHandlers(io, socket);
 
     // Setup Collab Proposal handlers
     setupProposalHandlers(io, socket);
