@@ -51,10 +51,19 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             const activeSession = await CollaborationSession.findOne({
                 participants: userId,
                 status: 'active',
-            });
+            }) as any;
             if (activeSession) {
-                socket.emit('challenge:error', 'You already have an active challenge. Finish it before starting a new one.');
-                return;
+                // Auto-close if expired or stale (no endsAt = old system leftover)
+                const isExpired = !activeSession.endsAt || new Date(activeSession.endsAt).getTime() < Date.now();
+                if (isExpired) {
+                    activeSession.status = 'completed';
+                    activeSession.endedAt = new Date();
+                    await activeSession.save();
+                    console.log(`[Challenge] Auto-closed stale session ${activeSession._id} for user ${userId}`);
+                } else {
+                    socket.emit('challenge:error', 'You already have an active challenge. Finish it before starting a new one.');
+                    return;
+                }
             }
 
             // Check if already in queue
