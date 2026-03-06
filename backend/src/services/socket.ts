@@ -246,7 +246,7 @@ export function setupSocketHandlers(io: Server) {
         if (!session.participants.includes(userId)) return;
 
         // End session normally
-        session.status = 'ended' as any;
+        session.status = 'completed';
         session.endedAt = new Date();
         await session.save();
 
@@ -297,7 +297,7 @@ export function setupSocketHandlers(io: Server) {
         if (!partnerId) return;
 
         // End session
-        session.status = 'ended' as any;
+        session.status = 'abandoned';
         session.endedAt = new Date();
         await session.save();
 
