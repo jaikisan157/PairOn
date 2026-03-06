@@ -78,8 +78,30 @@ export function setupSocketHandlers(io: Server) {
         // Add to queue
         matchmakingQueue.set(userId, { userId, mode, socketId: socket.id });
 
-        // Try to find a match
-        await findMatch(io, userId, mode, socket);
+        // Try to find a match immediately
+        const matched = await findMatch(io, userId, mode, socket);
+        if (matched) return;
+
+        // Retry every 5 seconds for up to 60 seconds
+        let retries = 0;
+        const retryInterval = setInterval(async () => {
+          retries++;
+
+          // If user cancelled or already matched, stop retrying
+          if (!matchmakingQueue.has(userId)) {
+            clearInterval(retryInterval);
+            return;
+          }
+
+          const found = await findMatch(io, userId, mode, socket);
+          if (found || retries >= 12) { // 12 * 5s = 60s
+            clearInterval(retryInterval);
+            if (!found && retries >= 12) {
+              socket.emit('match:error', 'No match found. Please try again.');
+              matchmakingQueue.delete(userId);
+            }
+          }
+        }, 5000);
       } catch (error) {
         console.error('Match request error:', error);
         socket.emit('match:error', 'Failed to process match request');
@@ -376,9 +398,9 @@ async function findMatch(
   userId: string,
   mode: MatchMode,
   socket: Socket
-): Promise<void> {
+): Promise<boolean> {
   const user = await User.findById(userId);
-  if (!user) return;
+  if (!user) return false;
 
   // Look for other users in queue with same mode
   const candidates: Array<{ userId: string; socketId: string; user: any }> = [];
@@ -400,7 +422,7 @@ async function findMatch(
 
   if (candidates.length === 0) {
     socket.emit('match:waiting', 'Looking for a match...');
-    return;
+    return false;
   }
 
   // Find best match
@@ -409,15 +431,21 @@ async function findMatch(
 
   for (const candidate of candidates) {
     const result = calculateMatchScore(user, candidate.user);
-    if (result.score > bestScore && result.score >= 30) {
+    if (result.score > bestScore) {
       bestScore = result.score;
       bestMatch = candidate;
     }
   }
 
+  // If no scored match, just pick the first candidate (any match is better than no match)
+  if (!bestMatch) {
+    bestMatch = candidates[0];
+    bestScore = 50; // default score
+  }
+
   if (!bestMatch) {
     socket.emit('match:waiting', 'Looking for a better match...');
-    return;
+    return false;
   }
 
   // Create match
@@ -545,6 +573,8 @@ async function findMatch(
 
   // Start session timer
   startSessionTimer(io, session._id.toString(), session.endsAt, session.participants);
+
+  return true;
 }
 
 // Start session countdown timer

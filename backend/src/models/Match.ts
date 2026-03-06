@@ -60,7 +60,7 @@ const MessageSchema = new Schema({
   senderId: { type: String, required: true },
   content: { type: String, required: true },
   timestamp: { type: Date, default: Date.now },
-  type: { type: String, enum: ['text', 'system'], default: 'text' },
+  type: { type: String, enum: ['text', 'system', 'ai'], default: 'text' },
 });
 
 const TaskSchema = new Schema({

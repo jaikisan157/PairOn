@@ -75,7 +75,7 @@ export interface IMessage {
   senderId: string;
   content: string;
   timestamp: Date;
-  type: 'text' | 'system';
+  type: 'text' | 'system' | 'ai';
 }
 
 export type TaskStatus = 'todo' | 'in-progress' | 'done';
