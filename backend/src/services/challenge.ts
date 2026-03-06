@@ -47,19 +47,27 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 return;
             }
 
-            // NUCLEAR CLEANUP: Close ALL active sessions and matches for this user
-            // If they're on the dashboard starting a new search, old sessions are dead
-            const closedSessions = await CollaborationSession.updateMany(
-                { participants: userId, status: 'active' },
-                { $set: { status: 'completed' } }
-            );
-            const closedMatches = await Match.updateMany(
-                { $or: [{ user1Id: userId }, { user2Id: userId }], status: 'active' },
-                { $set: { status: 'completed' } }
-            );
-            if (closedSessions.modifiedCount > 0 || closedMatches.modifiedCount > 0) {
-                console.log(`[Challenge] Cleaned up ${closedSessions.modifiedCount} sessions + ${closedMatches.modifiedCount} matches for user ${userId}`);
+            // CHECK: Block if user has an active session that hasn't expired
+            const now = new Date();
+            const activeSession = await CollaborationSession.findOne({
+                participants: userId,
+                status: 'active',
+                endsAt: { $gt: now },
+            });
+            if (activeSession) {
+                socket.emit('challenge:error', 'You already have an active session! Finish or leave it before starting a new one.');
+                return;
             }
+
+            // Clean up only EXPIRED sessions (safe cleanup)
+            await CollaborationSession.updateMany(
+                { participants: userId, status: 'active', endsAt: { $lt: now } },
+                { $set: { status: 'completed' } }
+            );
+            await Match.updateMany(
+                { $or: [{ user1Id: userId }, { user2Id: userId }], status: 'active', endsAt: { $lt: now } },
+                { $set: { status: 'completed' } }
+            );
 
             // Check if already in queue
             if (challengeQueue.has(userId)) {

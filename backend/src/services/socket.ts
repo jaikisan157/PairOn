@@ -151,31 +151,49 @@ export function setupSocketHandlers(io: Server) {
     // ===== Session History =====
     socket.on('dashboard:get-history', async () => {
       try {
-        const recentSessions = await CollaborationSession.find({
-          participants: userId,
-        })
+        // Fetch only the 5 most recent, with minimal fields
+        const recentSessions = await CollaborationSession.find(
+          { participants: userId },
+          { matchId: 1, participants: 1, status: 1, startedAt: 1, endsAt: 1, tasks: 1 }
+        )
           .sort({ createdAt: -1 })
-          .limit(10)
+          .limit(5)
           .lean();
 
-        const history = [];
-        for (const sess of recentSessions) {
-          const match = await Match.findById(sess.matchId).lean();
+        if (recentSessions.length === 0) {
+          socket.emit('dashboard:history', []);
+          return;
+        }
+
+        // Batch fetch all matches and partners in 2 queries instead of N+1
+        const matchIds = recentSessions.map(s => s.matchId);
+        const partnerIds = recentSessions.map(s => (s.participants as string[]).find(p => p !== userId) || '').filter(Boolean);
+
+        const [matches, partners] = await Promise.all([
+          Match.find({ _id: { $in: matchIds } }, { mode: 1, projectIdea: 1 }).lean(),
+          User.find({ _id: { $in: partnerIds } }, { name: 1, reputation: 1 }).lean(),
+        ]);
+
+        const matchMap = new Map(matches.map(m => [(m as any)._id.toString(), m]));
+        const partnerMap = new Map(partners.map(p => [(p as any)._id.toString(), p]));
+
+        const history = recentSessions.map(sess => {
+          const match = matchMap.get(sess.matchId);
           const partnerId = (sess.participants as string[]).find(p => p !== userId) || '';
-          const partner = await User.findById(partnerId).select('name reputation').lean();
-          history.push({
+          const partner = partnerMap.get(partnerId);
+          return {
             sessionId: (sess as any)._id.toString(),
             partnerName: partner?.name || 'Unknown',
             partnerReputation: (partner as any)?.reputation || 0,
             mode: match?.mode || 'sprint',
-            projectIdea: (sess as any).projectIdea || match?.projectIdea,
-            status: sess.status, // active, completed, abandoned, ended
+            projectIdea: match?.projectIdea,
+            status: sess.status,
             startedAt: sess.startedAt,
             endsAt: sess.endsAt,
             tasksTotal: (sess.tasks as any[])?.length || 0,
             tasksDone: (sess.tasks as any[])?.filter((t: any) => t.status === 'done').length || 0,
-          });
-        }
+          };
+        });
 
         socket.emit('dashboard:history', history);
       } catch (error) {
