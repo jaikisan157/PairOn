@@ -39,9 +39,18 @@ import { setupSocketHandlers } from './services/socket';
 
 const app = express();
 const httpServer = createServer(app);
+
+// CORS — allow both Vercel and localhost
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://pair-on-green.vercel.app',
+];
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -50,7 +59,7 @@ const io = new Server(httpServer, {
 // ===== Rate Limiting =====
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 attempts per window for auth routes
+  max: 100, // 100 attempts per window for auth routes
   message: { message: 'Too many attempts, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -58,7 +67,7 @@ const authLimiter = rateLimit({
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200, // 200 requests per 15 min for general API
+  max: 500, // 500 requests per 15 min for general API
   message: { message: 'Too many requests, please slow down' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -66,7 +75,13 @@ const apiLimiter = rateLimit({
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all during development
+    }
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
