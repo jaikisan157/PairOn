@@ -47,25 +47,18 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 return;
             }
 
-            // Check if user is already in a challenge
-            const activeSession = await CollaborationSession.findOne({
-                participants: userId,
-                status: 'active',
-            }) as any;
-            if (activeSession) {
-                // Auto-close if expired or stale (no endsAt = old system leftover)
-                const isExpired = !activeSession.endsAt || new Date(activeSession.endsAt).getTime() < Date.now();
-                if (isExpired) {
-                    // Close ALL stale sessions for this user
-                    await CollaborationSession.updateMany(
-                        { participants: userId, status: 'active' },
-                        { $set: { status: 'completed' } }
-                    );
-                    console.log(`[Challenge] Auto-closed all stale sessions for user ${userId}`);
-                } else {
-                    socket.emit('challenge:error', 'You already have an active challenge. Finish it before starting a new one.');
-                    return;
-                }
+            // NUCLEAR CLEANUP: Close ALL active sessions and matches for this user
+            // If they're on the dashboard starting a new search, old sessions are dead
+            const closedSessions = await CollaborationSession.updateMany(
+                { participants: userId, status: 'active' },
+                { $set: { status: 'completed' } }
+            );
+            const closedMatches = await Match.updateMany(
+                { $or: [{ user1Id: userId }, { user2Id: userId }], status: 'active' },
+                { $set: { status: 'completed' } }
+            );
+            if (closedSessions.modifiedCount > 0 || closedMatches.modifiedCount > 0) {
+                console.log(`[Challenge] Cleaned up ${closedSessions.modifiedCount} sessions + ${closedMatches.modifiedCount} matches for user ${userId}`);
             }
 
             // Check if already in queue
