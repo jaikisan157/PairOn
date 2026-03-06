@@ -340,6 +340,7 @@ async function findQuickChatPartner(
         chatId: chat._id.toString(),
         partnerId: best.userId,
         partnerName: partner.name,
+        partnerReputation: partner.reputation || 0,
         mode: chatMode,
         topic: chatTopic,
     };
@@ -348,6 +349,7 @@ async function findQuickChatPartner(
         chatId: chat._id.toString(),
         partnerId: userId,
         partnerName: user.name,
+        partnerReputation: user.reputation || 0,
         mode: chatMode,
         topic: chatTopic,
     };

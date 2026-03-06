@@ -38,6 +38,7 @@ interface ActiveChat {
     chatId: string;
     partnerId: string;
     partnerName: string;
+    partnerReputation: number;
     mode: QuickChatMode;
     topic?: string;
     messages: QuickMessage[];
@@ -84,6 +85,7 @@ export function QuickConnectPage() {
                 chatId: data.chatId,
                 partnerId: data.partnerId,
                 partnerName: data.partnerName,
+                partnerReputation: data.partnerReputation || 0,
                 mode: data.mode,
                 topic: data.topic,
                 messages: [],
@@ -257,7 +259,7 @@ export function QuickConnectPage() {
                                 </h1>
                                 <p className="text-sm text-gray-500 dark:text-gray-400">
                                     {chatStatus === 'chatting'
-                                        ? `Chatting with ${activeChat?.partnerName}`
+                                        ? <>Chatting with {activeChat?.partnerName} <span className="text-yellow-500">⭐ {activeChat?.partnerReputation}</span></>
                                         : 'Short chats · Ask doubts · Tech talks'
                                     }
                                 </p>

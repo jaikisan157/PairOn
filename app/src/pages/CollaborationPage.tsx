@@ -48,6 +48,7 @@ interface ChallengeSession {
   matchId: string;
   partnerId: string;
   partnerName: string;
+  partnerReputation: number;
   mode: ChallengeMode;
   projectIdea: any;
   messages: ChallengeMessage[];
@@ -103,6 +104,13 @@ export function CollaborationPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const gracefulEndRef = useRef(false);
+  const sessionRef = useRef<ChallengeSession | null>(null);
+
+  // Keep sessionRef in sync
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   // ===== SOCKET LISTENERS (like QuickConnectPage) =====
   useEffect(() => {
@@ -118,6 +126,7 @@ export function CollaborationPage() {
         matchId: data.matchId,
         partnerId: data.partnerId,
         partnerName: data.partnerName,
+        partnerReputation: data.partnerReputation || 0,
         mode: data.mode,
         projectIdea: data.projectIdea,
         messages: data.messages || [],
@@ -237,6 +246,7 @@ export function CollaborationPage() {
         matchId: '',
         partnerId: data.session.participants.find((p: string) => p !== user?.id) || '',
         partnerName: data.partnerName,
+        partnerReputation: data.partnerReputation || 0,
         mode: data.mode,
         projectIdea: data.projectIdea,
         messages: data.session.messages || [],
@@ -296,6 +306,7 @@ export function CollaborationPage() {
           matchId: data.matchId || '',
           partnerId: data.partnerId || '',
           partnerName: data.partnerName || 'Partner',
+          partnerReputation: data.partnerReputation || 0,
           mode: data.mode || 'sprint',
           projectIdea: data.projectIdea || null,
           messages: data.messages || [],
@@ -383,6 +394,7 @@ export function CollaborationPage() {
   }
 
   function handleSessionEnded() {
+    gracefulEndRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
     setSession(null);
@@ -393,12 +405,40 @@ export function CollaborationPage() {
   }
 
   function cleanupAndLeave() {
+    gracefulEndRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
     setSession(null);
     setStatus('idle');
     localStorage.removeItem('challenge_session');
   }
+
+  // ===== Force quit on unmount (URL change / navigation away) =====
+  useEffect(() => {
+    return () => {
+      if (!gracefulEndRef.current && sessionRef.current) {
+        // User navigated away without ending session — force quit
+        socketService.getSocket()?.emit('challenge:force-quit', sessionRef.current.sessionId);
+        localStorage.removeItem('challenge_session');
+      }
+    };
+  }, []);
+
+  // ===== Warn before closing tab =====
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (status === 'matched' && session) {
+        e.preventDefault();
+        e.returnValue = 'You have an active collaboration session. Leaving will count as a force quit!';
+        // Also emit force-quit since the user might still leave
+        socketService.getSocket()?.emit('challenge:force-quit', session.sessionId);
+        localStorage.removeItem('challenge_session');
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [status, session]);
 
   // ===== Actions =====
   const handleSendMessage = useCallback((e: React.FormEvent) => {
@@ -505,7 +545,7 @@ export function CollaborationPage() {
                   {MODE_LABELS[session.mode]}
                 </h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  with <strong>{session.partnerName}</strong>
+                  with <strong>{session.partnerName}</strong> <span className="text-yellow-500">⭐ {session.partnerReputation}</span>
                   {session.projectIdea && ` • ${session.projectIdea.title}`}
                 </p>
               </div>

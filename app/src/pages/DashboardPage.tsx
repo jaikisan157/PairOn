@@ -72,6 +72,7 @@ export function DashboardPage() {
         matchId: data.matchId,
         partnerId: data.partnerId,
         partnerName: data.partnerName,
+        partnerReputation: data.partnerReputation || 0,
         mode: data.mode,
         projectIdea: data.projectIdea,
         endsAt: data.endsAt,
