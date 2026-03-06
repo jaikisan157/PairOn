@@ -15,6 +15,8 @@ import {
     Search,
     Handshake,
     Sparkles,
+    Bell,
+    CheckCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +67,7 @@ export function QuickConnectPage() {
     const [loadingIdeas, setLoadingIdeas] = useState(false);
     const [proposalSent, setProposalSent] = useState(false);
     const [showEndConfirm, setShowEndConfirm] = useState(false);
+    const [incomingProposals, setIncomingProposals] = useState<any[]>([]);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -129,9 +132,14 @@ export function QuickConnectPage() {
             if (ideas.length > 0) setSelectedIdea(ideas[0]);
         });
 
+        // Listen for incoming proposals while on QuickConnect
+        socketService.onProposalReceived((proposal: any) => {
+            if (!proposal.isSent) {
+                setIncomingProposals(prev => [proposal, ...prev]);
+            }
+        });
+
         return () => {
-            // Only remove Quick Chat-specific listeners, NOT all listeners
-            // (removeAllListeners was destroying MatchingContext listeners!)
             const socket = socketService.getSocket();
             if (socket) {
                 socket.removeAllListeners('quickchat:matched');
@@ -142,6 +150,7 @@ export function QuickConnectPage() {
                 socket.removeAllListeners('quickchat:blocked');
                 socket.removeAllListeners('quickchat:rated');
                 socket.removeAllListeners('collab:ai-ideas');
+                socket.removeAllListeners('collab:proposal-received');
             }
         };
     }, []);
@@ -302,6 +311,40 @@ export function QuickConnectPage() {
                             <p className="text-sm text-red-700 dark:text-red-300">{warning.message}</p>
                             <button onClick={() => setWarning(null)} className="ml-auto">
                                 <X className="w-4 h-4 text-red-400" />
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Incoming Proposal Banner */}
+            <AnimatePresence>
+                {incomingProposals.length > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className="bg-green-50 dark:bg-green-900/30 border-b border-green-200 dark:border-green-800 px-4 py-3"
+                    >
+                        <div className="flex items-center gap-3 max-w-4xl mx-auto">
+                            <Bell className="w-5 h-5 text-green-600 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium text-green-800 dark:text-green-200">
+                                    🤝 {incomingProposals[0].proposer?.name} sent you a collaboration proposal!
+                                </p>
+                                <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                                    {incomingProposals[0].projectIdea?.title} · {incomingProposals[0].mode}
+                                </p>
+                            </div>
+                            <Button
+                                size="sm"
+                                onClick={() => navigate('/dashboard')}
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs"
+                            >
+                                <CheckCircle className="w-3 h-3 mr-1" /> View
+                            </Button>
+                            <button onClick={() => setIncomingProposals(prev => prev.slice(1))}>
+                                <X className="w-4 h-4 text-green-400" />
                             </button>
                         </div>
                     </motion.div>
