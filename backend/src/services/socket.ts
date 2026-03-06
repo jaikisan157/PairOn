@@ -250,7 +250,11 @@ export function setupSocketHandlers(io: Server) {
         session.endedAt = new Date();
         await session.save();
 
+        // Emit to session room AND both user rooms for guaranteed delivery
         io.to(`session:${sessionId}`).emit('session:exit-approved', { sessionId });
+        for (const pid of session.participants) {
+          io.to(`user:${pid}`).emit('session:exit-approved', { sessionId });
+        }
 
         // System message
         const sysMsg = {
@@ -297,7 +301,7 @@ export function setupSocketHandlers(io: Server) {
         session.endedAt = new Date();
         await session.save();
 
-        // Penalize quitter: reduce reputation (min 0)
+        // Penalize quitter: reduce reputation only (NOT credits)
         await User.findByIdAndUpdate(userId, {
           $inc: { reputation: -5 },
         });
@@ -312,11 +316,11 @@ export function setupSocketHandlers(io: Server) {
           $inc: { credits: 10 },
         });
 
-        // Notify both
-        io.to(`session:${sessionId}`).emit('session:force-quit', {
-          sessionId,
-          quitterId: userId,
-        });
+        // Notify BOTH via session room AND personal rooms
+        const forceQuitData = { sessionId, quitterId: userId };
+        io.to(`session:${sessionId}`).emit('session:force-quit', forceQuitData);
+        io.to(`user:${userId}`).emit('session:force-quit', forceQuitData);
+        io.to(`user:${partnerId}`).emit('session:force-quit', forceQuitData);
 
         const sysMsg = {
           id: `sys-fquit-${Date.now()}`,
@@ -568,8 +572,15 @@ async function findMatch(
     },
   };
 
-  socket.emit('match:found', matchData1);
-  io.to(bestMatch.socketId).emit('match:found', matchData2);
+  // Emit to BOTH user rooms (not socket IDs — socket IDs can be stale)
+  io.to(`user:${userId}`).emit('match:found', matchData1);
+  io.to(`user:${bestMatch.userId}`).emit('match:found', matchData2);
+
+  // Also auto-join both to session room
+  const user1Socket = io.sockets.sockets.get(socket.id);
+  if (user1Socket) user1Socket.join(`session:${session._id.toString()}`);
+  const user2Socket = io.sockets.sockets.get(bestMatch.socketId);
+  if (user2Socket) user2Socket.join(`session:${session._id.toString()}`);
 
   // Start session timer
   startSessionTimer(io, session._id.toString(), session.endsAt, session.participants);

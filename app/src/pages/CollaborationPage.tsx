@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   LogOut,
   Bot,
+  Menu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,6 +54,9 @@ export function CollaborationPage() {
   } | null>(null);
   const [exitDeclined, setExitDeclined] = useState(false);
   const [showForceQuitConfirm, setShowForceQuitConfirm] = useState(false);
+
+  // Sidebar toggle for tasks/project panel
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Activity check state
   const [showActivityCheck, setShowActivityCheck] = useState(false);
@@ -119,6 +123,19 @@ export function CollaborationPage() {
     }
   }, [currentSession, navigate]);
 
+  // Route guard: navigating away from /collaborate during active session = force quit
+  useEffect(() => {
+    const handlePopState = () => {
+      if (currentSession?.status === 'active') {
+        // User pressed back button or changed URL — treat as force quit
+        socketService.forceQuit(currentSession.id);
+        endSession();
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [currentSession, endSession]);
+
   // beforeunload warning during active session
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -184,7 +201,8 @@ export function CollaborationPage() {
 
   const handleRequestExit = useCallback(() => {
     if (!currentSession) return;
-    socketService.requestExit(currentSession.id, exitReason || 'Personal reasons');
+    if (!exitReason.trim()) return; // Reason is required
+    socketService.requestExit(currentSession.id, exitReason.trim());
     setShowExitModal(false);
   }, [currentSession, exitReason]);
 
@@ -288,6 +306,17 @@ export function CollaborationPage() {
                 <X className="w-4 h-4 mr-1" />
                 Force leave
               </Button>
+
+              {/* Sidebar Toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="text-gray-500"
+                title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+              >
+                <Menu className="w-5 h-5" />
+              </Button>
             </div>
           </div>
         </div>
@@ -390,195 +419,199 @@ export function CollaborationPage() {
           </form>
         </div>
 
-        {/* Kanban Panel */}
-        <div className="w-96 bg-gray-50 dark:bg-gray-900/50 flex flex-col border-r border-gray-200 dark:border-gray-700">
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-            <h2 className="font-display font-semibold text-gray-900 dark:text-white">
-              Tasks
-            </h2>
+        {/* Kanban Panel + Sidebar — toggleable */}
+        {sidebarOpen && (<>
+          <div className="w-96 bg-gray-50 dark:bg-gray-900/50 flex flex-col border-r border-gray-200 dark:border-gray-700">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <h2 className="font-display font-semibold text-gray-900 dark:text-white">
+                Tasks
+              </h2>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* To Do */}
+              <div>
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                  <Circle className="w-3 h-3" />
+                  To Do ({todoTasks.length})
+                </h3>
+                <div className="space-y-2">
+                  {todoTasks.map((task) => (
+                    <div
+                      key={task.id}
+                      onClick={() => handleTaskStatusChange(task.id, 'in-progress')}
+                      className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                    >
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        {task.title}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* In Progress */}
+              <div>
+                <h3 className="text-xs font-semibold text-blue-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                  <MoreHorizontal className="w-3 h-3" />
+                  In Progress ({inProgressTasks.length})
+                </h3>
+                <div className="space-y-2">
+                  {inProgressTasks.map((task) => (
+                    <div
+                      key={task.id}
+                      onClick={() => handleTaskStatusChange(task.id, 'done')}
+                      className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl cursor-pointer hover:shadow-md transition-shadow"
+                    >
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        {task.title}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Done */}
+              <div>
+                <h3 className="text-xs font-semibold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Done ({doneTasks.length})
+                </h3>
+                <div className="space-y-2">
+                  {doneTasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl opacity-60"
+                    >
+                      <p className="text-sm text-gray-700 dark:text-gray-300 line-through">
+                        {task.title}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* To Do */}
+          {/* Sidebar - Project & Actions */}
+          <div className="w-64 bg-white dark:bg-gray-800 p-4 space-y-6">
+            {/* Match Info */}
             <div>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Circle className="w-3 h-3" />
-                To Do ({todoTasks.length})
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                Match Details
               </h3>
-              <div className="space-y-2">
-                {todoTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    onClick={() => handleTaskStatusChange(task.id, 'in-progress')}
-                    className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-                  >
-                    <p className="text-sm text-gray-700 dark:text-gray-300">
-                      {task.title}
-                    </p>
-                  </div>
-                ))}
+              <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Score</span>
+                  <span className="font-medium text-pairon-accent">{currentMatch.matchScore}%</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Mode</span>
+                  <span className="font-medium text-gray-900 dark:text-white capitalize">{currentMatch.mode}</span>
+                </div>
               </div>
             </div>
 
-            {/* In Progress */}
+            {/* Project Info */}
             <div>
-              <h3 className="text-xs font-semibold text-blue-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <MoreHorizontal className="w-3 h-3" />
-                In Progress ({inProgressTasks.length})
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                Project
               </h3>
-              <div className="space-y-2">
-                {inProgressTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    onClick={() => handleTaskStatusChange(task.id, 'done')}
-                    className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl cursor-pointer hover:shadow-md transition-shadow"
-                  >
-                    <p className="text-sm text-gray-700 dark:text-gray-300">
-                      {task.title}
-                    </p>
-                  </div>
-                ))}
+              <div className="p-3 bg-pairon-accent-light dark:bg-pairon-accent/10 rounded-xl">
+                <p className="font-medium text-gray-900 dark:text-white text-sm mb-1">
+                  {currentMatch.projectIdea?.title}
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  {currentMatch.projectIdea?.description}
+                </p>
               </div>
             </div>
 
-            {/* Done */}
-            <div>
-              <h3 className="text-xs font-semibold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <CheckCircle2 className="w-3 h-3" />
-                Done ({doneTasks.length})
-              </h3>
-              <div className="space-y-2">
-                {doneTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl opacity-60"
-                  >
-                    <p className="text-sm text-gray-700 dark:text-gray-300 line-through">
-                      {task.title}
-                    </p>
-                  </div>
-                ))}
+            {/* Submission Status */}
+            {currentSession.submission ? (
+              <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
+                <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">
+                  ✅ Project Submitted
+                </p>
+                <a
+                  href={currentSession.submission.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-pairon-accent hover:underline break-all"
+                >
+                  {currentSession.submission.link}
+                </a>
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Sidebar - Project & Actions */}
-        <div className="w-64 bg-white dark:bg-gray-800 p-4 space-y-6">
-          {/* Match Info */}
-          <div>
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-              Match Details
-            </h3>
-            <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Score</span>
-                <span className="font-medium text-pairon-accent">{currentMatch.matchScore}%</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Mode</span>
-                <span className="font-medium text-gray-900 dark:text-white capitalize">{currentMatch.mode}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Project Info */}
-          <div>
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-              Project
-            </h3>
-            <div className="p-3 bg-pairon-accent-light dark:bg-pairon-accent/10 rounded-xl">
-              <p className="font-medium text-gray-900 dark:text-white text-sm mb-1">
-                {currentMatch.projectIdea?.title}
-              </p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">
-                {currentMatch.projectIdea?.description}
-              </p>
-            </div>
-          </div>
-
-          {/* Submission Status */}
-          {currentSession.submission ? (
-            <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
-              <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">
-                ✅ Project Submitted
-              </p>
-              <a
-                href={currentSession.submission.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-pairon-accent hover:underline break-all"
+            ) : (
+              <Button
+                onClick={() => setShowSubmitModal(true)}
+                className="w-full pairon-btn-primary"
               >
-                {currentSession.submission.link}
-              </a>
-            </div>
-          ) : (
-            <Button
-              onClick={() => setShowSubmitModal(true)}
-              className="w-full pairon-btn-primary"
-            >
-              <Link2 className="w-4 h-4 mr-2" />
-              Submit project
-            </Button>
-          )}
-        </div>
+                <Link2 className="w-4 h-4 mr-2" />
+                Submit project
+              </Button>
+            )}
+          </div>
+        </>)}
       </main>
 
       {/* Submit Modal */}
-      {showSubmitModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-gray-800 rounded-[28px] p-8 max-w-md w-full"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white">
-                Submit project
-              </h2>
-              <button
-                onClick={() => setShowSubmitModal(false)}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Project link
-                </label>
-                <Input
-                  type="url"
-                  value={submissionLink}
-                  onChange={(e) => setSubmissionLink(e.target.value)}
-                  placeholder="https://github.com/..."
-                  className="rounded-xl"
-                  required
-                />
+      {
+        showSubmitModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white dark:bg-gray-800 rounded-[28px] p-8 max-w-md w-full"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white">
+                  Submit project
+                </h2>
+                <button
+                  onClick={() => setShowSubmitModal(false)}
+                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Description
-                </label>
-                <textarea
-                  value={submissionDescription}
-                  onChange={(e) => setSubmissionDescription(e.target.value)}
-                  placeholder="What did you build?"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white resize-none h-24"
-                  required
-                />
-              </div>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Project link
+                  </label>
+                  <Input
+                    type="url"
+                    value={submissionLink}
+                    onChange={(e) => setSubmissionLink(e.target.value)}
+                    placeholder="https://github.com/..."
+                    className="rounded-xl"
+                    required
+                  />
+                </div>
 
-              <Button type="submit" className="w-full pairon-btn-primary">
-                Submit
-              </Button>
-            </form>
-          </motion.div>
-        </div>
-      )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={submissionDescription}
+                    onChange={(e) => setSubmissionDescription(e.target.value)}
+                    placeholder="What did you build?"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white resize-none h-24"
+                    required
+                  />
+                </div>
+
+                <Button type="submit" className="w-full pairon-btn-primary">
+                  Submit
+                </Button>
+              </form>
+            </motion.div>
+          </div>
+        )
+      }
 
       {/* Exit Request Modal */}
       <AnimatePresence>
@@ -607,14 +640,18 @@ export function CollaborationPage() {
 
               <div className="mb-4">
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  Reason (optional)
+                  Reason <span className="text-red-500">*</span>
                 </label>
                 <Input
                   value={exitReason}
                   onChange={(e) => setExitReason(e.target.value)}
                   placeholder="Why do you want to leave?"
                   className="rounded-xl text-sm"
+                  required
                 />
+                {exitReason.trim().length === 0 && (
+                  <p className="text-xs text-red-400 mt-1">A reason is required to request exit</p>
+                )}
               </div>
 
               <div className="flex gap-3">
@@ -627,7 +664,8 @@ export function CollaborationPage() {
                 </Button>
                 <Button
                   onClick={handleRequestExit}
-                  className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl"
+                  disabled={!exitReason.trim()}
+                  className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl disabled:opacity-50"
                 >
                   Send request
                 </Button>
@@ -686,39 +724,43 @@ export function CollaborationPage() {
       </AnimatePresence>
 
       {/* Exit Request Sent Banner */}
-      {exitRequestSent && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-yellow-100 dark:bg-yellow-900/50 border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
-          >
-            <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
-            Waiting for partner to approve your exit request...
-          </motion.div>
-        </div>
-      )}
+      {
+        exitRequestSent && (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-yellow-100 dark:bg-yellow-900/50 border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
+            >
+              <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+              Waiting for partner to approve your exit request...
+            </motion.div>
+          </div>
+        )
+      }
 
       {/* Exit Declined Banner */}
-      {exitDeclined && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-red-100 dark:bg-red-900/50 border border-red-300 dark:border-red-700 text-red-800 dark:text-red-300 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
-          >
-            <AlertTriangle className="w-4 h-4" />
-            <span>Your exit request was declined.</span>
-            <Button
-              size="sm"
-              onClick={() => setShowForceQuitConfirm(true)}
-              className="bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs px-3"
+      {
+        exitDeclined && (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-red-100 dark:bg-red-900/50 border border-red-300 dark:border-red-700 text-red-800 dark:text-red-300 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3"
             >
-              Force quit (-reputation)
-            </Button>
-          </motion.div>
-        </div>
-      )}
+              <AlertTriangle className="w-4 h-4" />
+              <span>Your exit request was declined.</span>
+              <Button
+                size="sm"
+                onClick={() => setShowForceQuitConfirm(true)}
+                className="bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs px-3"
+              >
+                Force quit (-reputation)
+              </Button>
+            </motion.div>
+          </div>
+        )
+      }
 
       {/* Force Quit Confirm */}
       <AnimatePresence>
@@ -811,8 +853,8 @@ export function CollaborationPage() {
                   {/* Current position indicator */}
                   <div
                     className={`absolute top-0 bottom-0 w-2 rounded-full transition-all ${sliderValue >= targetZone.min && sliderValue <= targetZone.max
-                        ? 'bg-green-500 shadow-lg shadow-green-500/50'
-                        : 'bg-pairon-accent'
+                      ? 'bg-green-500 shadow-lg shadow-green-500/50'
+                      : 'bg-pairon-accent'
                       }`}
                     style={{ left: `${sliderValue}%` }}
                   />
@@ -829,8 +871,8 @@ export function CollaborationPage() {
 
               {/* Status */}
               <p className={`text-sm font-medium mb-4 ${sliderValue >= targetZone.min && sliderValue <= targetZone.max
-                  ? 'text-green-500'
-                  : 'text-gray-400'
+                ? 'text-green-500'
+                : 'text-gray-400'
                 }`}>
                 {sliderValue >= targetZone.min && sliderValue <= targetZone.max
                   ? '✅ Perfect! Click verify!'
@@ -913,6 +955,6 @@ export function CollaborationPage() {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </div >
   );
 }
