@@ -2,9 +2,13 @@ import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { User, Match, CollaborationSession } from '../models';
 import { calculateMatchScore, generateProjectIdea } from '../utils/matchingAlgorithm';
+import { moderateMessage } from '../utils/contentModeration';
 import { setupQuickChatHandlers } from './quickChat';
 import { setupProposalHandlers } from './collabProposal';
 import type { MatchMode, ICollaborationSession, IMessage, ITask, JWTPayload } from '../types';
+
+// Track warnings per session per user
+const sessionWarnings: Map<string, number> = new Map(); // `${sessionId}:${userId}` -> warningCount
 
 // Active matchmaking queue
 const matchmakingQueue: Map<string, { userId: string; mode: MatchMode; socketId: string }> = new Map();
@@ -126,12 +130,12 @@ export function setupSocketHandlers(io: Server) {
       console.log(`User ${userId} left session ${sessionId}`);
     });
 
-    // Send message — uses authenticated userId, not client-provided
+    // Send message — with content moderation + 3 warnings = kick
     socket.on('session:send-message', async (sessionId: string, content: string) => {
       try {
         if (!content || typeof content !== 'string' || content.trim().length === 0) return;
 
-        const session = await CollaborationSession.findById(sessionId);
+        const session = await CollaborationSession.findById(sessionId) as any;
         if (!session) return;
 
         // Verify sender is a participant
@@ -140,6 +144,82 @@ export function setupSocketHandlers(io: Server) {
           return;
         }
 
+        // ===== CONTENT MODERATION =====
+        const moderationResult = moderateMessage(content);
+
+        if (!moderationResult.isClean) {
+          // Message BLOCKED
+          const warningKey = `${sessionId}:${userId}`;
+          const currentWarnings = (sessionWarnings.get(warningKey) || 0) + 1;
+          sessionWarnings.set(warningKey, currentWarnings);
+
+          // Update user warnings in DB
+          await User.findByIdAndUpdate(userId, { $inc: { warnings: 1 } });
+
+          if (currentWarnings >= 3) {
+            // 3 warnings → kick from session
+            const partnerId = session.participants.find((p: string) => p !== userId);
+
+            // End session
+            session.status = 'abandoned';
+            session.endedAt = new Date();
+            await session.save();
+
+            // Penalize offender: -10 reputation
+            await User.findByIdAndUpdate(userId, {
+              $inc: { reputation: -10 },
+            });
+            await User.updateOne(
+              { _id: userId, reputation: { $lt: 0 } },
+              { $set: { reputation: 0 } }
+            );
+
+            // Award partner 10 credits
+            if (partnerId) {
+              await User.findByIdAndUpdate(partnerId, {
+                $inc: { credits: 10 },
+              });
+            }
+
+            // Notify offender
+            socket.emit('session:warning', {
+              warningCount: currentWarnings,
+              message: '🚫 You have been removed from this collaboration for repeated violations of community guidelines. Your reputation has been reduced.',
+              kicked: true,
+            });
+
+            // Notify both to exit via force-quit
+            const forceQuitData = { sessionId, quitterId: userId };
+            io.to(`session:${sessionId}`).emit('session:force-quit', forceQuitData);
+            io.to(`user:${userId}`).emit('session:force-quit', forceQuitData);
+            if (partnerId) {
+              io.to(`user:${partnerId}`).emit('session:force-quit', forceQuitData);
+              io.to(`user:${partnerId}`).emit('session:message', {
+                id: `sys-kick-${Date.now()}`,
+                senderId: 'system',
+                content: 'Your partner was removed for violating community guidelines. You have been awarded 10 credits.',
+                timestamp: new Date(),
+                type: 'system',
+              });
+            }
+
+            // Clean up warning tracking
+            sessionWarnings.delete(warningKey);
+            return;
+          }
+
+          // Warning (not kicked yet)
+          const remaining = 3 - currentWarnings;
+          socket.emit('session:warning', {
+            warningCount: currentWarnings,
+            message: `⚠️ Warning ${currentWarnings}/3: Your message was blocked for violating community guidelines. ${remaining} more warning${remaining > 1 ? 's' : ''} and you will be removed from this collaboration.`,
+            kicked: false,
+          });
+
+          return; // Do NOT send blocked message
+        }
+
+        // Message is clean — save and broadcast
         const message: IMessage = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           senderId: userId,
@@ -335,7 +415,7 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
-    // ===== AI Assistant in Collaboration Chat =====
+    // ===== AI Assistant in Collaboration Chat (Grok or fallback) =====
     socket.on('session:ai-help', async (sessionId: string, question: string) => {
       try {
         const session = await CollaborationSession.findById(sessionId);
@@ -348,8 +428,50 @@ export function setupSocketHandlers(io: Server) {
         // Get recent messages for context (last 10)
         const recentMessages = session.messages.slice(-10).map(m => `${m.senderId === userId ? userName : 'Partner'}: ${m.content}`).join('\n');
 
-        // Generate AI response based on context
-        const aiResponse = generateAIResponse(userName, question, recentMessages, (session as any).projectIdea);
+        let aiResponse: string;
+        const grokApiKey = process.env.GROK_API_KEY;
+
+        if (grokApiKey) {
+          // Use Grok API (xAI)
+          try {
+            const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${grokApiKey}`,
+              },
+              body: JSON.stringify({
+                model: 'grok-3-mini',
+                messages: [
+                  {
+                    role: 'system',
+                    content: `You are an AI pair programming assistant in a collaborative coding platform called PairOn. Two developers are working together on a project. Help them with coding questions, architecture decisions, debugging, and provide actual code snippets when asked. Be concise, practical, and give working code examples. The project they're building: ${(session as any).projectIdea?.title || 'unknown'}. Recent conversation:\n${recentMessages}`,
+                  },
+                  {
+                    role: 'user',
+                    content: question,
+                  },
+                ],
+                max_tokens: 1024,
+                temperature: 0.7,
+              }),
+            });
+
+            if (grokRes.ok) {
+              const grokData: any = await grokRes.json();
+              aiResponse = `@${userName}, ${grokData.choices?.[0]?.message?.content || 'Sorry, I couldn\'t generate a response.'}`;
+            } else {
+              console.error('Grok API error:', grokRes.status);
+              aiResponse = generateAIResponse(userName, question, recentMessages, (session as any).projectIdea);
+            }
+          } catch (grokError) {
+            console.error('Grok API call failed:', grokError);
+            aiResponse = generateAIResponse(userName, question, recentMessages, (session as any).projectIdea);
+          }
+        } else {
+          // No API key — use template-based fallback
+          aiResponse = generateAIResponse(userName, question, recentMessages, (session as any).projectIdea);
+        }
 
         const aiMsg = {
           id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,

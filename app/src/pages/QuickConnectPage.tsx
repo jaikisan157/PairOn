@@ -130,7 +130,19 @@ export function QuickConnectPage() {
         });
 
         return () => {
-            socketService.removeAllListeners();
+            // Only remove Quick Chat-specific listeners, NOT all listeners
+            // (removeAllListeners was destroying MatchingContext listeners!)
+            const socket = socketService.getSocket();
+            if (socket) {
+                socket.removeAllListeners('quickchat:matched');
+                socket.removeAllListeners('quickchat:message');
+                socket.removeAllListeners('quickchat:ended');
+                socket.removeAllListeners('quickchat:waiting');
+                socket.removeAllListeners('quickchat:warning');
+                socket.removeAllListeners('quickchat:blocked');
+                socket.removeAllListeners('quickchat:rated');
+                socket.removeAllListeners('collab:ai-ideas');
+            }
         };
     }, []);
 

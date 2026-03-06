@@ -55,6 +55,9 @@ export function CollaborationPage() {
   const [exitDeclined, setExitDeclined] = useState(false);
   const [showForceQuitConfirm, setShowForceQuitConfirm] = useState(false);
 
+  // Content moderation warnings
+  const [warningMessage, setWarningMessage] = useState<string | null>(null);
+
   // Sidebar toggle for tasks/project panel
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -166,6 +169,15 @@ export function CollaborationPage() {
       setExitRequestSent(false);
       setExitDeclined(true);
       setTimeout(() => setExitDeclined(false), 5000);
+    });
+
+    // Content moderation warning
+    socketService.getSocket()?.on('session:warning', (data: { warningCount: number; message: string; kicked: boolean }) => {
+      setWarningMessage(data.message);
+      setTimeout(() => setWarningMessage(null), 8000);
+      if (data.kicked) {
+        // Will be handled by session:force-quit event
+      }
     });
 
     // Force logout from another device
@@ -326,6 +338,19 @@ export function CollaborationPage() {
       <main className="flex-1 flex overflow-hidden">
         {/* Chat Panel */}
         <div className="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700">
+          {/* Content moderation warning toast */}
+          <AnimatePresence>
+            {warningMessage && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="px-4 py-3 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800"
+              >
+                <p className="text-sm text-red-600 dark:text-red-400 font-medium">{warningMessage}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
           {/* AI hint */}
           <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center gap-2">
             <Bot className="w-4 h-4 text-blue-500" />
