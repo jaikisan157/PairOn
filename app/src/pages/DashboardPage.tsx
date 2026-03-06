@@ -112,10 +112,7 @@ export function DashboardPage() {
       }
     });
 
-    socketService.onProposalAccepted((data: any) => {
-      setProposals(prev => prev.filter(p => p.id !== data.proposalId));
-      navigate('/collaborate');
-    });
+    // Note: proposal acceptance now emits 'challenge:matched' which is handled above
 
     socketService.onProposalDeclined((proposalId: string) => {
       setProposals(prev => prev.filter(p => p.id !== proposalId));

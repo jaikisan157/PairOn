@@ -141,18 +141,39 @@ export function QuickConnectPage() {
             }
         });
 
+        // Listen for proposal acceptance → navigate to collaborate
+        const socket = socketService.getSocket();
+        socket?.on('challenge:matched', (data: any) => {
+            // Save session to localStorage (same as DashboardPage does)
+            localStorage.setItem('challenge_session', JSON.stringify({
+                sessionId: data.sessionId,
+                matchId: data.matchId,
+                partnerId: data.partnerId,
+                partnerName: data.partnerName,
+                partnerReputation: data.partnerReputation || 0,
+                mode: data.mode,
+                projectIdea: data.projectIdea,
+                endsAt: data.endsAt,
+                startedAt: data.startedAt,
+                messages: data.messages || [],
+                tasks: data.tasks || [],
+            }));
+            navigate('/collaborate');
+        });
+
         return () => {
-            const socket = socketService.getSocket();
-            if (socket) {
-                socket.removeAllListeners('quickchat:matched');
-                socket.removeAllListeners('quickchat:message');
-                socket.removeAllListeners('quickchat:ended');
-                socket.removeAllListeners('quickchat:waiting');
-                socket.removeAllListeners('quickchat:warning');
-                socket.removeAllListeners('quickchat:blocked');
-                socket.removeAllListeners('quickchat:rated');
-                socket.removeAllListeners('collab:ai-ideas');
-                socket.removeAllListeners('collab:proposal-received');
+            const sock = socketService.getSocket();
+            if (sock) {
+                sock.removeAllListeners('quickchat:matched');
+                sock.removeAllListeners('quickchat:message');
+                sock.removeAllListeners('quickchat:ended');
+                sock.removeAllListeners('quickchat:waiting');
+                sock.removeAllListeners('quickchat:warning');
+                sock.removeAllListeners('quickchat:blocked');
+                sock.removeAllListeners('quickchat:rated');
+                sock.removeAllListeners('collab:ai-ideas');
+                sock.removeAllListeners('collab:proposal-received');
+                sock.removeAllListeners('challenge:matched');
             }
         };
     }, []);

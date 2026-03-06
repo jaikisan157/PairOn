@@ -149,69 +149,80 @@ export function setupProposalHandlers(io: Server, socket: Socket) {
             });
             await match.save();
 
-            // Create a Collaboration Session
+            // Duration based on mode: sprint=1hr, challenge=2hr, build=3hr
             const durationMap: Record<string, number> = {
                 sprint: 60,
                 challenge: 120,
                 build: 180,
             };
+            const durationMinutes = durationMap[proposal.mode] || 60;
+            const now = new Date();
+            const endsAt = new Date(now.getTime() + durationMinutes * 60 * 1000);
 
+            // Create Collaboration Session (using correct field names)
             const session = new CollaborationSession({
                 matchId: match._id.toString(),
-                users: [proposal.proposerId, userId],
+                participants: [proposal.proposerId, userId],
                 projectIdea: proposal.projectIdea,
-                duration: durationMap[proposal.mode] || 60,
                 messages: [{
                     id: `sys-${Date.now()}`,
                     senderId: 'system',
-                    content: `🎉 Collaboration started! Project: "${proposal.projectIdea.title}". You have ${durationMap[proposal.mode] || 60} minutes. Good luck!`,
-                    timestamp: new Date(),
+                    content: `🎉 Collaboration started from proposal! Project: "${proposal.projectIdea.title}". You have ${durationMinutes} minutes. Good luck!`,
+                    timestamp: now,
                     type: 'system',
                 }],
                 tasks: [],
                 status: 'active',
-                startedAt: new Date(),
+                startedAt: now,
+                endsAt: endsAt,
             });
             await session.save();
 
             // Update match with session
             await Match.findByIdAndUpdate(match._id, { sessionId: session._id.toString() });
 
-            const matchData = {
-                proposalId,
-                match: {
-                    matchId: match._id.toString(),
-                    sessionId: session._id.toString(),
-                    partner: {
-                        id: proposer._id.toString(),
-                        name: proposer.name,
-                        skills: proposer.skills,
-                    },
-                    mode: proposal.mode,
-                    projectIdea: proposal.projectIdea,
-                    matchScore: matchResult.score,
-                },
+            // Join both users to session room
+            socket.join(`challenge:${session._id}`);
+            // Find proposer's socket and join them too
+            const proposerSocketId = Array.from(io.sockets.sockets.entries())
+                .find(([, s]) => s.data?.userId === proposal.proposerId)?.[0];
+            if (proposerSocketId) {
+                io.sockets.sockets.get(proposerSocketId)?.join(`challenge:${session._id}`);
+            }
+
+            // Build match data in SAME format as challenge:matched
+            // so CollaborationPage can handle it identically
+            const matchDataForRecipient = {
+                sessionId: session._id.toString(),
+                matchId: match._id.toString(),
+                partnerId: proposal.proposerId,
+                partnerName: proposer.name,
+                partnerReputation: proposer.reputation || 0,
+                mode: proposal.mode,
+                projectIdea: proposal.projectIdea,
+                endsAt: endsAt.toISOString(),
+                startedAt: now.toISOString(),
+                messages: session.messages,
+                tasks: session.tasks,
             };
 
             const matchDataForProposer = {
-                proposalId,
-                match: {
-                    matchId: match._id.toString(),
-                    sessionId: session._id.toString(),
-                    partner: {
-                        id: recipient._id.toString(),
-                        name: recipient.name,
-                        skills: recipient.skills,
-                    },
-                    mode: proposal.mode,
-                    projectIdea: proposal.projectIdea,
-                    matchScore: matchResult.score,
-                },
+                sessionId: session._id.toString(),
+                matchId: match._id.toString(),
+                partnerId: userId,
+                partnerName: recipient.name,
+                partnerReputation: recipient.reputation || 0,
+                mode: proposal.mode,
+                projectIdea: proposal.projectIdea,
+                endsAt: endsAt.toISOString(),
+                startedAt: now.toISOString(),
+                messages: session.messages,
+                tasks: session.tasks,
             };
 
-            // Notify both users
-            socket.emit('collab:proposal-accepted', matchData);
-            io.to(`user:${proposal.proposerId}`).emit('collab:proposal-accepted', matchDataForProposer);
+            // Emit as challenge:matched so both frontends navigate to /collaborate
+            socket.emit('challenge:matched', matchDataForRecipient);
+            io.to(`user:${proposal.proposerId}`).emit('challenge:matched', matchDataForProposer);
         } catch (error) {
             console.error('Proposal accept error:', error);
         }

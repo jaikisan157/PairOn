@@ -79,7 +79,7 @@ export function setupSocketHandlers(io: Server) {
     setupProposalHandlers(io, socket);
 
     // ===== Dashboard Cleanup =====
-    // When user lands on dashboard, close all their active sessions
+    // When user lands on dashboard, close all their active sessions + proposals
     socket.on('dashboard:cleanup', async () => {
       try {
         // Close all active collaboration sessions
@@ -100,8 +100,15 @@ export function setupSocketHandlers(io: Server) {
           { $set: { status: 'ended' } }
         );
 
-        if (closedSessions.modifiedCount > 0 || closedMatches.modifiedCount > 0 || closedChats.modifiedCount > 0) {
-          console.log(`[Dashboard Cleanup] user ${userId}: ${closedSessions.modifiedCount} sessions, ${closedMatches.modifiedCount} matches, ${closedChats.modifiedCount} quick chats closed`);
+        // Expire all pending proposals (sent or received)
+        const { CollabProposal } = require('../models');
+        const closedProposals = await CollabProposal.updateMany(
+          { $or: [{ proposerId: userId }, { recipientId: userId }], status: 'pending' },
+          { $set: { status: 'expired' } }
+        );
+
+        if (closedSessions.modifiedCount > 0 || closedMatches.modifiedCount > 0 || closedChats.modifiedCount > 0 || closedProposals.modifiedCount > 0) {
+          console.log(`[Dashboard Cleanup] user ${userId}: ${closedSessions.modifiedCount} sessions, ${closedMatches.modifiedCount} matches, ${closedChats.modifiedCount} chats, ${closedProposals.modifiedCount} proposals closed`);
         }
 
         socket.emit('dashboard:cleanup-done');
