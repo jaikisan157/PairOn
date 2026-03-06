@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import { User, Match, CollaborationSession } from '../models';
+import { User, Match, CollaborationSession, QuickChat } from '../models';
 import { calculateMatchScore, generateProjectIdea } from '../utils/matchingAlgorithm';
 import { moderateMessage } from '../utils/contentModeration';
 import { setupQuickChatHandlers } from './quickChat';
@@ -77,6 +77,38 @@ export function setupSocketHandlers(io: Server) {
 
     // Setup Collab Proposal handlers
     setupProposalHandlers(io, socket);
+
+    // ===== Dashboard Cleanup =====
+    // When user lands on dashboard, close all their active sessions
+    socket.on('dashboard:cleanup', async () => {
+      try {
+        // Close all active collaboration sessions
+        const closedSessions = await CollaborationSession.updateMany(
+          { participants: userId, status: 'active' },
+          { $set: { status: 'completed' } }
+        );
+
+        // Close all active matches
+        const closedMatches = await Match.updateMany(
+          { $or: [{ user1Id: userId }, { user2Id: userId }], status: 'active' },
+          { $set: { status: 'completed' } }
+        );
+
+        // Close all active quick chats
+        const closedChats = await QuickChat.updateMany(
+          { participants: userId, status: 'active' },
+          { $set: { status: 'ended' } }
+        );
+
+        if (closedSessions.modifiedCount > 0 || closedMatches.modifiedCount > 0 || closedChats.modifiedCount > 0) {
+          console.log(`[Dashboard Cleanup] user ${userId}: ${closedSessions.modifiedCount} sessions, ${closedMatches.modifiedCount} matches, ${closedChats.modifiedCount} quick chats closed`);
+        }
+
+        socket.emit('dashboard:cleanup-done');
+      } catch (error) {
+        console.error('[Dashboard Cleanup] error:', error);
+      }
+    });
 
     // Matchmaking
     socket.on('match:request', async (data: { mode: MatchMode }) => {

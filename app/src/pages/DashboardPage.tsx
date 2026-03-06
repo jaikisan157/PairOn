@@ -60,6 +60,10 @@ export function DashboardPage() {
     const socket = socketService.getSocket();
     if (!socket) return;
 
+    // Cleanup all active sessions when landing on dashboard
+    socket.emit('dashboard:cleanup');
+    localStorage.removeItem('challenge_session');
+
     // Matched — save data and navigate
     socket.on('challenge:matched', (data: any) => {
       setIsSearching(false);
