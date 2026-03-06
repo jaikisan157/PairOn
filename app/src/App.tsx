@@ -100,9 +100,7 @@ function AppRoutes() {
         path="/dashboard"
         element={
           <ProtectedRoute>
-            <MatchingProvider>
-              <DashboardPage />
-            </MatchingProvider>
+            <DashboardPage />
           </ProtectedRoute>
         }
       />
@@ -110,9 +108,7 @@ function AppRoutes() {
         path="/collaborate"
         element={
           <ProtectedRoute>
-            <MatchingProvider>
-              <CollaborationPage />
-            </MatchingProvider>
+            <CollaborationPage />
           </ProtectedRoute>
         }
       />
@@ -159,9 +155,11 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <MatchingProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </MatchingProvider>
       </AuthProvider>
     </ThemeProvider>
   );
