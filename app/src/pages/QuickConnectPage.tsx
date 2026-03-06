@@ -69,6 +69,7 @@ export function QuickConnectPage() {
     const [proposalSent, setProposalSent] = useState(false);
     const [showEndConfirm, setShowEndConfirm] = useState(false);
     const [incomingProposals, setIncomingProposals] = useState<any[]>([]);
+    const [viewingProposal, setViewingProposal] = useState<any | null>(null);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -361,7 +362,7 @@ export function QuickConnectPage() {
                             </div>
                             <Button
                                 size="sm"
-                                onClick={() => navigate('/dashboard')}
+                                onClick={() => setViewingProposal(incomingProposals[0])}
                                 className="bg-green-600 hover:bg-green-700 text-white text-xs"
                             >
                                 <CheckCircle className="w-3 h-3 mr-1" /> View
@@ -370,6 +371,88 @@ export function QuickConnectPage() {
                                 <X className="w-4 h-4 text-green-400" />
                             </button>
                         </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Proposal Details Modal */}
+            <AnimatePresence>
+                {viewingProposal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+                        onClick={() => setViewingProposal(null)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6"
+                        >
+                            <div className="text-center mb-4">
+                                <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-3">
+                                    <Handshake className="w-7 h-7 text-green-600" />
+                                </div>
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Collaboration Proposal</h3>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    from <strong>{viewingProposal.proposer?.name}</strong>
+                                    <span className="text-yellow-500 ml-1">⭐ {viewingProposal.proposer?.reputation || 0}</span>
+                                </p>
+                            </div>
+
+                            <div className="space-y-3 mb-6">
+                                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">Project</p>
+                                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{viewingProposal.projectIdea?.title}</p>
+                                    <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">{viewingProposal.projectIdea?.description}</p>
+                                </div>
+                                <div className="flex gap-3">
+                                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 flex-1">
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">Mode</p>
+                                        <p className="text-sm font-semibold text-gray-900 dark:text-white capitalize">{viewingProposal.mode}</p>
+                                    </div>
+                                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 flex-1">
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">Duration</p>
+                                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                            {viewingProposal.mode === 'sprint' ? '1 Hour' : viewingProposal.mode === 'challenge' ? '2 Hours' : '3 Hours'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {viewingProposal.message && (
+                                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3">
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium">Message</p>
+                                        <p className="text-sm text-gray-700 dark:text-gray-300 italic">"{viewingProposal.message}"</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex gap-3">
+                                <Button
+                                    onClick={() => {
+                                        socketService.declineProposal(viewingProposal.id);
+                                        setIncomingProposals(prev => prev.filter(p => p.id !== viewingProposal.id));
+                                        setViewingProposal(null);
+                                    }}
+                                    variant="outline"
+                                    className="flex-1 border-red-300 text-red-600 hover:bg-red-50"
+                                >
+                                    <X className="w-4 h-4 mr-1" /> Decline
+                                </Button>
+                                <Button
+                                    onClick={() => {
+                                        socketService.acceptProposal(viewingProposal.id);
+                                        setIncomingProposals(prev => prev.filter(p => p.id !== viewingProposal.id));
+                                        setViewingProposal(null);
+                                    }}
+                                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                    <CheckCircle className="w-4 h-4 mr-1" /> Accept
+                                </Button>
+                            </div>
+                        </motion.div>
                     </motion.div>
                 )}
             </AnimatePresence>
