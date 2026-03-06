@@ -79,28 +79,30 @@ export function setupSocketHandlers(io: Server) {
     setupProposalHandlers(io, socket);
 
     // ===== Dashboard Cleanup =====
-    // When user lands on dashboard, close all their active sessions + proposals
+    // Close expired/stale sessions, but KEEP active long-running ones (24hr/7day)
     socket.on('dashboard:cleanup', async () => {
       try {
-        // Close all active collaboration sessions
+        const now = new Date();
+
+        // Only close EXPIRED collaboration sessions (endsAt in the past)
         const closedSessions = await CollaborationSession.updateMany(
-          { participants: userId, status: 'active' },
+          { participants: userId, status: 'active', endsAt: { $lt: now } },
           { $set: { status: 'completed' } }
         );
 
-        // Close all active matches
+        // Close expired matches
         const closedMatches = await Match.updateMany(
-          { $or: [{ user1Id: userId }, { user2Id: userId }], status: 'active' },
+          { $or: [{ user1Id: userId }, { user2Id: userId }], status: 'active', endsAt: { $lt: now } },
           { $set: { status: 'completed' } }
         );
 
-        // Close all active quick chats
+        // Close all active quick chats (always short-lived)
         const closedChats = await QuickChat.updateMany(
           { participants: userId, status: 'active' },
           { $set: { status: 'ended' } }
         );
 
-        // Expire all pending proposals (sent or received)
+        // Expire all pending proposals
         const { CollabProposal } = require('../models');
         const closedProposals = await CollabProposal.updateMany(
           { $or: [{ proposerId: userId }, { recipientId: userId }], status: 'pending' },
@@ -111,7 +113,36 @@ export function setupSocketHandlers(io: Server) {
           console.log(`[Dashboard Cleanup] user ${userId}: ${closedSessions.modifiedCount} sessions, ${closedMatches.modifiedCount} matches, ${closedChats.modifiedCount} chats, ${closedProposals.modifiedCount} proposals closed`);
         }
 
-        socket.emit('dashboard:cleanup-done');
+        // Find any ACTIVE long-running sessions (still have time left)
+        const activeSessions = await CollaborationSession.find({
+          participants: userId,
+          status: 'active',
+          endsAt: { $gt: now },
+        }).lean();
+
+        // Get match info for each active session (for mode + partner info)
+        const activeSessionsWithInfo = [];
+        for (const sess of activeSessions) {
+          const match = await Match.findById(sess.matchId).lean();
+          const partnerId = (sess.participants as string[]).find(p => p !== userId) || '';
+          const partner = await User.findById(partnerId).select('name reputation').lean();
+          activeSessionsWithInfo.push({
+            sessionId: (sess as any)._id.toString(),
+            matchId: sess.matchId,
+            partnerId,
+            partnerName: partner?.name || 'Partner',
+            partnerReputation: (partner as any)?.reputation || 0,
+            mode: match?.mode || 'sprint',
+            projectIdea: (sess as any).projectIdea || match?.projectIdea,
+            endsAt: sess.endsAt,
+            startedAt: sess.startedAt,
+            tasksTotal: (sess.tasks as any[])?.length || 0,
+            tasksDone: (sess.tasks as any[])?.filter((t: any) => t.status === 'done').length || 0,
+            messagesCount: (sess.messages as any[])?.length || 0,
+          });
+        }
+
+        socket.emit('dashboard:cleanup-done', { activeSessions: activeSessionsWithInfo });
       } catch (error) {
         console.error('[Dashboard Cleanup] error:', error);
       }

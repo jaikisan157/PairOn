@@ -22,6 +22,8 @@ import {
   Shield,
   AlertTriangle,
   Clock,
+  Play,
+  ListChecks,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
@@ -55,14 +57,29 @@ export function DashboardPage() {
   // Proposals
   const [proposals, setProposals] = useState<any[]>([]);
 
+  // Active long-running sessions (24hr/7day)
+  const [activeSessions, setActiveSessions] = useState<any[]>([]);
+
   // Listen for challenge events
   useEffect(() => {
     const socket = socketService.getSocket();
     if (!socket) return;
 
-    // Cleanup all active sessions when landing on dashboard
+    // Cleanup expired sessions when landing on dashboard
     socket.emit('dashboard:cleanup');
-    localStorage.removeItem('challenge_session');
+
+    // Receive active long-running sessions after cleanup
+    socket.on('dashboard:cleanup-done', (data: { activeSessions: any[] }) => {
+      if (data?.activeSessions?.length > 0) {
+        setActiveSessions(data.activeSessions);
+        // If there's an active long session, save the first one to localStorage
+        const first = data.activeSessions[0];
+        localStorage.setItem('challenge_session', JSON.stringify(first));
+      } else {
+        setActiveSessions([]);
+        localStorage.removeItem('challenge_session');
+      }
+    });
 
     // Matched — save data and navigate
     socket.on('challenge:matched', (data: any) => {
@@ -124,6 +141,7 @@ export function DashboardPage() {
         socket.removeAllListeners('challenge:waiting');
         socket.removeAllListeners('challenge:error');
         socket.removeAllListeners('challenge:cancelled');
+        socket.removeAllListeners('dashboard:cleanup-done');
       }
     };
   }, [navigate]);
@@ -282,6 +300,81 @@ export function DashboardPage() {
               </div>
             ))}
           </motion.div>
+
+          {/* Active Challenge Card (for 24hr/7day sessions) */}
+          {activeSessions.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="mb-8"
+            >
+              {activeSessions.map((sess: any) => {
+                const remaining = Math.max(0, Math.floor((new Date(sess.endsAt).getTime() - Date.now()) / 1000));
+                const hours = Math.floor(remaining / 3600);
+                const minutes = Math.floor((remaining % 3600) / 60);
+                const modeLabels: Record<string, string> = { sprint: '3-Hour Sprint', challenge: '24-Hour Challenge', build: '7-Day Build' };
+                const modeColors: Record<string, string> = { sprint: 'from-blue-500 to-blue-600', challenge: 'from-orange-500 to-orange-600', build: 'from-purple-500 to-purple-600' };
+
+                return (
+                  <div
+                    key={sess.sessionId}
+                    className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl shadow-card border-2 border-green-400 dark:border-green-500"
+                  >
+                    {/* Gradient accent bar */}
+                    <div className={`h-1.5 bg-gradient-to-r ${modeColors[sess.mode] || 'from-green-500 to-green-600'}`} />
+
+                    <div className="p-5">
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+                            <span className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">
+                              Active Session
+                            </span>
+                          </div>
+                          <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                            {sess.projectIdea?.title || 'Untitled Project'}
+                          </h3>
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            {modeLabels[sess.mode]} · with <strong>{sess.partnerName}</strong>
+                            <span className="text-yellow-500 ml-1">⭐ {sess.partnerReputation}</span>
+                          </p>
+                        </div>
+
+                        <Button
+                          onClick={() => navigate('/collaborate')}
+                          className="bg-green-600 hover:bg-green-700 text-white shadow-lg"
+                        >
+                          <Play className="w-4 h-4 mr-1 fill-current" /> Continue
+                        </Button>
+                      </div>
+
+                      <div className="flex items-center gap-6 text-sm">
+                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                          <Clock className="w-4 h-4 text-orange-500" />
+                          <span className="font-medium">
+                            {hours > 24
+                              ? `${Math.floor(hours / 24)}d ${hours % 24}h remaining`
+                              : `${hours}h ${minutes}m remaining`
+                            }
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                          <ListChecks className="w-4 h-4 text-blue-500" />
+                          <span className="font-medium">{sess.tasksDone}/{sess.tasksTotal} tasks done</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                          <MessageCircle className="w-4 h-4 text-purple-500" />
+                          <span className="font-medium">{sess.messagesCount} messages</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </motion.div>
+          )}
 
           {/* Match Modes */}
           <motion.div

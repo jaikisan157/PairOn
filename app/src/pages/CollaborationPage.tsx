@@ -414,12 +414,17 @@ export function CollaborationPage() {
   }
 
   // ===== Force quit on unmount (URL change / navigation away) =====
+  // Only for SPRINT (3hr). Long sessions (24hr/7day) persist.
   useEffect(() => {
     return () => {
       if (!gracefulEndRef.current && sessionRef.current) {
-        // User navigated away without ending session — force quit
-        socketService.getSocket()?.emit('challenge:force-quit', sessionRef.current.sessionId);
-        localStorage.removeItem('challenge_session');
+        const mode = sessionRef.current.mode;
+        if (mode === 'sprint') {
+          // Sprint: force quit — user shouldn't leave
+          socketService.getSocket()?.emit('challenge:force-quit', sessionRef.current.sessionId);
+          localStorage.removeItem('challenge_session');
+        }
+        // challenge/build: keep localStorage so user can resume from Dashboard
       }
     };
   }, []);
@@ -428,11 +433,17 @@ export function CollaborationPage() {
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (status === 'matched' && session) {
+        if (session.mode === 'sprint') {
+          // Sprint: warn and force quit
+          e.preventDefault();
+          e.returnValue = 'You have an active sprint session. Leaving will count as a force quit!';
+          socketService.getSocket()?.emit('challenge:force-quit', session.sessionId);
+          localStorage.removeItem('challenge_session');
+          return e.returnValue;
+        }
+        // Long sessions: just warn, don't force quit
         e.preventDefault();
-        e.returnValue = 'You have an active collaboration session. Leaving will count as a force quit!';
-        // Also emit force-quit since the user might still leave
-        socketService.getSocket()?.emit('challenge:force-quit', session.sessionId);
-        localStorage.removeItem('challenge_session');
+        e.returnValue = 'You have an active session. Your progress is saved — you can resume from the Dashboard.';
         return e.returnValue;
       }
     };
