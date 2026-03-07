@@ -65,9 +65,9 @@ interface ChallengeSession {
 }
 
 const MODE_LABELS: Record<ChallengeMode, string> = {
-  sprint: '3-Hour Sprint',
-  challenge: '24-Hour Challenge',
-  build: '7-Day Build',
+  sprint: '⚡ Sprint',
+  challenge: '🏆 Challenge',
+  build: '🔨 Build',
 };
 
 export function CollaborationPage() {
@@ -121,9 +121,16 @@ export function CollaborationPage() {
   const [targetZone, setTargetZone] = useState({ min: 40, max: 60 });
   const [activityCheckTimer, setActivityCheckTimer] = useState(60);
 
+  // Partner activity
+  const [partnerStatus, setPartnerStatus] = useState<'online' | 'away' | 'offline'>('offline');
+
+  // Project edit proposal
+  const [incomingProjectEdit, setIncomingProjectEdit] = useState<{ proposerName: string; title: string; description: string } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gracefulEndRef = useRef(false);
   const sessionRef = useRef<ChallengeSession | null>(null);
 
@@ -302,8 +309,33 @@ export function CollaborationPage() {
       navigate('/login');
     });
 
+    // Partner activity updates
+    socket.on('challenge:partner-activity', (data: any) => {
+      setPartnerStatus(data.status);
+    });
+
+    // Project edit proposed by partner
+    socket.on('challenge:project-edit-proposed', (data: any) => {
+      setIncomingProjectEdit({ proposerName: data.proposerName, title: data.title, description: data.description });
+    });
+
+    // Project edit approved
+    socket.on('challenge:project-updated', (data: any) => {
+      setSession(prev => prev ? { ...prev, projectIdea: { ...prev.projectIdea, title: data.title, description: data.description } } : prev);
+      setIncomingProjectEdit(null);
+    });
+
+    // Project edit declined
+    socket.on('challenge:project-edit-declined', () => {
+      setIncomingProjectEdit(null);
+    });
+
+    // Task deleted
+    socket.on('challenge:task-deleted', (taskId: string) => {
+      setSession(prev => prev ? { ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) } : prev);
+    });
+
     return () => {
-      // Only remove challenge-specific listeners
       const s = socketService.getSocket();
       if (s) {
         s.removeAllListeners('challenge:matched');
@@ -322,9 +354,15 @@ export function CollaborationPage() {
         s.removeAllListeners('challenge:warning');
         s.removeAllListeners('challenge:rejoined');
         s.removeAllListeners('challenge:task-suggestions');
+        s.removeAllListeners('challenge:partner-activity');
+        s.removeAllListeners('challenge:project-edit-proposed');
+        s.removeAllListeners('challenge:project-updated');
+        s.removeAllListeners('challenge:project-edit-declined');
+        s.removeAllListeners('challenge:task-deleted');
       }
       if (timerRef.current) clearInterval(timerRef.current);
       if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     };
   }, []);
 
@@ -361,14 +399,39 @@ export function CollaborationPage() {
 
         // Rejoin socket room
         socketService.getSocket()?.emit('challenge:rejoin', data.sessionId);
+
+        // Restore active view from session storage
+        const savedView = sessionStorage.getItem('collab_active_view');
+        if (savedView === 'code' || savedView === 'chat') {
+          setActiveView(savedView);
+        }
       } else {
         navigate('/dashboard');
       }
     } else if (!saved && status === 'idle') {
-      // No session at all — go back to dashboard
       navigate('/dashboard');
     }
   }, [status, navigate]);
+
+  // Persist active view
+  useEffect(() => {
+    sessionStorage.setItem('collab_active_view', activeView);
+  }, [activeView]);
+
+  // Heartbeat: send every 20s while matched
+  useEffect(() => {
+    if (status === 'matched' && session) {
+      const socket = socketService.getSocket();
+      // Send immediately
+      socket?.emit('challenge:heartbeat', session.sessionId);
+      socket?.emit('challenge:check-partner', session.sessionId);
+      heartbeatRef.current = setInterval(() => {
+        socket?.emit('challenge:heartbeat', session.sessionId);
+        socket?.emit('challenge:check-partner', session.sessionId);
+      }, 20_000);
+    }
+    return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current); };
+  }, [status, session?.sessionId]);
 
   // ===== Auto-scroll messages =====
   useEffect(() => {
@@ -506,7 +569,7 @@ export function CollaborationPage() {
   }, [newMessage, session, user?.id]);
 
   const handleRequestExit = useCallback(() => {
-    if (!session || !exitReason.trim()) return;
+    if (!session || !exitReason.trim() || exitReason.trim().length < 5) return;
     socketService.getSocket()?.emit('challenge:request-exit', session.sessionId, exitReason.trim());
     setShowExitModal(false);
   }, [session, exitReason]);
@@ -600,13 +663,12 @@ export function CollaborationPage() {
       ...prev,
       projectIdea: { ...prev.projectIdea, title: editProjectTitle, description: editProjectDesc },
     } : null);
-    // Update localStorage too
-    const saved = localStorage.getItem('challenge_session');
-    if (saved) {
-      const data = JSON.parse(saved);
-      data.projectIdea = { ...data.projectIdea, title: editProjectTitle, description: editProjectDesc };
-      localStorage.setItem('challenge_session', JSON.stringify(data));
-    }
+    // Send proposal to partner instead of editing directly
+    socketService.getSocket()?.emit('challenge:propose-project-edit', {
+      sessionId: session.sessionId,
+      title: editProjectTitle,
+      description: editProjectDesc,
+    });
     setEditingProject(false);
   }, [session, editProjectTitle, editProjectDesc]);
 
@@ -652,7 +714,9 @@ export function CollaborationPage() {
                   {MODE_LABELS[session.mode]}
                 </h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  with <strong>{session.partnerName}</strong> <span className="text-yellow-500">⭐ {session.partnerReputation}</span>
+                  with <strong>{session.partnerName}</strong>
+                  <span className={`inline-block w-2 h-2 rounded-full ml-1 ${partnerStatus === 'online' ? 'bg-green-500' : partnerStatus === 'away' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`} title={`Partner is ${partnerStatus}`} />
+                  <span className="text-yellow-500"> ⭐ {session.partnerReputation}</span>
                   {session.projectIdea && ` • ${session.projectIdea.title}`}
                 </p>
               </div>
@@ -944,6 +1008,10 @@ export function CollaborationPage() {
                           className="w-5 h-5 rounded-full border-2 border-gray-300 hover:border-blue-500 hover:bg-blue-50 transition-colors flex-shrink-0"
                         />
                         <p className="text-sm text-gray-700 dark:text-gray-300 flex-1">{task.title}</p>
+                        <button onClick={() => socketService.getSocket()?.emit('challenge:delete-task', session.sessionId, task.id)}
+                          className="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:text-red-600 transition-all" title="Delete task">
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -959,7 +1027,7 @@ export function CollaborationPage() {
                   <div className="space-y-1.5">
                     {inProgressTasks.map(task => (
                       <div key={task.id}
-                        className="flex items-center gap-2.5 p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-xl hover:shadow-md transition-all cursor-pointer"
+                        className="flex items-center gap-2.5 p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-xl hover:shadow-md transition-all cursor-pointer group"
                       >
                         <button
                           onClick={() => handleTaskStatusChange(task.id, 'done')}
@@ -968,6 +1036,16 @@ export function CollaborationPage() {
                           <div className="w-2 h-2 rounded-full bg-blue-400" />
                         </button>
                         <p className="text-sm text-gray-700 dark:text-gray-300 flex-1">{task.title}</p>
+                        <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
+                          <button onClick={() => handleTaskStatusChange(task.id, 'todo')}
+                            className="p-1 text-gray-400 hover:text-blue-500" title="Undo (back to todo)">
+                            ↩
+                          </button>
+                          <button onClick={() => socketService.getSocket()?.emit('challenge:delete-task', session.sessionId, task.id)}
+                            className="p-1 text-red-400 hover:text-red-600" title="Delete">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -982,11 +1060,21 @@ export function CollaborationPage() {
                   </h3>
                   <div className="space-y-1.5">
                     {doneTasks.map(task => (
-                      <div key={task.id} className="flex items-center gap-2.5 p-2.5 bg-green-50 dark:bg-green-900/20 rounded-xl opacity-60">
+                      <div key={task.id} className="flex items-center gap-2.5 p-2.5 bg-green-50 dark:bg-green-900/20 rounded-xl opacity-60 group hover:opacity-100 transition-all">
                         <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
                           <Check className="w-3 h-3 text-white" />
                         </div>
                         <p className="text-sm text-gray-700 dark:text-gray-300 flex-1 line-through">{task.title}</p>
+                        <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
+                          <button onClick={() => handleTaskStatusChange(task.id, 'in-progress')}
+                            className="p-1 text-gray-400 hover:text-blue-500" title="Undo (back to in-progress)">
+                            ↩
+                          </button>
+                          <button onClick={() => socketService.getSocket()?.emit('challenge:delete-task', session.sessionId, task.id)}
+                            className="p-1 text-red-400 hover:text-red-600" title="Delete">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1099,12 +1187,13 @@ export function CollaborationPage() {
               </p>
               <div className="mb-4">
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Reason <span className="text-red-500">*</span></label>
-                <Input value={exitReason} onChange={(e) => setExitReason(e.target.value)} placeholder="Why do you want to leave?" className="rounded-xl text-sm" required />
+                <Input value={exitReason} onChange={(e) => setExitReason(e.target.value)} placeholder="Why do you want to leave? (min 5 characters)" className="rounded-xl text-sm" required />
+                {exitReason.trim().length > 0 && exitReason.trim().length < 5 && <p className="text-xs text-red-400 mt-1">Reason must be at least 5 characters ({exitReason.trim().length}/5)</p>}
                 {!exitReason.trim() && <p className="text-xs text-red-400 mt-1">A reason is required</p>}
               </div>
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setShowExitModal(false)} className="flex-1 rounded-xl">Stay</Button>
-                <Button onClick={handleRequestExit} disabled={!exitReason.trim()} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl disabled:opacity-50">Send request</Button>
+                <Button onClick={handleRequestExit} disabled={!exitReason.trim() || exitReason.trim().length < 5} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl disabled:opacity-50">Send request</Button>
               </div>
             </motion.div>
           </motion.div>
@@ -1145,6 +1234,41 @@ export function CollaborationPage() {
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setShowForceQuitConfirm(false)} className="flex-1 rounded-xl">Cancel</Button>
                 <Button onClick={handleForceQuit} className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl">Force leave</Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Incoming Project Edit Proposal */}
+      <AnimatePresence>
+        {incomingProjectEdit && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl">✏️</span>
+              </div>
+              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">Project Edit Proposal</h3>
+              <p className="text-sm text-gray-500 text-center mb-3">
+                <strong>{incomingProjectEdit.proposerName}</strong> wants to change the project:
+              </p>
+              <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-3 mb-4 space-y-1">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{incomingProjectEdit.title}</p>
+                <p className="text-xs text-gray-500">{incomingProjectEdit.description}</p>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => {
+                  socketService.getSocket()?.emit('challenge:decline-project-edit', { sessionId: session.sessionId });
+                  setIncomingProjectEdit(null);
+                }} className="flex-1 rounded-xl">Decline</Button>
+                <Button onClick={() => {
+                  socketService.getSocket()?.emit('challenge:approve-project-edit', {
+                    sessionId: session.sessionId,
+                    title: incomingProjectEdit.title,
+                    description: incomingProjectEdit.description,
+                  });
+                  setIncomingProjectEdit(null);
+                }} className="flex-1 bg-blue-500 hover:bg-blue-600 text-white rounded-xl">Accept</Button>
               </div>
             </motion.div>
           </motion.div>

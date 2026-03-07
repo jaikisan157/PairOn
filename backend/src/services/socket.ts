@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { User, Match, CollaborationSession, QuickChat } from '../models';
 import { calculateMatchScore, generateProjectIdea } from '../utils/matchingAlgorithm';
 import { moderateMessage } from '../utils/contentModeration';
-import { setupQuickChatHandlers } from './quickChat';
+import { setupQuickChatHandlers, startQuickChatInactivityChecker } from './quickChat';
 import { setupChallengeHandlers } from './challenge';
 import { setupProposalHandlers } from './collabProposal';
 import type { MatchMode, ICollaborationSession, IMessage, ITask, JWTPayload } from '../types';
@@ -18,6 +18,8 @@ const matchmakingQueue: Map<string, { userId: string; mode: MatchMode; socketId:
 const activeSessions: Map<string, { timer: NodeJS.Timeout }> = new Map();
 
 export function setupSocketHandlers(io: Server) {
+  // Start quickchat inactivity checker (5 min timeout)
+  startQuickChatInactivityChecker(io);
   // ===== Socket.io JWT Authentication Middleware =====
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;

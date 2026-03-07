@@ -19,6 +19,13 @@ const challengeQueue: Map<string, QueueEntry> = new Map(); // userId -> entry
 const activeChallengeSockets: Map<string, Set<string>> = new Map(); // socketId -> Set<sessionId>
 const sessionWarnings: Map<string, number> = new Map(); // `${sessionId}:${userId}` -> count
 
+// Pending exit requests: sessionId -> { requesterId, requesterName, reason }
+const pendingExitRequests: Map<string, { requesterId: string; requesterName: string; reason: string }> = new Map();
+
+// Heartbeat / activity tracking: sessionId:userId -> lastActiveTimestamp
+const userActivity: Map<string, number> = new Map();
+const activityTimers: Map<string, NodeJS.Timeout> = new Map();
+
 // Mode durations in milliseconds
 const MODE_DURATIONS: Record<ChallengeMode, number> = {
     sprint: 3 * 60 * 60 * 1000,      // 3 hours
@@ -418,6 +425,10 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
     // ===== Request to leave =====
     socket.on('challenge:request-exit', async (sessionId: string, reason: string) => {
         try {
+            if (!reason || reason.trim().length < 5) {
+                socket.emit('challenge:error', 'Reason must be at least 5 characters');
+                return;
+            }
             const session = await CollaborationSession.findById(sessionId);
             if (!session || session.status !== 'active') return;
             if (!session.participants.includes(userId)) return;
@@ -426,12 +437,18 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             if (!partnerId) return;
 
             const user = await User.findById(userId);
-
-            io.to(`user:${partnerId}`).emit('challenge:exit-requested', {
-                sessionId,
+            const exitData = {
                 requesterId: userId,
                 requesterName: user?.name || 'Partner',
                 reason: reason || 'No reason given',
+            };
+
+            // Store pending request so partner sees it even after refresh
+            pendingExitRequests.set(sessionId, exitData);
+
+            io.to(`user:${partnerId}`).emit('challenge:exit-requested', {
+                sessionId,
+                ...exitData,
             });
 
             socket.emit('challenge:exit-request-sent', { sessionId });
@@ -447,14 +464,14 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             if (!session || session.status !== 'active') return;
             if (!session.participants.includes(userId)) return;
 
-            // Use findByIdAndUpdate to guarantee DB write
+            pendingExitRequests.delete(sessionId);
+
             await CollaborationSession.findByIdAndUpdate(sessionId, {
                 $set: { status: 'completed' }
             });
 
             clearSessionTimer(sessionId);
 
-            // Notify BOTH via room + personal rooms
             io.to(`challenge:${sessionId}`).emit('challenge:ended', sessionId);
             for (const pid of session.participants) {
                 io.to(`user:${pid}`).emit('challenge:ended', sessionId);
@@ -480,6 +497,8 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             if (!session || session.status !== 'active') return;
             if (!session.participants.includes(userId)) return;
 
+            pendingExitRequests.delete(sessionId);
+
             const partnerId = session.participants.find(p => p !== userId);
             if (!partnerId) return;
 
@@ -499,9 +518,11 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             const partnerId = session.participants.find((p: string) => p !== userId);
             if (!partnerId) return;
 
+            pendingExitRequests.delete(sessionId);
+
             // Use findByIdAndUpdate to guarantee DB write
             await CollaborationSession.findByIdAndUpdate(sessionId, {
-                $set: { status: 'abandoned' }
+                $set: { status: 'partner_skipped' }
             });
 
             clearSessionTimer(sessionId);
@@ -569,8 +590,115 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 projectIdea: match?.projectIdea || null,
                 mode: match?.mode || 'sprint',
             });
+
+            // Send pending exit request if exists
+            const pendingExit = pendingExitRequests.get(sessionId);
+            if (pendingExit && pendingExit.requesterId !== userId) {
+                socket.emit('challenge:exit-requested', {
+                    sessionId,
+                    ...pendingExit,
+                });
+            }
+
+            // Notify partner that user is back
+            io.to(`user:${partnerId}`).emit('challenge:partner-activity', { sessionId, status: 'online' });
         } catch (error) {
             console.error('Challenge rejoin error:', error);
+        }
+    });
+
+    // ===== Heartbeat / Activity tracking =====
+    socket.on('challenge:heartbeat', async (sessionId: string) => {
+        userActivity.set(`${sessionId}:${userId}`, Date.now());
+        const session = await CollaborationSession.findById(sessionId).catch(() => null);
+        if (!session || session.status !== 'active') return;
+        const partnerId = session.participants.find((p: string) => p !== userId);
+        if (partnerId) {
+            io.to(`user:${partnerId}`).emit('challenge:partner-activity', { sessionId, status: 'online' });
+        }
+    });
+
+    // ===== Check partner activity =====
+    socket.on('challenge:check-partner', async (sessionId: string) => {
+        const session = await CollaborationSession.findById(sessionId).catch(() => null);
+        if (!session) return;
+        const partnerId = session.participants.find((p: string) => p !== userId);
+        if (!partnerId) return;
+        const lastActive = userActivity.get(`${sessionId}:${partnerId}`);
+        const now = Date.now();
+        let status = 'offline';
+        if (lastActive) {
+            const diff = now - lastActive;
+            if (diff < 30_000) status = 'online';
+            else if (diff < 300_000) status = 'away';
+        }
+        socket.emit('challenge:partner-activity', { sessionId, status });
+    });
+
+    // ===== Project edit proposal =====
+    socket.on('challenge:propose-project-edit', async (data: { sessionId: string; title: string; description: string }) => {
+        try {
+            const session = await CollaborationSession.findById(data.sessionId);
+            if (!session || session.status !== 'active') return;
+            if (!session.participants.includes(userId)) return;
+            const partnerId = session.participants.find(p => p !== userId);
+            if (!partnerId) return;
+            const user = await User.findById(userId);
+            io.to(`user:${partnerId}`).emit('challenge:project-edit-proposed', {
+                sessionId: data.sessionId,
+                proposerId: userId,
+                proposerName: user?.name || 'Partner',
+                title: data.title,
+                description: data.description,
+            });
+        } catch (error) {
+            console.error('Project edit proposal error:', error);
+        }
+    });
+
+    socket.on('challenge:approve-project-edit', async (data: { sessionId: string; title: string; description: string }) => {
+        try {
+            const match = await Match.findOne({
+                $or: [
+                    { user1Id: userId },
+                    { user2Id: userId },
+                ],
+                status: 'active',
+            });
+            if (match && match.projectIdea) {
+                match.projectIdea.title = data.title;
+                match.projectIdea.description = data.description;
+                await match.save();
+            }
+            io.to(`challenge:${data.sessionId}`).emit('challenge:project-updated', {
+                title: data.title,
+                description: data.description,
+            });
+        } catch (error) {
+            console.error('Project edit approval error:', error);
+        }
+    });
+
+    socket.on('challenge:decline-project-edit', async (data: { sessionId: string }) => {
+        const session = await CollaborationSession.findById(data.sessionId).catch(() => null);
+        if (!session) return;
+        const partnerId = session.participants.find((p: string) => p !== userId);
+        if (partnerId) {
+            io.to(`user:${partnerId}`).emit('challenge:project-edit-declined', { sessionId: data.sessionId });
+        }
+    });
+
+    // ===== Delete task =====
+    socket.on('challenge:delete-task', async (sessionId: string, taskId: string) => {
+        try {
+            const session = await CollaborationSession.findById(sessionId);
+            if (!session || session.status !== 'active') return;
+            if (!session.participants.includes(userId)) return;
+            session.tasks = session.tasks.filter((t: any) => t.id !== taskId);
+            await session.save();
+            io.to(`challenge:${sessionId}`).emit('challenge:task-deleted', taskId);
+        } catch (error) {
+            console.error('Delete task error:', error);
         }
     });
 
@@ -578,6 +706,20 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
     socket.on('disconnect', async () => {
         // Remove from queue
         challengeQueue.delete(userId);
+
+        // Notify partners about offline status
+        const sessions = activeChallengeSockets.get(socket.id);
+        if (sessions) {
+            for (const sessionId of sessions) {
+                const session = await CollaborationSession.findById(sessionId).catch(() => null);
+                if (session && session.status === 'active') {
+                    const partnerId = session.participants.find((p: string) => p !== userId);
+                    if (partnerId) {
+                        io.to(`user:${partnerId}`).emit('challenge:partner-activity', { sessionId, status: 'offline' });
+                    }
+                }
+            }
+        }
 
         // Clean up socket tracking
         activeChallengeSockets.delete(socket.id);

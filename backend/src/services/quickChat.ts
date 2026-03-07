@@ -15,6 +15,10 @@ const quickChatQueue: Map<string, {
 // Track active chats per socket for disconnect handling
 const activeChatsMap: Map<string, Set<string>> = new Map(); // socketId -> Set<chatId>
 
+// Inactivity tracking: chatId -> lastMessageTimestamp
+const chatLastActivity: Map<string, number> = new Map();
+const QUICKCHAT_INACTIVITY_MS = 5 * 60 * 1000; // 5 minutes
+
 export function setupQuickChatHandlers(io: Server, socket: Socket) {
     const userId = socket.data.userId;
 
@@ -138,6 +142,9 @@ export function setupQuickChatHandlers(io: Server, socket: Socket) {
             chat.messages.push(message);
             await chat.save();
 
+            // Track activity for inactivity timeout
+            chatLastActivity.set(chatId, Date.now());
+
             // Send to both participants
             io.to(`quickchat:${chatId}`).emit('quickchat:message', message);
         } catch (error) {
@@ -227,6 +234,9 @@ async function endChat(io: Server, chatId: string, endedByUserId: string, reason
     chat.endedAt = new Date();
     await chat.save();
 
+    // Clean up activity tracking
+    chatLastActivity.delete(chatId);
+
     // System message
     const endMessage: IMessage = {
         id: `qc-sys-${Date.now()}`,
@@ -239,6 +249,27 @@ async function endChat(io: Server, chatId: string, endedByUserId: string, reason
 
     // Notify both participants
     io.to(`quickchat:${chatId}`).emit('quickchat:ended', chatId);
+}
+
+// ===== Inactivity checker: ends quickchats with 5+ min of no messages =====
+export function startQuickChatInactivityChecker(io: Server) {
+    setInterval(async () => {
+        const now = Date.now();
+        for (const [chatId, lastActive] of chatLastActivity.entries()) {
+            if (now - lastActive >= QUICKCHAT_INACTIVITY_MS) {
+                try {
+                    const chat = await QuickChat.findById(chatId);
+                    if (chat && chat.status === 'active') {
+                        await endChat(io, chatId, 'system', '⏰ Chat ended due to 5 minutes of inactivity.');
+                    } else {
+                        chatLastActivity.delete(chatId);
+                    }
+                } catch {
+                    chatLastActivity.delete(chatId);
+                }
+            }
+        }
+    }, 60_000); // Check every minute
 }
 
 // ===== Find a Quick Chat Partner =====
@@ -316,6 +347,9 @@ async function findQuickChatPartner(
     });
 
     await chat.save();
+
+    // Track initial activity
+    chatLastActivity.set(chat._id.toString(), Date.now());
 
     // Remove both from queue
     quickChatQueue.delete(userId);
