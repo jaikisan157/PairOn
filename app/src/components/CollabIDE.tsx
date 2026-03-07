@@ -158,6 +158,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const suppressSyncRef = useRef(false);
 
+    // Terminal tabs
+    const [activeTermTab, setActiveTermTab] = useState<'shell' | 'output'>('shell');
+    const outputRef = useRef<HTMLDivElement>(null);
+    const [outputLines, setOutputLines] = useState<string[]>([]);
+
+    // Inline comments
+    const [comments, setComments] = useState<Record<string, { id: string; line: number; text: string; userId: string; userName: string; timestamp: number }[]>>({});
+    const [commentLine, setCommentLine] = useState<number | null>(null);
+    const [commentText, setCommentText] = useState('');
+
     useEffect(() => { filesRef.current = files; }, [files]);
 
     // Unread count
@@ -245,6 +255,19 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             // Lock file
             lockFile(path);
         });
+
+        // Add "Comment on Line" action to editor context menu
+        editor.addAction({
+            id: 'add-comment',
+            label: '💬 Add Comment on Line',
+            contextMenuGroupId: 'navigation',
+            contextMenuOrder: 99,
+            keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM],
+            run: (ed) => {
+                const pos = ed.getPosition();
+                if (pos) setCommentLine(pos.lineNumber);
+            },
+        });
     }, [activeFile, sessionId, getOrCreateModel, autosave]);
 
     // ===== Initialize Terminal =====
@@ -329,12 +352,18 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const handleFileLock = (data: FileLock) => { setFileLocks(prev => { const n = new Map(prev); n.set(data.path, data); return n; }); };
         const handleFileUnlock = (data: { path: string }) => { setFileLocks(prev => { const n = new Map(prev); n.delete(data.path); return n; }); };
 
+        const handleComment = (data: { filePath: string; comment: { id: string; line: number; text: string; userId: string; userName: string; timestamp: number }; senderId: string }) => {
+            if (data.senderId === socket.id) return;
+            setComments(prev => ({ ...prev, [data.filePath]: [...(prev[data.filePath] || []), data.comment] }));
+        };
+
         socket.on('code:file-change', handleFileChange);
         socket.on('code:file-create', handleFileCreate);
         socket.on('code:file-delete', handleFileDelete);
         socket.on('code:file-rename', handleFileRename);
         socket.on('code:file-lock', handleFileLock);
         socket.on('code:file-unlock', handleFileUnlock);
+        socket.on('code:comment', handleComment);
         return () => {
             socket.off('code:file-change', handleFileChange);
             socket.off('code:file-create', handleFileCreate);
@@ -342,6 +371,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             socket.off('code:file-rename', handleFileRename);
             socket.off('code:file-lock', handleFileLock);
             socket.off('code:file-unlock', handleFileUnlock);
+            socket.off('code:comment', handleComment);
         };
     }, [autosave]);
 
@@ -531,9 +561,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const term = xtermRef.current;
         if (term) term.writeln('\n\x1b[36m🔨 Building project (npm run build)...\x1b[0m');
         addToast('Building project...', 'info');
+        setActiveTermTab('output');
+        setOutputLines(prev => [...prev, '🔨 Building project (npm run build)...']);
         const build = await webcontainerRef.current.spawn('npm', ['run', 'build']);
-        build.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); } }));
+        build.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); setOutputLines(prev => [...prev, d]); } }));
         const code = await build.exit;
+        setOutputLines(prev => [...prev, code === 0 ? '✅ Build successful!' : '❌ Build failed']);
         addToast(code === 0 ? 'Build successful!' : 'Build failed', code === 0 ? 'success' : 'error');
     }, [addToast]);
 
@@ -545,8 +578,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const cmd = ext === 'ts' ? 'npx' : 'node';
         const args = ext === 'ts' ? ['tsx', path] : [path];
         if (term) term.writeln(`\n\x1b[36m▶ Running ${path}...\x1b[0m`);
+        setOutputLines(prev => [...prev, `▶ Running ${path}...`]);
         const proc = await webcontainerRef.current.spawn(cmd, args);
-        proc.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); } }));
+        proc.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); setOutputLines(prev => [...prev, d]); } }));
         setContextMenu(null);
     }, [addToast]);
 
@@ -861,16 +895,66 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <ResizeDivider dividerRef={terminal.dividerRef} direction="vertical" />
                     <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
                         <div className="flex items-center justify-between px-3 py-1 bg-[#161b22] border-b border-gray-800">
-                            <div className="flex items-center gap-1.5">
-                                <Terminal className="w-3 h-3 text-gray-500" />
-                                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Terminal</span>
+                            <div className="flex items-center gap-0">
+                                <button onClick={() => setActiveTermTab('shell')}
+                                    className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${activeTermTab === 'shell' ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
+                                    <Terminal className="w-3 h-3" /> Shell
+                                </button>
+                                <button onClick={() => setActiveTermTab('output')}
+                                    className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${activeTermTab === 'output' ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
+                                    Output {outputLines.length > 0 && <span className="bg-gray-700 text-[9px] px-1 rounded">{outputLines.length}</span>}
+                                </button>
                             </div>
-                            <button onClick={() => terminal.setSize(h => h === 200 ? 350 : 200)} className="p-0.5 text-gray-500 hover:text-white">
-                                {terminal.size > 200 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
-                            </button>
+                            <div className="flex items-center gap-1">
+                                {activeTermTab === 'output' && outputLines.length > 0 && (
+                                    <button onClick={() => setOutputLines([])} className="text-[10px] text-gray-500 hover:text-white px-1">Clear</button>
+                                )}
+                                <button onClick={() => terminal.setSize(h => h === 200 ? 350 : 200)} className="p-0.5 text-gray-500 hover:text-white">
+                                    {terminal.size > 200 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                                </button>
+                            </div>
                         </div>
-                        <div ref={terminalRef} className="h-[calc(100%-24px)]" />
+                        <div ref={terminalRef} className="h-[calc(100%-28px)]" style={{ display: activeTermTab === 'shell' ? 'block' : 'none' }} />
+                        {activeTermTab === 'output' && (
+                            <div ref={outputRef} className="h-[calc(100%-28px)] overflow-y-auto p-2 font-mono text-xs text-gray-400">
+                                {outputLines.length === 0 ? (
+                                    <p className="text-gray-600 text-center py-4">Build & run output will appear here</p>
+                                ) : outputLines.map((line, i) => (
+                                    <div key={i} className="py-0.5 border-b border-gray-800/30">{line}</div>
+                                ))}
+                            </div>
+                        )}
                     </div>
+
+                    {/* Inline Comment Panel */}
+                    {commentLine !== null && (
+                        <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#1e2030] border-t border-blue-500/30 p-2">
+                            <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
+                                <span>💬 Comment on line {commentLine}</span>
+                                <button onClick={() => { setCommentLine(null); setCommentText(''); }} className="ml-auto text-gray-500 hover:text-white"><X className="w-3 h-3" /></button>
+                            </div>
+                            {(comments[activeFile] || []).filter(c => c.line === commentLine).map(c => (
+                                <div key={c.id} className="flex items-start gap-1.5 mb-1 text-xs">
+                                    <span className="text-blue-400 font-medium">{c.userName}:</span>
+                                    <span className="text-gray-300">{c.text}</span>
+                                </div>
+                            ))}
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                if (!commentText.trim() || commentLine === null) return;
+                                const newComment = { id: Date.now().toString(), line: commentLine, text: commentText, userId, userName, timestamp: Date.now() };
+                                setComments(prev => ({ ...prev, [activeFile]: [...(prev[activeFile] || []), newComment] }));
+                                const socket = socketService.getSocket();
+                                socket?.emit('code:comment', { sessionId, filePath: activeFile, comment: newComment, senderId: socket?.id });
+                                setCommentText('');
+                                addToast('Comment added', 'success');
+                            }} className="flex gap-1 mt-1">
+                                <input value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="Add a comment..."
+                                    className="flex-1 bg-[#0d1117] border border-gray-700 rounded px-2 py-1 text-[11px] text-white placeholder-gray-600 outline-none focus:border-blue-500" autoFocus />
+                                <button type="submit" className="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-500">Add</button>
+                            </form>
+                        </div>
+                    )}
                 </div>
 
                 {/* Preview resize divider */}
