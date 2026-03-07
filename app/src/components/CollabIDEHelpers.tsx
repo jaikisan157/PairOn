@@ -185,3 +185,62 @@ export function CommentWidget({ comments, onAdd, onDelete, userId }: {
 
 // Suppress unused import warnings
 void Search; void MessageCircle; void Bell;
+
+// ===== Diff Viewer Modal =====
+export function DiffViewer({ original, modified, fileName, onClose }: {
+    original: string; modified: string; fileName: string; onClose: () => void;
+}) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        let editor: any;
+        const loadDiff = async () => {
+            const monaco = await import('monaco-editor');
+            if (!containerRef.current) return;
+            const originalModel = monaco.editor.createModel(original, 'typescript');
+            const modifiedModel = monaco.editor.createModel(modified, 'typescript');
+            editor = monaco.editor.createDiffEditor(containerRef.current, {
+                theme: 'vs-dark', automaticLayout: true, readOnly: true, renderSideBySide: true,
+                minimap: { enabled: false }, fontSize: 13,
+            });
+            editor.setModel({ original: originalModel, modified: modifiedModel });
+        };
+        loadDiff();
+        return () => { if (editor) editor.dispose(); };
+    }, [original, modified]);
+    return (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-8">
+            <div className="bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl w-full max-w-5xl h-[70vh] flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
+                    <span className="text-sm text-white font-medium">Diff: {fileName}</span>
+                    <button onClick={onClose} className="p-1 text-gray-400 hover:text-white"><X className="w-4 h-4" /></button>
+                </div>
+                <div ref={containerRef} className="flex-1" />
+            </div>
+        </div>
+    );
+}
+
+// ===== Panel Resize Hook =====
+export function usePanelResize(initialSize: number, min: number, max: number, direction: 'horizontal' | 'vertical' = 'horizontal') {
+    const [size, setSize] = useState(initialSize);
+    const dragging = useRef(false);
+    const startPos = useRef(0);
+    const startSize = useRef(0);
+
+    const onMouseDown = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        dragging.current = true;
+        startPos.current = direction === 'horizontal' ? e.clientX : e.clientY;
+        startSize.current = size;
+        const onMouseMove = (ev: MouseEvent) => {
+            if (!dragging.current) return;
+            const delta = (direction === 'horizontal' ? ev.clientX : ev.clientY) - startPos.current;
+            setSize(Math.max(min, Math.min(max, startSize.current + delta)));
+        };
+        const onMouseUp = () => { dragging.current = false; window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    }, [size, min, max, direction]);
+
+    return { size, setSize, onMouseDown };
+}

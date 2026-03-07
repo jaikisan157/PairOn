@@ -8,10 +8,11 @@ import {
     FolderOpen, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
     Trash2, Pencil, Copy, FolderPlus, Search, Sun, Moon, Map as MapIcon, Hammer, Clock,
+    MoreVertical, Columns, GitCompare,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
-import { useToasts, ToastContainer, SearchPanel, Breadcrumb, RecentFiles } from './CollabIDEHelpers';
+import { useToasts, ToastContainer, SearchPanel, Breadcrumb, RecentFiles, DiffViewer, usePanelResize } from './CollabIDEHelpers';
 
 // ===== Types =====
 interface FileNode { name: string; type: 'file' | 'directory'; children?: FileNode[]; }
@@ -108,9 +109,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const miniChatEndRef = useRef<HTMLDivElement>(null);
 
     // Layout
-    const [terminalHeight, setTerminalHeight] = useState(200);
-    const [sidebarWidth] = useState(200);
-    const [previewWidth, setPreviewWidth] = useState(350);
     const [isFullscreen, setIsFullscreen] = useState(false);
 
     // Editor settings
@@ -128,6 +126,21 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [showRecentFiles, setShowRecentFiles] = useState(false);
     const [showSearchPanel, setShowSearchPanel] = useState(false);
     const { toasts, addToast } = useToasts();
+
+    // Split editor
+    const [splitView, setSplitView] = useState(false);
+    const [splitFile, setSplitFile] = useState<string | null>(null);
+
+    // Diff viewer
+    const [diffFile, setDiffFile] = useState<{ path: string; original: string } | null>(null);
+
+    // Drag & drop
+    const [draggedPath, setDraggedPath] = useState<string | null>(null);
+
+    // Panel resize
+    const sidebar = usePanelResize(200, 120, 400);
+    const preview = usePanelResize(350, 200, 600);
+    const terminal = usePanelResize(200, 100, 500, 'vertical');
 
     // Monaco refs
     const editorRef = useRef<MonacoTypes.editor.IStandaloneCodeEditor | null>(null);
@@ -551,6 +564,53 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         addToast(`Replaced in ${path.split('/').pop()}`, 'success');
     }, [files, sessionId, autosave, addToast]);
 
+    // Prettier format
+    const formatFile = useCallback(async () => {
+        const content = files[activeFile];
+        if (!content) return;
+        try {
+            const prettier = await import('prettier/standalone');
+            const babel = await import('prettier/plugins/babel');
+            const ts = await import('prettier/plugins/typescript');
+            const estree = await import('prettier/plugins/estree');
+            const formatted = await prettier.format(content, {
+                parser: activeFile.endsWith('.ts') || activeFile.endsWith('.tsx') ? 'typescript' : 'babel',
+                plugins: [babel.default || babel, ts.default || ts, estree.default || estree],
+                semi: true, singleQuote: true, tabWidth: 2,
+            });
+            setFiles(prev => { const next = { ...prev, [activeFile]: formatted }; autosave(next); return next; });
+            const model = modelsRef.current.get(activeFile);
+            if (model && !model.isDisposed()) { suppressSyncRef.current = true; model.setValue(formatted); suppressSyncRef.current = false; }
+            if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(activeFile, formatted).catch(() => { });
+            addToast('Formatted with Prettier', 'success');
+        } catch (e: any) { addToast(`Format error: ${e.message}`, 'error'); }
+    }, [files, activeFile, autosave, addToast]);
+
+    // Move file (drag & drop)
+    const moveFile = useCallback((fromPath: string, toDir: string) => {
+        const fileName = fromPath.split('/').pop()!;
+        const newPath = toDir ? `${toDir}/${fileName}` : fileName;
+        if (newPath === fromPath) return;
+        setFiles(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(p => {
+                if (p === fromPath || p.startsWith(fromPath + '/')) {
+                    const renamed = newPath + p.slice(fromPath.length);
+                    next[renamed] = next[p]; delete next[p];
+                    const model = modelsRef.current.get(p);
+                    if (model && !model.isDisposed()) model.dispose();
+                    modelsRef.current.delete(p);
+                }
+            });
+            autosave(next); return next;
+        });
+        setOpenTabs(prev => prev.map(t => t === fromPath || t.startsWith(fromPath + '/') ? newPath + t.slice(fromPath.length) : t));
+        setActiveFile(prev => prev === fromPath || prev.startsWith(fromPath + '/') ? newPath + prev.slice(fromPath.length) : prev);
+        const socket = socketService.getSocket();
+        socket?.emit('code:file-rename', { sessionId, oldPath: fromPath, newPath, senderId: socket?.id });
+        addToast(`Moved to ${toDir || 'root'}`, 'success');
+    }, [sessionId, autosave, addToast]);
+
     // ===== File tree =====
     const buildTree = useCallback((): FileNode[] => {
         const root: FileNode[] = [];
@@ -595,14 +655,21 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             if (node.type === 'directory') {
                 const isExpanded = expandedDirs.has(fullPath);
                 return (
-                    <div key={fullPath}>
-                        <button onClick={() => toggleDir(fullPath)}
-                            onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, path: fullPath, type: 'directory' }); }}
-                            className="w-full flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:bg-[#1e2030] hover:text-gray-200 transition-colors rounded group">
-                            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                            <FolderOpen className="w-3.5 h-3.5 text-blue-400" />
-                            <span className="flex-1 text-left">{node.name}</span>
-                        </button>
+                    <div key={fullPath}
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (draggedPath && draggedPath !== fullPath) moveFile(draggedPath, fullPath); setDraggedPath(null); }}>
+                        <div className="w-full flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:bg-[#1e2030] hover:text-gray-200 transition-colors rounded group"
+                            draggable onDragStart={() => setDraggedPath(fullPath)}>
+                            <button onClick={() => toggleDir(fullPath)} className="flex items-center gap-1 flex-1 text-left">
+                                {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                <FolderOpen className="w-3.5 h-3.5 text-blue-400" />
+                                <span className="flex-1">{node.name}</span>
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, path: fullPath, type: 'directory' }); }}
+                                className="p-0.5 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition-opacity">
+                                <MoreVertical className="w-3 h-3" />
+                            </button>
+                        </div>
                         {isExpanded && node.children && <div className="ml-3 border-l border-gray-800">{renderTree(node.children, fullPath)}</div>}
                     </div>
                 );
@@ -610,19 +677,24 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             const locked = isLockedByPartner(fullPath);
             return (
-                <button key={fullPath}
+                <div key={fullPath}
+                    className={`flex items-center gap-1.5 px-2 py-1 text-xs transition-colors rounded group cursor-pointer ${activeFile === fullPath ? 'bg-[#2d2f3f] text-white' : 'text-gray-500 hover:bg-[#1e2030] hover:text-gray-300'}`}
+                    draggable onDragStart={() => setDraggedPath(fullPath)}
                     onClick={() => switchToFile(fullPath)}
-                    onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, path: fullPath, type: 'file' }); }}
-                    className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs transition-colors rounded ${activeFile === fullPath ? 'bg-[#2d2f3f] text-white' : 'text-gray-500 hover:bg-[#1e2030] hover:text-gray-300'}`}>
+                    onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, path: fullPath, type: 'file' }); }}>
                     <File className="w-3.5 h-3.5 text-gray-500" />
                     <span className="truncate flex-1 text-left">{node.name}</span>
                     {locked && <Lock className="w-3 h-3 text-yellow-500" />}
-                </button>
+                    <button onClick={(e) => { e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, path: fullPath, type: 'file' }); }}
+                        className="p-0.5 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition-opacity">
+                        <MoreVertical className="w-3 h-3" />
+                    </button>
+                </div>
             );
         });
     };
 
-    useEffect(() => { setTimeout(() => { try { fitAddonRef.current?.fit(); } catch { /* */ } }, 50); }, [terminalHeight]);
+    useEffect(() => { setTimeout(() => { try { fitAddonRef.current?.fit(); } catch { /* */ } }, 50); }, [terminal.size]);
     // Close context menu on click anywhere
     useEffect(() => { const h = () => setContextMenu(null); window.addEventListener('click', h); return () => window.removeEventListener('click', h); }, []);
 
@@ -677,6 +749,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         className="p-1.5 text-gray-400 hover:text-white rounded" title="Quick Open (Ctrl+P)">
                         <Search className="w-3.5 h-3.5" />
                     </button>
+                    <button onClick={formatFile} className="p-1.5 text-gray-400 hover:text-white rounded" title="Format with Prettier">✨</button>
+                    <button onClick={() => { setSplitView(!splitView); if (!splitView && !splitFile) setSplitFile(activeFile); }}
+                        className={`p-1.5 rounded transition-colors ${splitView ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`} title="Split editor">
+                        <Columns className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => { if (activeFile) setDiffFile({ path: activeFile, original: '' }); }}
+                        className="p-1.5 text-gray-400 hover:text-white rounded" title="Show diff">
+                        <GitCompare className="w-3.5 h-3.5" />
+                    </button>
                     <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 text-gray-400 hover:text-white rounded">
                         {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                     </button>
@@ -689,7 +770,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 {showSearchPanel && <SearchPanel files={files} onOpenFile={switchToFile} onClose={() => setShowSearchPanel(false)} onReplace={replaceInFile} />}
 
                 {/* File explorer */}
-                <div className="flex-shrink-0 bg-[#0d1117] border-r border-gray-800 overflow-y-auto" style={{ width: sidebarWidth }}>
+                <div className="flex-shrink-0 bg-[#0d1117] border-r border-gray-800 overflow-y-auto" style={{ width: sidebar.size }}>
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Explorer</span>
                         <div className="flex items-center gap-0.5">
@@ -707,6 +788,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     )}
                     <div className="p-1">{renderTree(tree)}</div>
                 </div>
+                {/* Sidebar resize divider */}
+                <div onMouseDown={sidebar.onMouseDown} className="w-1 flex-shrink-0 cursor-col-resize hover:bg-blue-500/50 transition-colors" />
 
                 {/* Editor + Terminal */}
                 <div className="flex-1 flex flex-col min-w-0">
@@ -729,50 +812,78 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         setExpandedDirs(prev => { const n = new Set(prev); n.add(dir); return n; });
                     }} />
 
-                    <div className="flex-1 min-h-0 relative">
-                        {activeFileLocked && (
-                            <div className="absolute top-0 left-0 right-0 z-10 bg-yellow-500/10 border-b border-yellow-500/30 px-3 py-1 flex items-center gap-2">
-                                <Lock className="w-3 h-3 text-yellow-500" />
-                                <span className="text-[11px] text-yellow-400">{getLockerName(activeFile)} is editing — view only</span>
-                            </div>
+                    <div className="flex flex-1 min-h-0">
+                        <div className="flex-1 relative">
+                            {activeFileLocked && (
+                                <div className="absolute top-0 left-0 right-0 z-10 bg-yellow-500/10 border-b border-yellow-500/30 px-3 py-1 flex items-center gap-2">
+                                    <Lock className="w-3 h-3 text-yellow-500" />
+                                    <span className="text-[11px] text-yellow-400">{getLockerName(activeFile)} is editing — view only</span>
+                                </div>
+                            )}
+                            <Editor
+                                height="100%" theme={editorTheme} onMount={handleEditorMount}
+                                options={{
+                                    minimap: { enabled: showMinimap }, fontSize,
+                                    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                                    lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true,
+                                    tabSize: 2, wordWrap: 'on', bracketPairColorization: { enabled: true },
+                                    padding: { top: activeFileLocked ? 28 : 8, bottom: 8 }, readOnly: activeFileLocked,
+                                }}
+                            />
+                        </div>
+                        {/* Split Editor */}
+                        {splitView && splitFile && (
+                            <>
+                                <div className="w-1 flex-shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500/50 transition-colors" />
+                                <div className="flex-1 relative">
+                                    <div className="flex items-center px-2 py-0.5 bg-[#161b22] border-b border-gray-800">
+                                        <select value={splitFile} onChange={e => setSplitFile(e.target.value)}
+                                            className="bg-transparent text-[10px] text-gray-400 outline-none cursor-pointer">
+                                            {Object.keys(files).map(p => <option key={p} value={p} className="bg-[#1e2030]">{p}</option>)}
+                                        </select>
+                                    </div>
+                                    <Editor
+                                        height="calc(100% - 24px)" theme={editorTheme}
+                                        path={`split-${splitFile}`}
+                                        value={files[splitFile] || ''}
+                                        options={{
+                                            minimap: { enabled: false }, fontSize, readOnly: true,
+                                            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                                            lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true,
+                                        }}
+                                    />
+                                </div>
+                            </>
                         )}
-                        <Editor
-                            height="100%"
-                            theme={editorTheme}
-                            onMount={handleEditorMount}
-                            options={{
-                                minimap: { enabled: showMinimap }, fontSize,
-                                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                                lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true,
-                                tabSize: 2, wordWrap: 'on', bracketPairColorization: { enabled: true },
-                                padding: { top: activeFileLocked ? 28 : 8, bottom: 8 },
-                                readOnly: activeFileLocked,
-                            }}
-                        />
                     </div>
 
-                    <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminalHeight }}>
+                    {/* Terminal resize handle */}
+                    <div onMouseDown={terminal.onMouseDown} className="h-1 flex-shrink-0 cursor-row-resize hover:bg-blue-500/50 transition-colors" />
+                    <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
                         <div className="flex items-center justify-between px-3 py-1 bg-[#161b22] border-b border-gray-800">
                             <div className="flex items-center gap-1.5">
                                 <Terminal className="w-3 h-3 text-gray-500" />
                                 <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Terminal</span>
                             </div>
-                            <button onClick={() => setTerminalHeight(h => h === 200 ? 350 : 200)} className="p-0.5 text-gray-500 hover:text-white">
-                                {terminalHeight > 200 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                            <button onClick={() => terminal.setSize(h => h === 200 ? 350 : 200)} className="p-0.5 text-gray-500 hover:text-white">
+                                {terminal.size > 200 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
                             </button>
                         </div>
                         <div ref={terminalRef} className="h-[calc(100%-24px)]" />
                     </div>
                 </div>
 
+                {/* Preview resize divider */}
+                <div onMouseDown={preview.onMouseDown} className="w-1 flex-shrink-0 cursor-col-resize hover:bg-blue-500/50 transition-colors" />
+
                 {/* Preview + Mini Chat */}
-                <div className="flex-shrink-0 border-l border-gray-800 bg-[#161b22] flex flex-col" style={{ width: previewWidth }}>
+                <div className="flex-shrink-0 border-l border-gray-800 bg-[#161b22] flex flex-col" style={{ width: preview.size }}>
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Preview</span>
                         <div className="flex items-center gap-1">
                             {previewUrl && <button onClick={() => { const f = document.getElementById('preview-iframe') as HTMLIFrameElement; if (f) f.src = previewUrl; }} className="p-0.5 text-gray-500 hover:text-white"><RefreshCw className="w-3 h-3" /></button>}
-                            <button onClick={() => setPreviewWidth(w => w === 350 ? 500 : 350)} className="p-0.5 text-gray-500 hover:text-white">
-                                {previewWidth > 350 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                            <button onClick={() => preview.setSize(w => w === 350 ? 500 : 350)} className="p-0.5 text-gray-500 hover:text-white">
+                                {preview.size > 350 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
                             </button>
                         </div>
                     </div>
@@ -897,6 +1008,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Diff Viewer Modal */}
+            {diffFile && (
+                <DiffViewer
+                    original={diffFile.original}
+                    modified={files[diffFile.path] || ''}
+                    fileName={diffFile.path}
+                    onClose={() => setDiffFile(null)}
+                />
             )}
 
             {/* Toast notifications */}
