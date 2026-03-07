@@ -7,10 +7,11 @@ import '@xterm/xterm/css/xterm.css';
 import {
     FolderOpen, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
-    Trash2, Pencil, Copy, FolderPlus, Search, Sun, Moon, Map as MapIcon,
+    Trash2, Pencil, Copy, FolderPlus, Search, Sun, Moon, Map as MapIcon, Hammer, Clock,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
+import { useToasts, ToastContainer, SearchPanel, Breadcrumb, RecentFiles } from './CollabIDEHelpers';
 
 // ===== Types =====
 interface FileNode { name: string; type: 'file' | 'directory'; children?: FileNode[]; }
@@ -122,6 +123,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [quickOpenQuery, setQuickOpenQuery] = useState('');
     const quickOpenInputRef = useRef<HTMLInputElement>(null);
 
+    // New features
+    const [recentFiles, setRecentFiles] = useState<string[]>([]);
+    const [showRecentFiles, setShowRecentFiles] = useState(false);
+    const [showSearchPanel, setShowSearchPanel] = useState(false);
+    const { toasts, addToast } = useToasts();
+
     // Monaco refs
     const editorRef = useRef<MonacoTypes.editor.IStandaloneCodeEditor | null>(null);
     const monacoRef = useRef<typeof MonacoTypes | null>(null);
@@ -136,7 +143,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const filesRef = useRef(files);
     const lockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const suppressSyncRef = useRef(false); // Prevent echo on remote changes
+    const suppressSyncRef = useRef(false);
 
     useEffect(() => { filesRef.current = files; }, [files]);
 
@@ -146,16 +153,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (showMiniChat) { miniChatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); onMessagesSeen(messages.length); }
     }, [messages.length, showMiniChat, onMessagesSeen]);
 
-    // Ctrl+P shortcut
+    // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-                e.preventDefault();
-                setShowQuickOpen(true);
-                setQuickOpenQuery('');
+                e.preventDefault(); setShowQuickOpen(true); setQuickOpenQuery('');
                 setTimeout(() => quickOpenInputRef.current?.focus(), 50);
             }
-            // Ctrl+= / Ctrl+- for font size
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') { e.preventDefault(); setShowSearchPanel(p => !p); }
             if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 28)); }
             if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); }
         };
@@ -194,15 +199,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const model = getOrCreateModel(path, content);
         if (editor && model) {
             editor.setModel(model);
-            // Sync content if model content differs (remote update)
-            if (model.getValue() !== content) {
-                suppressSyncRef.current = true;
-                model.setValue(content);
-                suppressSyncRef.current = false;
-            }
+            if (model.getValue() !== content) { suppressSyncRef.current = true; model.setValue(content); suppressSyncRef.current = false; }
         }
         setActiveFile(path);
         if (!openTabs.includes(path)) setOpenTabs(prev => [...prev, path]);
+        // Track recent files
+        setRecentFiles(prev => [path, ...prev.filter(p => p !== path)].slice(0, 10));
     }, [getOrCreateModel, openTabs]);
 
     // Handle editor mount — set up model system
@@ -507,7 +509,47 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${projectTitle.replace(/\s+/g, '-').toLowerCase()}.zip`; a.click();
         URL.revokeObjectURL(url);
-    }, [files, projectTitle]);
+        addToast('Project downloaded as ZIP', 'success');
+    }, [files, projectTitle, addToast]);
+
+    // Build project
+    const buildProject = useCallback(async () => {
+        if (!webcontainerRef.current) { addToast('Boot the dev environment first', 'error'); return; }
+        const term = xtermRef.current;
+        if (term) term.writeln('\n\x1b[36m🔨 Building project (npm run build)...\x1b[0m');
+        addToast('Building project...', 'info');
+        const build = await webcontainerRef.current.spawn('npm', ['run', 'build']);
+        build.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); } }));
+        const code = await build.exit;
+        addToast(code === 0 ? 'Build successful!' : 'Build failed', code === 0 ? 'success' : 'error');
+    }, [addToast]);
+
+    // Run specific file in terminal
+    const runFile = useCallback(async (path: string) => {
+        if (!webcontainerRef.current) { addToast('Boot the dev environment first', 'error'); return; }
+        const term = xtermRef.current;
+        const ext = path.split('.').pop();
+        const cmd = ext === 'ts' ? 'npx' : 'node';
+        const args = ext === 'ts' ? ['tsx', path] : [path];
+        if (term) term.writeln(`\n\x1b[36m▶ Running ${path}...\x1b[0m`);
+        const proc = await webcontainerRef.current.spawn(cmd, args);
+        proc.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); } }));
+        setContextMenu(null);
+    }, [addToast]);
+
+    // Replace across files (for search panel)
+    const replaceInFile = useCallback((path: string, oldText: string, newText: string) => {
+        const content = files[path];
+        if (!content) return;
+        const updated = content.replaceAll(oldText, newText);
+        setFiles(prev => { const next = { ...prev, [path]: updated }; autosave(next); return next; });
+        const model = modelsRef.current.get(path);
+        if (model && !model.isDisposed()) { suppressSyncRef.current = true; model.setValue(updated); suppressSyncRef.current = false; }
+        if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(path, updated).catch(() => { });
+        const socket = socketService.getSocket();
+        socket?.emit('code:file-change', { sessionId, path, content: updated, senderId: socket?.id });
+        addToast(`Replaced in ${path.split('/').pop()}`, 'success');
+    }, [files, sessionId, autosave, addToast]);
 
     // ===== File tree =====
     const buildTree = useCallback((): FileNode[] => {
@@ -610,6 +652,18 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             <Square className="w-3 h-3" /> Stop
                         </button>
                     )}
+                    <button onClick={buildProject} className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors" title="Build (npm run build)">
+                        <Hammer className="w-3 h-3" /> Build
+                    </button>
+                    <div className="relative">
+                        <button onClick={() => setShowRecentFiles(!showRecentFiles)} className="p-1.5 text-gray-400 hover:text-white rounded" title="Recent files">
+                            <Clock className="w-3.5 h-3.5" />
+                        </button>
+                        {showRecentFiles && <RecentFiles recentFiles={recentFiles} onOpenFile={switchToFile} onClose={() => setShowRecentFiles(false)} />}
+                    </div>
+                    <button onClick={() => setShowSearchPanel(!showSearchPanel)} className={`p-1.5 rounded transition-colors ${showSearchPanel ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`} title="Search across files (Ctrl+Shift+F)">
+                        <Search className="w-3.5 h-3.5" />
+                    </button>
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
                     <button onClick={() => setShowMinimap(!showMinimap)} className={`p-1.5 rounded transition-colors ${showMinimap ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`} title="Toggle minimap">
                         <MapIcon className="w-3.5 h-3.5" />
@@ -631,6 +685,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             {/* Main */}
             <div className="flex flex-1 overflow-hidden">
+                {/* Search Panel */}
+                {showSearchPanel && <SearchPanel files={files} onOpenFile={switchToFile} onClose={() => setShowSearchPanel(false)} onReplace={replaceInFile} />}
+
                 {/* File explorer */}
                 <div className="flex-shrink-0 bg-[#0d1117] border-r border-gray-800 overflow-y-auto" style={{ width: sidebarWidth }}>
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
@@ -666,6 +723,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             );
                         })}
                     </div>
+
+                    {/* Breadcrumb */}
+                    <Breadcrumb path={activeFile} onNavigate={(dir) => {
+                        setExpandedDirs(prev => { const n = new Set(prev); n.add(dir); return n; });
+                    }} />
 
                     <div className="flex-1 min-h-0 relative">
                         {activeFileLocked && (
@@ -791,6 +853,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             <FolderPlus className="w-3 h-3" /> New Subfolder
                         </button>
                     )}
+                    {contextMenu.type === 'file' && /\.(js|ts|mjs)$/.test(contextMenu.path) && (
+                        <button onClick={() => runFile(contextMenu.path)}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-green-400 hover:bg-green-500/10 transition-colors">
+                            <Play className="w-3 h-3" /> Run File
+                        </button>
+                    )}
                     <div className="border-t border-gray-700 my-0.5" />
                     <button onClick={() => { if (confirm(`Delete "${contextMenu.path}"?`)) deleteFile(contextMenu.path); else setContextMenu(null); }}
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
@@ -830,6 +898,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     </div>
                 </div>
             )}
+
+            {/* Toast notifications */}
+            <ToastContainer toasts={toasts} />
         </div>
     );
 }
