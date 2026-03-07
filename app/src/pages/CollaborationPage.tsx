@@ -630,7 +630,7 @@ export function CollaborationPage() {
   const doneTasks = tasks.filter(t => t.status === 'done');
 
   return (
-    <div className="min-h-screen bg-pairon-bg dark:bg-gray-900 flex flex-col">
+    <div className="h-screen bg-pairon-bg dark:bg-gray-900 flex flex-col overflow-hidden">
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="w-full px-4 sm:px-6 lg:px-8">

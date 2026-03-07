@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
-import { useToasts, ToastContainer, SearchPanel, Breadcrumb, RecentFiles, DiffViewer, usePanelResize } from './CollabIDEHelpers';
+import { useToasts, ToastContainer, SearchPanel, Breadcrumb, RecentFiles, DiffViewer, usePanelResize, ResizeDivider } from './CollabIDEHelpers';
 
 // ===== Types =====
 interface FileNode { name: string; type: 'file' | 'directory'; children?: FileNode[]; }
@@ -139,8 +139,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
     // Panel resize
     const sidebar = usePanelResize(200, 120, 400);
-    const preview = usePanelResize(350, 200, 600);
-    const terminal = usePanelResize(200, 100, 500, 'vertical');
+    const preview = usePanelResize(350, 200, 600, 'horizontal', true);
+    const terminal = usePanelResize(200, 100, 500, 'vertical', true);
 
     // Monaco refs
     const editorRef = useRef<MonacoTypes.editor.IStandaloneCodeEditor | null>(null);
@@ -789,8 +789,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <div className="p-1">{renderTree(tree)}</div>
                 </div>
                 {/* Sidebar resize divider */}
-                <div onMouseDown={sidebar.onMouseDown}
-                    className="w-[4px] flex-shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500 active:bg-blue-400 transition-colors" />
+                <ResizeDivider dividerRef={sidebar.dividerRef} />
 
                 {/* Editor + Terminal */}
                 <div className="flex-1 flex flex-col min-w-0">
@@ -859,8 +858,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     </div>
 
                     {/* Terminal resize handle */}
-                    <div onMouseDown={terminal.onMouseDown}
-                        className="h-[4px] flex-shrink-0 cursor-row-resize bg-gray-800 hover:bg-blue-500 active:bg-blue-400 transition-colors" />
+                    <ResizeDivider dividerRef={terminal.dividerRef} direction="vertical" />
                     <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
                         <div className="flex items-center justify-between px-3 py-1 bg-[#161b22] border-b border-gray-800">
                             <div className="flex items-center gap-1.5">
@@ -876,8 +874,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 </div>
 
                 {/* Preview resize divider */}
-                <div onMouseDown={preview.onMouseDown}
-                    className="w-[4px] flex-shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500 active:bg-blue-400 transition-colors" />
+                <ResizeDivider dividerRef={preview.dividerRef} />
 
                 {/* Preview + Mini Chat */}
                 <div className="flex-shrink-0 border-l border-gray-800 bg-[#161b22] flex flex-col" style={{ width: preview.size }}>

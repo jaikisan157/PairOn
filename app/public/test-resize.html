@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Panel Resize Test</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0d1117; color: white; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; }
+.top-bar { padding: 8px 12px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 12px; }
+.main { display: flex; flex: 1; overflow: hidden; }
+.sidebar { background: #0d1117; border-right: 1px solid #30363d; overflow-y: auto; padding: 8px; }
+.sidebar h3 { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+.divider-h { width: 4px; flex-shrink: 0; cursor: col-resize; background: #30363d; transition: background 0.15s; }
+.divider-h:hover, .divider-h.active { background: #58a6ff; }
+.divider-v { height: 4px; flex-shrink: 0; cursor: row-resize; background: #30363d; transition: background 0.15s; }
+.divider-v:hover, .divider-v.active { background: #58a6ff; }
+.editor-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.editor { flex: 1; background: #161b22; display: flex; align-items: center; justify-content: center; color: #888; font-size: 14px; }
+.terminal { background: #0d1117; border-top: 1px solid #30363d; display: flex; align-items: center; justify-content: center; color: #888; font-size: 12px; }
+.preview { background: #161b22; border-left: 1px solid #30363d; display: flex; align-items: center; justify-content: center; color: #888; font-size: 12px; flex-shrink: 0; }
+.info { position: fixed; bottom: 8px; left: 8px; background: #2d2f3f; padding: 6px 12px; border-radius: 6px; font-size: 11px; z-index: 100; }
+</style>
+</head>
+<body>
+<div class="top-bar">Panel Resize Test — Drag the blue dividers</div>
+<div class="main">
+    <div class="sidebar" id="sidebar" style="width: 200px">
+        <h3>Explorer</h3>
+        <div>📁 src/</div>
+        <div>&nbsp;&nbsp;📄 index.tsx</div>
+        <div>&nbsp;&nbsp;📄 App.tsx</div>
+    </div>
+    <div class="divider-h" id="divider-sidebar"></div>
+    <div class="editor-area">
+        <div class="editor" id="editor-label">Editor Area</div>
+        <div class="divider-v" id="divider-terminal"></div>
+        <div class="terminal" id="terminal" style="height: 200px">Terminal</div>
+    </div>
+    <div class="divider-h" id="divider-preview"></div>
+    <div class="preview" id="preview" style="width: 350px">Preview</div>
+</div>
+<div class="info" id="info">Sizes: sidebar=200, terminal=200, preview=350</div>
+
+<script>
+function makeResizable(dividerEl, targetEl, { prop, min, max, invert = false }) {
+    let startPos = 0, startSize = 0;
+    
+    dividerEl.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const isVertical = prop === 'height';
+        startPos = isVertical ? e.clientY : e.clientX;
+        startSize = parseInt(getComputedStyle(targetEl)[prop]);
+        
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = isVertical ? 'row-resize' : 'col-resize';
+        dividerEl.classList.add('active');
+        
+        function onMove(ev) {
+            ev.preventDefault();
+            const currentPos = isVertical ? ev.clientY : ev.clientX;
+            let delta = currentPos - startPos;
+            if (invert) delta = -delta;
+            const newSize = Math.max(min, Math.min(max, startSize + delta));
+            targetEl.style[prop] = newSize + 'px';
+            updateInfo();
+        }
+        
+        function onUp() {
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            dividerEl.classList.remove('active');
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        }
+        
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+    });
+}
+
+function updateInfo() {
+    const s = document.getElementById('sidebar').offsetWidth;
+    const t = document.getElementById('terminal').offsetHeight;
+    const p = document.getElementById('preview').offsetWidth;
+    document.getElementById('info').textContent = `Sizes: sidebar=${s}, terminal=${t}, preview=${p}`;
+}
+
+// Sidebar: drag RIGHT = bigger (normal)
+makeResizable(document.getElementById('divider-sidebar'), document.getElementById('sidebar'), { prop: 'width', min: 120, max: 400 });
+
+// Terminal: drag UP = bigger (invert)
+makeResizable(document.getElementById('divider-terminal'), document.getElementById('terminal'), { prop: 'height', min: 100, max: 500, invert: true });
+
+// Preview: drag LEFT = bigger (invert)
+makeResizable(document.getElementById('divider-preview'), document.getElementById('preview'), { prop: 'width', min: 200, max: 600, invert: true });
+</script>
+</body>
+</html>

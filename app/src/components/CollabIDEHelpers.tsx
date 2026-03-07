@@ -221,44 +221,72 @@ export function DiffViewer({ original, modified, fileName, onClose }: {
 }
 
 // ===== Panel Resize Hook =====
-export function usePanelResize(initialSize: number, min: number, max: number, direction: 'horizontal' | 'vertical' = 'horizontal') {
+export function usePanelResize(initialSize: number, min: number, max: number, direction: 'horizontal' | 'vertical' = 'horizontal', invert = false) {
     const [size, setSize] = useState(initialSize);
     const sizeRef = useRef(initialSize);
-    const startPos = useRef(0);
+    const dividerRef = useRef<HTMLDivElement>(null);
 
-    // Keep ref in sync with state
     useEffect(() => { sizeRef.current = size; }, [size]);
 
-    const onMouseDown = useCallback((e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        startPos.current = direction === 'horizontal' ? e.clientX : e.clientY;
-        const startSz = sizeRef.current;
+    useEffect(() => {
+        const el = dividerRef.current;
+        if (!el) return;
 
-        // Prevent text selection during drag
-        document.body.style.userSelect = 'none';
-        document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize';
+        const handleMouseDown = (e: MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const startPos = direction === 'horizontal' ? e.clientX : e.clientY;
+            const startSz = sizeRef.current;
 
-        const onMouseMove = (ev: MouseEvent) => {
-            ev.preventDefault();
-            const currentPos = direction === 'horizontal' ? ev.clientX : ev.clientY;
-            const delta = currentPos - startPos.current;
-            // For vertical (terminal at bottom), dragging UP = negative delta = bigger panel
-            const adjustedDelta = direction === 'vertical' ? -delta : delta;
-            const newSize = Math.max(min, Math.min(max, startSz + adjustedDelta));
-            setSize(newSize);
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize';
+            el.style.background = '#3b82f6';
+
+            const onMove = (ev: MouseEvent) => {
+                ev.preventDefault();
+                const pos = direction === 'horizontal' ? ev.clientX : ev.clientY;
+                let delta = pos - startPos;
+                if (invert) delta = -delta;
+                const newSz = Math.max(min, Math.min(max, startSz + delta));
+                sizeRef.current = newSz;
+                setSize(newSz);
+            };
+
+            const onUp = () => {
+                document.body.style.userSelect = '';
+                document.body.style.cursor = '';
+                el.style.background = '';
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+            };
+
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
         };
 
-        const onMouseUp = () => {
-            document.body.style.userSelect = '';
-            document.body.style.cursor = '';
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
-        };
+        el.addEventListener('mousedown', handleMouseDown);
+        return () => { el.removeEventListener('mousedown', handleMouseDown); };
+    }, [min, max, direction, invert]);
 
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('mouseup', onMouseUp);
-    }, [min, max, direction]);
+    return { size, setSize, dividerRef };
+}
 
-    return { size, setSize, onMouseDown };
+// ResizeDivider component
+export function ResizeDivider({ dividerRef, direction = 'horizontal' }: { dividerRef: React.RefObject<HTMLDivElement | null>; direction?: 'horizontal' | 'vertical' }) {
+    const isH = direction === 'horizontal';
+    return (
+        <div
+            ref={dividerRef}
+            style={{
+                [isH ? 'width' : 'height']: '5px',
+                flexShrink: 0,
+                cursor: isH ? 'col-resize' : 'row-resize',
+                background: '#21262d',
+                transition: 'background 0.15s',
+                zIndex: 10,
+            }}
+            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = '#58a6ff'; }}
+            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = '#21262d'; }}
+        />
+    );
 }
