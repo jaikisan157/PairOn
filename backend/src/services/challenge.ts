@@ -365,6 +365,10 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
         socket.to(`challenge:${data.sessionId}`).emit('code:file-unlock', data);
     });
 
+    socket.on('code:file-rename', (data: { sessionId: string; oldPath: string; newPath: string; senderId: string }) => {
+        socket.to(`challenge:${data.sessionId}`).emit('code:file-rename', data);
+    });
+
     // ===== Update task =====
     socket.on('challenge:update-task', async (sessionId: string, task: any) => {
         try {
