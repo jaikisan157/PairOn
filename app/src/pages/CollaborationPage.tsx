@@ -14,6 +14,11 @@ import {
   LogOut,
   Bot,
   Menu,
+  Plus,
+  Sparkles,
+  Wand2,
+  Edit3,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -94,6 +99,18 @@ export function CollaborationPage() {
 
   // Content moderation
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
+
+  // Task features
+  const [showNewTaskInput, setShowNewTaskInput] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [aiTaskSuggestions, setAiTaskSuggestions] = useState<string[]>([]);
+  const [loadingTaskSuggestions, setLoadingTaskSuggestions] = useState(false);
+  const [showTaskSuggestions, setShowTaskSuggestions] = useState(false);
+
+  // Edit project idea
+  const [editingProject, setEditingProject] = useState(false);
+  const [editProjectTitle, setEditProjectTitle] = useState('');
+  const [editProjectDesc, setEditProjectDesc] = useState('');
 
   // Activity check
   const [showActivityCheck, setShowActivityCheck] = useState(false);
@@ -301,6 +318,7 @@ export function CollaborationPage() {
         s.removeAllListeners('challenge:exit-declined');
         s.removeAllListeners('challenge:warning');
         s.removeAllListeners('challenge:rejoined');
+        s.removeAllListeners('challenge:task-suggestions');
       }
       if (timerRef.current) clearInterval(timerRef.current);
       if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
@@ -531,6 +549,64 @@ export function CollaborationPage() {
     }
   };
 
+  // Task suggestion handlers
+  const handleRequestTaskSuggestions = useCallback(() => {
+    if (!session) return;
+    setLoadingTaskSuggestions(true);
+    setShowTaskSuggestions(true);
+    const socket = socketService.getSocket();
+    socket?.emit('challenge:suggest-tasks', session.sessionId);
+    // Listen for response
+    socket?.once('challenge:task-suggestions', (data: { tasks: string[]; error?: string }) => {
+      setLoadingTaskSuggestions(false);
+      if (data.tasks?.length > 0) {
+        setAiTaskSuggestions(data.tasks);
+      }
+    });
+  }, [session]);
+
+  const handleAddTask = useCallback((title: string) => {
+    if (!session || !title.trim()) return;
+    socketService.getSocket()?.emit('challenge:add-task', session.sessionId, title.trim());
+  }, [session]);
+
+  const handleAddNewTask = useCallback(() => {
+    if (!newTaskTitle.trim() || !session) return;
+    handleAddTask(newTaskTitle);
+    setNewTaskTitle('');
+    setShowNewTaskInput(false);
+  }, [newTaskTitle, session, handleAddTask]);
+
+  const handleAddAllSuggested = useCallback(() => {
+    if (!session) return;
+    aiTaskSuggestions.forEach((title) => {
+      socketService.getSocket()?.emit('challenge:add-task', session.sessionId, title);
+    });
+    setShowTaskSuggestions(false);
+    setAiTaskSuggestions([]);
+  }, [session, aiTaskSuggestions]);
+
+  const handleAddSingleSuggestion = useCallback((title: string) => {
+    handleAddTask(title);
+    setAiTaskSuggestions(prev => prev.filter(t => t !== title));
+  }, [handleAddTask]);
+
+  const handleSaveProjectEdit = useCallback(() => {
+    if (!session) return;
+    setSession(prev => prev ? {
+      ...prev,
+      projectIdea: { ...prev.projectIdea, title: editProjectTitle, description: editProjectDesc },
+    } : null);
+    // Update localStorage too
+    const saved = localStorage.getItem('challenge_session');
+    if (saved) {
+      const data = JSON.parse(saved);
+      data.projectIdea = { ...data.projectIdea, title: editProjectTitle, description: editProjectDesc };
+      localStorage.setItem('challenge_session', JSON.stringify(data));
+    }
+    setEditingProject(false);
+  }, [session, editProjectTitle, editProjectDesc]);
+
   // ===== RENDER: Loading (session not yet loaded from localStorage) =====
   if (status !== 'matched' || !session) {
     return (
@@ -691,63 +767,230 @@ export function CollaborationPage() {
         {/* Kanban + Sidebar — toggleable */}
         {sidebarOpen && (<>
           <div className="w-96 bg-gray-50 dark:bg-gray-900/50 flex flex-col border-r border-gray-200 dark:border-gray-700">
+            {/* Task Header with + and AI buttons */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-              <h2 className="font-display font-semibold text-gray-900 dark:text-white">Tasks</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="font-display font-semibold text-gray-900 dark:text-white">Tasks</h2>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => { setShowNewTaskInput(true); setTimeout(() => document.getElementById('new-task-input')?.focus(), 50); }}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    title="Add task"
+                  >
+                    <Plus className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                  </button>
+                  <button
+                    onClick={handleRequestTaskSuggestions}
+                    disabled={loadingTaskSuggestions}
+                    className="p-1.5 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                    title="AI suggest tasks"
+                  >
+                    <Wand2 className={`w-4 h-4 text-purple-500 ${loadingTaskSuggestions ? 'animate-pulse' : ''}`} />
+                  </button>
+                </div>
+              </div>
+
+              {/* New task inline input */}
+              {showNewTaskInput && (
+                <div className="mt-3 flex gap-2">
+                  <Input
+                    id="new-task-input"
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddNewTask(); if (e.key === 'Escape') setShowNewTaskInput(false); }}
+                    placeholder="What needs to be done?"
+                    className="flex-1 text-sm rounded-lg h-8"
+                  />
+                  <button onClick={handleAddNewTask} disabled={!newTaskTitle.trim()} className="p-1.5 rounded-lg bg-pairon-accent text-white hover:bg-pairon-accent/90 disabled:opacity-40">
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* AI Task Suggestions Panel */}
+            <AnimatePresence>
+              {showTaskSuggestions && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden border-b border-purple-200 dark:border-purple-800"
+                >
+                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-purple-500" />
+                        <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">AI Suggestions</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {aiTaskSuggestions.length > 0 && (
+                          <button onClick={handleAddAllSuggested} className="text-[10px] font-medium text-purple-600 hover:text-purple-800 px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-800/40">
+                            Add All
+                          </button>
+                        )}
+                        <button onClick={() => { setShowTaskSuggestions(false); setAiTaskSuggestions([]); }} className="p-1 rounded hover:bg-purple-100 dark:hover:bg-purple-800/40">
+                          <X className="w-3 h-3 text-purple-500" />
+                        </button>
+                      </div>
+                    </div>
+                    {loadingTaskSuggestions ? (
+                      <div className="flex items-center justify-center py-4">
+                        <div className="w-5 h-5 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
+                        <span className="ml-2 text-xs text-purple-500">Generating tasks...</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {aiTaskSuggestions.map((title, i) => (
+                          <div key={i} className="flex items-center gap-2 group">
+                            <button
+                              onClick={() => handleAddSingleSuggestion(title)}
+                              className="flex-1 text-left text-xs px-2.5 py-1.5 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-700 hover:border-purple-400 hover:shadow-sm transition-all group-hover:bg-purple-50 dark:group-hover:bg-purple-900/30"
+                            >
+                              <span className="text-gray-700 dark:text-gray-300">{title}</span>
+                            </button>
+                            <button onClick={() => handleAddSingleSuggestion(title)} className="opacity-0 group-hover:opacity-100 p-1 rounded bg-purple-500 text-white transition-opacity">
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Empty state */}
+              {tasks.length === 0 && !showTaskSuggestions && (
+                <div className="text-center py-8">
+                  <div className="w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle2 className="w-6 h-6 text-gray-400" />
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">No tasks yet</p>
+                  <div className="flex flex-col gap-2">
+                    <Button size="sm" onClick={handleRequestTaskSuggestions} className="mx-auto text-xs gap-1 bg-purple-500 hover:bg-purple-600 text-white">
+                      <Wand2 className="w-3 h-3" /> Generate with AI
+                    </Button>
+                    <button
+                      onClick={() => { setShowNewTaskInput(true); setTimeout(() => document.getElementById('new-task-input')?.focus(), 50); }}
+                      className="text-xs text-pairon-accent hover:underline"
+                    >
+                      or add manually
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* To Do */}
-              <div>
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                  <Circle className="w-3 h-3" /> To Do ({todoTasks.length})
-                </h3>
-                <div className="space-y-2">
-                  {todoTasks.map(task => (
-                    <div key={task.id} onClick={() => handleTaskStatusChange(task.id, 'in-progress')}
-                      className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm cursor-pointer hover:shadow-md transition-shadow">
-                      <p className="text-sm text-gray-700 dark:text-gray-300">{task.title}</p>
-                    </div>
-                  ))}
+              {todoTasks.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                    <Circle className="w-3 h-3" /> To Do ({todoTasks.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {todoTasks.map(task => (
+                      <div key={task.id}
+                        className="flex items-center gap-2.5 p-2.5 bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md transition-all group cursor-pointer"
+                      >
+                        <button
+                          onClick={() => handleTaskStatusChange(task.id, 'in-progress')}
+                          className="w-5 h-5 rounded-full border-2 border-gray-300 hover:border-blue-500 hover:bg-blue-50 transition-colors flex-shrink-0"
+                        />
+                        <p className="text-sm text-gray-700 dark:text-gray-300 flex-1">{task.title}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
+
               {/* In Progress */}
-              <div>
-                <h3 className="text-xs font-semibold text-blue-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                  <MoreHorizontal className="w-3 h-3" /> In Progress ({inProgressTasks.length})
-                </h3>
-                <div className="space-y-2">
-                  {inProgressTasks.map(task => (
-                    <div key={task.id} onClick={() => handleTaskStatusChange(task.id, 'done')}
-                      className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
-                      <p className="text-sm text-gray-700 dark:text-gray-300">{task.title}</p>
-                    </div>
-                  ))}
+              {inProgressTasks.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-blue-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                    <MoreHorizontal className="w-3 h-3" /> In Progress ({inProgressTasks.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {inProgressTasks.map(task => (
+                      <div key={task.id}
+                        className="flex items-center gap-2.5 p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-xl hover:shadow-md transition-all cursor-pointer"
+                      >
+                        <button
+                          onClick={() => handleTaskStatusChange(task.id, 'done')}
+                          className="w-5 h-5 rounded-full border-2 border-blue-400 bg-blue-100 hover:bg-green-100 hover:border-green-500 transition-colors flex-shrink-0 flex items-center justify-center"
+                        >
+                          <div className="w-2 h-2 rounded-full bg-blue-400" />
+                        </button>
+                        <p className="text-sm text-gray-700 dark:text-gray-300 flex-1">{task.title}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
+
               {/* Done */}
-              <div>
-                <h3 className="text-xs font-semibold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                  <CheckCircle2 className="w-3 h-3" /> Done ({doneTasks.length})
-                </h3>
-                <div className="space-y-2">
-                  {doneTasks.map(task => (
-                    <div key={task.id} className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl opacity-60">
-                      <p className="text-sm text-gray-700 dark:text-gray-300 line-through">{task.title}</p>
-                    </div>
-                  ))}
+              {doneTasks.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                    <CheckCircle2 className="w-3 h-3" /> Done ({doneTasks.length})
+                  </h3>
+                  <div className="space-y-1.5">
+                    {doneTasks.map(task => (
+                      <div key={task.id} className="flex items-center gap-2.5 p-2.5 bg-green-50 dark:bg-green-900/20 rounded-xl opacity-60">
+                        <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                          <Check className="w-3 h-3 text-white" />
+                        </div>
+                        <p className="text-sm text-gray-700 dark:text-gray-300 flex-1 line-through">{task.title}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
           {/* Project sidebar */}
           <div className="w-64 bg-white dark:bg-gray-800 p-4 space-y-6">
             <div>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Project Idea</h3>
-              {session.projectIdea && (
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Project Idea</h3>
+                {session.projectIdea && !editingProject && (
+                  <button
+                    onClick={() => { setEditProjectTitle(session.projectIdea.title); setEditProjectDesc(session.projectIdea.description || ''); setEditingProject(true); }}
+                    className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    title="Edit project"
+                  >
+                    <Edit3 className="w-3 h-3 text-gray-400" />
+                  </button>
+                )}
+              </div>
+              {editingProject ? (
+                <div className="space-y-2">
+                  <Input
+                    value={editProjectTitle}
+                    onChange={(e) => setEditProjectTitle(e.target.value)}
+                    placeholder="Project title"
+                    className="text-sm rounded-lg h-8"
+                  />
+                  <textarea
+                    value={editProjectDesc}
+                    onChange={(e) => setEditProjectDesc(e.target.value)}
+                    placeholder="Project description"
+                    className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white resize-none h-16"
+                  />
+                  <div className="flex gap-1.5">
+                    <Button size="sm" onClick={handleSaveProjectEdit} className="flex-1 text-xs h-7 pairon-btn-primary">Save</Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingProject(false)} className="flex-1 text-xs h-7">Cancel</Button>
+                  </div>
+                </div>
+              ) : session.projectIdea ? (
                 <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{session.projectIdea.title}</p>
                   <p className="text-xs text-gray-500 mt-1">{session.projectIdea.description}</p>
                 </div>
+              ) : (
+                <p className="text-xs text-gray-400">No project idea set</p>
               )}
             </div>
 

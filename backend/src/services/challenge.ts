@@ -261,6 +261,88 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
         }
     });
 
+    // ===== AI Task Suggestions =====
+    socket.on('challenge:suggest-tasks', async (sessionId: string) => {
+        try {
+            const session = await CollaborationSession.findById(sessionId);
+            if (!session || session.status !== 'active') return;
+            if (!session.participants.includes(userId)) return;
+
+            const match = await Match.findById(session.matchId);
+            const projectTitle = match?.projectIdea?.title || 'Unknown Project';
+            const projectDesc = match?.projectIdea?.description || '';
+
+            const GROQ_API_KEY = process.env.GROK_API_KEY || process.env.GROQ_API_KEY;
+            if (!GROQ_API_KEY) {
+                socket.emit('challenge:task-suggestions', { tasks: [], error: 'AI not configured' });
+                return;
+            }
+
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model: 'llama-3.3-70b-versatile',
+                    messages: [{
+                        role: 'system',
+                        content: 'You are a project planning assistant. Generate a task breakdown for a coding project. Return ONLY a JSON array of strings, each being a concise task title. Include both frontend and backend tasks. Group them logically. Return 8-12 tasks max. No markdown, no explanation, just the JSON array.',
+                    }, {
+                        role: 'user',
+                        content: `Project: "${projectTitle}"\nDescription: ${projectDesc}\n\nGenerate a task breakdown with frontend and backend tasks.`,
+                    }],
+                    max_tokens: 500,
+                    temperature: 0.7,
+                }),
+            });
+
+            if (groqRes.ok) {
+                const data: any = await groqRes.json();
+                const content = data.choices?.[0]?.message?.content || '[]';
+                try {
+                    // Parse JSON array from AI response
+                    const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                    const taskTitles = JSON.parse(cleaned);
+                    socket.emit('challenge:task-suggestions', { tasks: taskTitles });
+                } catch {
+                    socket.emit('challenge:task-suggestions', { tasks: [], error: 'Failed to parse AI response' });
+                }
+            } else {
+                socket.emit('challenge:task-suggestions', { tasks: [], error: 'AI temporarily unavailable' });
+            }
+        } catch (error) {
+            console.error('Challenge task suggestion error:', error);
+            socket.emit('challenge:task-suggestions', { tasks: [], error: 'Failed to generate suggestions' });
+        }
+    });
+
+    // ===== Add new task =====
+    socket.on('challenge:add-task', async (sessionId: string, taskTitle: string) => {
+        try {
+            const session = await CollaborationSession.findById(sessionId);
+            if (!session || session.status !== 'active') return;
+            if (!session.participants.includes(userId)) return;
+
+            const newTask = {
+                id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                title: taskTitle.trim(),
+                status: 'todo',
+                assigneeId: null,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            };
+
+            session.tasks.push(newTask as any);
+            await session.save();
+
+            io.to(`challenge:${sessionId}`).emit('challenge:task-updated', newTask);
+        } catch (error) {
+            console.error('Challenge add task error:', error);
+        }
+    });
+
     // ===== Update task =====
     socket.on('challenge:update-task', async (sessionId: string, task: any) => {
         try {
