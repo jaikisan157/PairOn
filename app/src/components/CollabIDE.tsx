@@ -789,7 +789,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <div className="p-1">{renderTree(tree)}</div>
                 </div>
                 {/* Sidebar resize divider */}
-                <div onMouseDown={sidebar.onMouseDown} className="w-1 flex-shrink-0 cursor-col-resize hover:bg-blue-500/50 transition-colors" />
+                <div onMouseDown={sidebar.onMouseDown}
+                    className="w-[4px] flex-shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500 active:bg-blue-400 transition-colors" />
 
                 {/* Editor + Terminal */}
                 <div className="flex-1 flex flex-col min-w-0">
@@ -858,7 +859,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     </div>
 
                     {/* Terminal resize handle */}
-                    <div onMouseDown={terminal.onMouseDown} className="h-1 flex-shrink-0 cursor-row-resize hover:bg-blue-500/50 transition-colors" />
+                    <div onMouseDown={terminal.onMouseDown}
+                        className="h-[4px] flex-shrink-0 cursor-row-resize bg-gray-800 hover:bg-blue-500 active:bg-blue-400 transition-colors" />
                     <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
                         <div className="flex items-center justify-between px-3 py-1 bg-[#161b22] border-b border-gray-800">
                             <div className="flex items-center gap-1.5">
@@ -874,7 +876,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 </div>
 
                 {/* Preview resize divider */}
-                <div onMouseDown={preview.onMouseDown} className="w-1 flex-shrink-0 cursor-col-resize hover:bg-blue-500/50 transition-colors" />
+                <div onMouseDown={preview.onMouseDown}
+                    className="w-[4px] flex-shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500 active:bg-blue-400 transition-colors" />
 
                 {/* Preview + Mini Chat */}
                 <div className="flex-shrink-0 border-l border-gray-800 bg-[#161b22] flex flex-col" style={{ width: preview.size }}>

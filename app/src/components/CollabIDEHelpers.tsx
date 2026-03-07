@@ -223,24 +223,42 @@ export function DiffViewer({ original, modified, fileName, onClose }: {
 // ===== Panel Resize Hook =====
 export function usePanelResize(initialSize: number, min: number, max: number, direction: 'horizontal' | 'vertical' = 'horizontal') {
     const [size, setSize] = useState(initialSize);
-    const dragging = useRef(false);
+    const sizeRef = useRef(initialSize);
     const startPos = useRef(0);
-    const startSize = useRef(0);
+
+    // Keep ref in sync with state
+    useEffect(() => { sizeRef.current = size; }, [size]);
 
     const onMouseDown = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
-        dragging.current = true;
+        e.stopPropagation();
         startPos.current = direction === 'horizontal' ? e.clientX : e.clientY;
-        startSize.current = size;
+        const startSz = sizeRef.current;
+
+        // Prevent text selection during drag
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize';
+
         const onMouseMove = (ev: MouseEvent) => {
-            if (!dragging.current) return;
-            const delta = (direction === 'horizontal' ? ev.clientX : ev.clientY) - startPos.current;
-            setSize(Math.max(min, Math.min(max, startSize.current + delta)));
+            ev.preventDefault();
+            const currentPos = direction === 'horizontal' ? ev.clientX : ev.clientY;
+            const delta = currentPos - startPos.current;
+            // For vertical (terminal at bottom), dragging UP = negative delta = bigger panel
+            const adjustedDelta = direction === 'vertical' ? -delta : delta;
+            const newSize = Math.max(min, Math.min(max, startSz + adjustedDelta));
+            setSize(newSize);
         };
-        const onMouseUp = () => { dragging.current = false; window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
+
+        const onMouseUp = () => {
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('mouseup', onMouseUp);
-    }, [size, min, max, direction]);
+    }, [min, max, direction]);
 
     return { size, setSize, onMouseDown };
 }
