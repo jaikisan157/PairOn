@@ -428,35 +428,20 @@ export function CollaborationPage() {
     localStorage.removeItem('challenge_session');
   }
 
-  // ===== Force quit on unmount (URL change / navigation away) =====
-  // Only for SPRINT (3hr). Long sessions (24hr/7day) persist.
+  // ===== Session persistence on unmount =====
+  // ALL modes: session persists. No auto force-quit on navigation.
+  // Sessions only end via: force-quit button, approved exit request, or timer expiry.
   useEffect(() => {
     return () => {
-      if (!gracefulEndRef.current && sessionRef.current) {
-        const mode = sessionRef.current.mode;
-        if (mode === 'sprint') {
-          // Sprint: force quit — user shouldn't leave
-          socketService.getSocket()?.emit('challenge:force-quit', sessionRef.current.sessionId);
-          localStorage.removeItem('challenge_session');
-        }
-        // challenge/build: keep localStorage so user can resume from Dashboard
-      }
+      // Do nothing — session stays alive in backend & localStorage
+      // User can resume from Dashboard "Recent Sessions"
     };
   }, []);
 
-  // ===== Warn before closing tab =====
+  // ===== Warn before closing tab (all modes) =====
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (status === 'matched' && session) {
-        if (session.mode === 'sprint') {
-          // Sprint: warn and force quit
-          e.preventDefault();
-          e.returnValue = 'You have an active sprint session. Leaving will count as a force quit!';
-          socketService.getSocket()?.emit('challenge:force-quit', session.sessionId);
-          localStorage.removeItem('challenge_session');
-          return e.returnValue;
-        }
-        // Long sessions: just warn, don't force quit
         e.preventDefault();
         e.returnValue = 'You have an active session. Your progress is saved — you can resume from the Dashboard.';
         return e.returnValue;
@@ -574,17 +559,12 @@ export function CollaborationPage() {
             <div className="flex items-center gap-4">
               <button
                 onClick={() => {
-                  if (session.mode === 'challenge' || session.mode === 'build') {
-                    // Long sessions: just go back, session persists
-                    gracefulEndRef.current = true;
-                    navigate('/dashboard');
-                  } else {
-                    // Sprint: request to leave
-                    setShowExitModal(true);
-                  }
+                  // ALL modes: go back to dashboard, session persists
+                  gracefulEndRef.current = true;
+                  navigate('/dashboard');
                 }}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title={session.mode === 'sprint' ? 'Request to leave' : 'Back to Dashboard (session continues)'}
+                title="Back to Dashboard (session continues)"
               >
                 <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
