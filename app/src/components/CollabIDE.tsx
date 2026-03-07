@@ -7,7 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 import {
     FolderOpen, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
-    Trash2, Pencil,
+    Trash2, Pencil, Copy, FolderPlus, Search, Sun, Moon, Map as MapIcon,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
@@ -112,6 +112,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [previewWidth, setPreviewWidth] = useState(350);
     const [isFullscreen, setIsFullscreen] = useState(false);
 
+    // Editor settings
+    const [showMinimap, setShowMinimap] = useState(false);
+    const [editorTheme, setEditorTheme] = useState<'vs-dark' | 'vs' | 'hc-black'>('vs-dark');
+    const [fontSize, setFontSize] = useState(14);
+
+    // Quick open (Ctrl+P)
+    const [showQuickOpen, setShowQuickOpen] = useState(false);
+    const [quickOpenQuery, setQuickOpenQuery] = useState('');
+    const quickOpenInputRef = useRef<HTMLInputElement>(null);
+
     // Monaco refs
     const editorRef = useRef<MonacoTypes.editor.IStandaloneCodeEditor | null>(null);
     const monacoRef = useRef<typeof MonacoTypes | null>(null);
@@ -135,6 +145,28 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     useEffect(() => {
         if (showMiniChat) { miniChatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); onMessagesSeen(messages.length); }
     }, [messages.length, showMiniChat, onMessagesSeen]);
+
+    // Ctrl+P shortcut
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+                e.preventDefault();
+                setShowQuickOpen(true);
+                setQuickOpenQuery('');
+                setTimeout(() => quickOpenInputRef.current?.focus(), 50);
+            }
+            // Ctrl+= / Ctrl+- for font size
+            if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 28)); }
+            if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    // Quick open filtered files
+    const quickOpenFiles = Object.keys(files).filter(p =>
+        !quickOpenQuery || p.toLowerCase().includes(quickOpenQuery.toLowerCase())
+    ).slice(0, 15);
 
     // ===== Autosave =====
     const autosave = useCallback((updated: Record<string, string>) => {
@@ -420,6 +452,53 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         setExpandedDirs(prev => { const n = new Set(prev); if (n.has(dir)) n.delete(dir); else n.add(dir); return n; });
     }, []);
 
+    // Duplicate file
+    const duplicateFile = useCallback((path: string) => {
+        const ext = path.lastIndexOf('.');
+        const newPath = ext > 0 ? path.slice(0, ext) + '-copy' + path.slice(ext) : path + '-copy';
+        const content = files[path] || '';
+        setFiles(prev => { const next = { ...prev, [newPath]: content }; autosave(next); return next; });
+        switchToFile(newPath);
+        if (webcontainerRef.current) {
+            const dir = newPath.split('/').slice(0, -1).join('/');
+            if (dir) webcontainerRef.current.fs.mkdir(dir, { recursive: true }).catch(() => { });
+            webcontainerRef.current.fs.writeFile(newPath, content).catch(() => { });
+        }
+        const socket = socketService.getSocket();
+        socket?.emit('code:file-create', { sessionId, path: newPath, content, senderId: socket?.id });
+        setContextMenu(null);
+    }, [files, sessionId, autosave, switchToFile]);
+
+    // Create folder
+    const createFolder = useCallback((parentPath?: string) => {
+        const folderName = prompt('Folder name:', 'new-folder');
+        if (!folderName) return;
+        const fullPath = parentPath ? `${parentPath}/${folderName}` : folderName;
+        // Create a .gitkeep to represent the folder
+        const keepPath = `${fullPath}/.gitkeep`;
+        setFiles(prev => { const next = { ...prev, [keepPath]: '' }; autosave(next); return next; });
+        setExpandedDirs(prev => { const n = new Set(prev); n.add(fullPath); return n; });
+        if (webcontainerRef.current) webcontainerRef.current.fs.mkdir(fullPath, { recursive: true }).catch(() => { });
+        setContextMenu(null);
+    }, [autosave]);
+
+    // Save As
+    const saveAs = useCallback((path: string) => {
+        const newName = prompt('Save as:', path);
+        if (!newName || newName === path) return;
+        const content = files[path] || '';
+        setFiles(prev => { const next = { ...prev, [newName]: content }; autosave(next); return next; });
+        switchToFile(newName);
+        if (webcontainerRef.current) {
+            const dir = newName.split('/').slice(0, -1).join('/');
+            if (dir) webcontainerRef.current.fs.mkdir(dir, { recursive: true }).catch(() => { });
+            webcontainerRef.current.fs.writeFile(newName, content).catch(() => { });
+        }
+        const socket = socketService.getSocket();
+        socket?.emit('code:file-create', { sessionId, path: newName, content, senderId: socket?.id });
+        setContextMenu(null);
+    }, [files, sessionId, autosave, switchToFile]);
+
     const downloadZip = useCallback(async () => {
         const { default: JSZip } = await import('jszip');
         const zip = new JSZip();
@@ -532,6 +611,18 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         </button>
                     )}
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setShowMinimap(!showMinimap)} className={`p-1.5 rounded transition-colors ${showMinimap ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`} title="Toggle minimap">
+                        <MapIcon className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setEditorTheme(t => t === 'vs-dark' ? 'vs' : t === 'vs' ? 'hc-black' : 'vs-dark')}
+                        className="p-1.5 text-gray-400 hover:text-white rounded" title={`Theme: ${editorTheme}`}>
+                        {editorTheme === 'vs' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                    </button>
+                    <span className="text-[10px] text-gray-500 px-1">{fontSize}px</span>
+                    <button onClick={() => { setShowQuickOpen(true); setQuickOpenQuery(''); setTimeout(() => quickOpenInputRef.current?.focus(), 50); }}
+                        className="p-1.5 text-gray-400 hover:text-white rounded" title="Quick Open (Ctrl+P)">
+                        <Search className="w-3.5 h-3.5" />
+                    </button>
                     <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 text-gray-400 hover:text-white rounded">
                         {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                     </button>
@@ -544,7 +635,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 <div className="flex-shrink-0 bg-[#0d1117] border-r border-gray-800 overflow-y-auto" style={{ width: sidebarWidth }}>
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Explorer</span>
-                        <button onClick={() => setShowNewFile(true)} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
+                        <div className="flex items-center gap-0.5">
+                            <button onClick={() => createFolder()} className="p-0.5 text-gray-500 hover:text-white rounded" title="New folder"><FolderPlus className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => setShowNewFile(true)} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
+                        </div>
                     </div>
                     {showNewFile && (
                         <div className="px-2 py-1 border-b border-gray-800">
@@ -582,10 +676,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         )}
                         <Editor
                             height="100%"
-                            theme="vs-dark"
+                            theme={editorTheme}
                             onMount={handleEditorMount}
                             options={{
-                                minimap: { enabled: false }, fontSize: 14,
+                                minimap: { enabled: showMinimap }, fontSize,
                                 fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
                                 lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true,
                                 tabSize: 2, wordWrap: 'on', bracketPairColorization: { enabled: true },
@@ -674,15 +768,66 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             {/* Context Menu */}
             {contextMenu && (
-                <div className="fixed z-50 bg-[#1e2030] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
+                <div className="fixed z-50 bg-[#1e2030] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
                     <button onClick={() => { setRenameValue(contextMenu.path.split('/').pop() || ''); setRenamingPath(contextMenu.path); setContextMenu(null); }}
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
                         <Pencil className="w-3 h-3" /> Rename
                     </button>
+                    {contextMenu.type === 'file' && (
+                        <>
+                            <button onClick={() => duplicateFile(contextMenu.path)}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                                <Copy className="w-3 h-3" /> Duplicate
+                            </button>
+                            <button onClick={() => saveAs(contextMenu.path)}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                                <Download className="w-3 h-3" /> Save As
+                            </button>
+                        </>
+                    )}
+                    {contextMenu.type === 'directory' && (
+                        <button onClick={() => createFolder(contextMenu.path)}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                            <FolderPlus className="w-3 h-3" /> New Subfolder
+                        </button>
+                    )}
+                    <div className="border-t border-gray-700 my-0.5" />
                     <button onClick={() => { if (confirm(`Delete "${contextMenu.path}"?`)) deleteFile(contextMenu.path); else setContextMenu(null); }}
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
                         <Trash2 className="w-3 h-3" /> Delete
                     </button>
+                </div>
+            )}
+
+            {/* Quick Open Modal (Ctrl+P) */}
+            {showQuickOpen && (
+                <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setShowQuickOpen(false)}>
+                    <div className="bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl w-[420px] overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700">
+                            <Search className="w-4 h-4 text-gray-500" />
+                            <input ref={quickOpenInputRef} autoFocus value={quickOpenQuery} onChange={(e) => setQuickOpenQuery(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Escape') setShowQuickOpen(false);
+                                    if (e.key === 'Enter' && quickOpenFiles.length > 0) { switchToFile(quickOpenFiles[0]); setShowQuickOpen(false); }
+                                }}
+                                placeholder="Search files by name..."
+                                className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none" />
+                        </div>
+                        <div className="max-h-[300px] overflow-y-auto">
+                            {quickOpenFiles.map(path => (
+                                <button key={path} onClick={() => { switchToFile(path); setShowQuickOpen(false); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#2d2f3f] transition-colors text-left">
+                                    <File className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                    <span className="text-gray-300 truncate">{path}</span>
+                                    <span className="text-gray-600 ml-auto text-[10px]">{path.split('/').slice(0, -1).join('/')}</span>
+                                </button>
+                            ))}
+                            {quickOpenFiles.length === 0 && <div className="px-3 py-4 text-xs text-gray-500 text-center">No files found</div>}
+                        </div>
+                        <div className="px-3 py-1.5 border-t border-gray-700 text-[10px] text-gray-600 flex gap-3">
+                            <span>↑↓ Navigate</span><span>↵ Open</span><span>Esc Close</span>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
