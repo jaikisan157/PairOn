@@ -67,6 +67,7 @@ export function QuickConnectPage() {
     const [proposalMessage, setProposalMessage] = useState('');
     const [loadingIdeas, setLoadingIdeas] = useState(false);
     const [proposalSent, setProposalSent] = useState(false);
+    const [proposalDeclinedMsg, setProposalDeclinedMsg] = useState<string | null>(null);
     const [showEndConfirm, setShowEndConfirm] = useState(false);
     const [incomingProposals, setIncomingProposals] = useState<any[]>([]);
     const [viewingProposal, setViewingProposal] = useState<any | null>(null);
@@ -175,6 +176,13 @@ export function QuickConnectPage() {
             navigate('/collaborate');
         });
 
+        // Listen for proposal declined → show notification to proposer
+        socketService.onProposalDeclined((_proposalId: string) => {
+            setProposalSent(false);
+            setProposalDeclinedMsg('Your proposal was declined by the other user.');
+            setTimeout(() => setProposalDeclinedMsg(null), 5000);
+        });
+
         return () => {
             const sock = socketService.getSocket();
             if (sock) {
@@ -187,6 +195,7 @@ export function QuickConnectPage() {
                 sock.removeAllListeners('quickchat:rated');
                 sock.removeAllListeners('collab:ai-ideas');
                 sock.removeAllListeners('collab:proposal-received');
+                sock.removeAllListeners('collab:proposal-declined');
                 sock.removeAllListeners('challenge:matched');
             }
         };
@@ -298,7 +307,13 @@ export function QuickConnectPage() {
                     <div className="flex items-center justify-between h-16">
                         <div className="flex items-center gap-4">
                             <button
-                                onClick={() => navigate('/dashboard')}
+                                onClick={() => {
+                                    // End active quick chat for both users
+                                    if (activeChat && chatStatus === 'chatting') {
+                                        socketService.endQuickChat(activeChat.chatId);
+                                    }
+                                    navigate('/dashboard');
+                                }}
                                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                             >
                                 <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -363,6 +378,26 @@ export function QuickConnectPage() {
                             <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                             <p className="text-sm text-red-700 dark:text-red-300">{warning.message}</p>
                             <button onClick={() => setWarning(null)} className="ml-auto">
+                                <X className="w-4 h-4 text-red-400" />
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Proposal Declined Toast */}
+            <AnimatePresence>
+                {proposalDeclinedMsg && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className="bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-3"
+                    >
+                        <div className="flex items-center gap-3 max-w-4xl mx-auto">
+                            <X className="w-5 h-5 text-red-500 flex-shrink-0" />
+                            <p className="text-sm font-medium text-red-700 dark:text-red-300">{proposalDeclinedMsg}</p>
+                            <button onClick={() => setProposalDeclinedMsg(null)} className="ml-auto">
                                 <X className="w-4 h-4 text-red-400" />
                             </button>
                         </div>

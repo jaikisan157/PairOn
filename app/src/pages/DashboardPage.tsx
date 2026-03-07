@@ -176,6 +176,18 @@ export function DashboardPage() {
 
   const handleStartMatching = () => {
     if (!selectedMode) return;
+    // Block if user has an active session
+    if (activeSessions.length > 0) {
+      const sess = activeSessions[0];
+      const modeLabels: Record<string, string> = { sprint: 'Sprint', challenge: '24-Hour Challenge', build: '7-Day Build' };
+      const confirmed = window.confirm(
+        `You already have an active ${modeLabels[sess.mode] || 'session'} with ${sess.partnerName}.\n\nFinish or leave your current session before starting a new one.\n\nClick OK to go to your active session.`
+      );
+      if (confirmed) {
+        navigate('/collaborate');
+      }
+      return;
+    }
     // Always show rules modal before matching
     setShowRulesModal(true);
     setRulesAgreed(false);

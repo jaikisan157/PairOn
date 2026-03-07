@@ -138,17 +138,6 @@ export function setupProposalHandlers(io: Server, socket: Socket) {
             const recipient = await User.findById(userId);
             if (!proposer || !recipient) return;
 
-            // Create a Match record
-            const matchResult = calculateMatchScore(proposer, recipient);
-            const match = new Match({
-                users: [proposal.proposerId, userId],
-                mode: proposal.mode,
-                matchScore: matchResult.score,
-                projectIdea: proposal.projectIdea,
-                status: 'accepted',
-            });
-            await match.save();
-
             // Duration based on mode: sprint=1hr, challenge=2hr, build=3hr
             const durationMap: Record<string, number> = {
                 sprint: 60,
@@ -159,11 +148,24 @@ export function setupProposalHandlers(io: Server, socket: Socket) {
             const now = new Date();
             const endsAt = new Date(now.getTime() + durationMinutes * 60 * 1000);
 
-            // Create Collaboration Session (using correct field names)
+            // Create a Match record (use correct field names!)
+            const matchResult = calculateMatchScore(proposer, recipient);
+            const match = new Match({
+                user1Id: proposal.proposerId,
+                user2Id: userId,
+                mode: proposal.mode,
+                matchScore: matchResult.score,
+                projectIdea: proposal.projectIdea,
+                status: 'active',
+                startedAt: now,
+                endsAt: endsAt,
+            });
+            await match.save();
+
+            // Create Collaboration Session (no projectIdea field in schema)
             const session = new CollaborationSession({
                 matchId: match._id.toString(),
                 participants: [proposal.proposerId, userId],
-                projectIdea: proposal.projectIdea,
                 messages: [{
                     id: `sys-${Date.now()}`,
                     senderId: 'system',
