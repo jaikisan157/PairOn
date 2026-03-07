@@ -84,6 +84,7 @@ export function CollaborationPage() {
   const [newMessage, setNewMessage] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState<'chat' | 'code'>('chat');
+  const [lastSeenMessageCount, setLastSeenMessageCount] = useState(0);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submissionLink, setSubmissionLink] = useState('');
   const [submissionDescription, setSubmissionDescription] = useState('');
@@ -690,9 +691,11 @@ export function CollaborationPage() {
               <Button variant="outline" size="sm" onClick={() => setShowForceQuitConfirm(true)} className="text-red-600 border-red-200 hover:bg-red-50">
                 <X className="w-4 h-4 mr-1" /> Force leave
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-500" title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
-                <Menu className="w-5 h-5" />
-              </Button>
+              {activeView === 'chat' && (
+                <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-500" title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
+                  <Menu className="w-5 h-5" />
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -709,6 +712,14 @@ export function CollaborationPage() {
                 sessionId={session.sessionId}
                 partnerId={session.partnerId}
                 projectTitle={session.projectIdea?.title || 'Untitled Project'}
+                userId={user?.id || ''}
+                userName={user?.name || 'You'}
+                messages={session.messages}
+                onSendMessage={(msg) => {
+                  socketService.getSocket()?.emit('challenge:message', session.sessionId, msg);
+                }}
+                lastSeenMessageCount={lastSeenMessageCount}
+                onMessagesSeen={(count) => setLastSeenMessageCount(count)}
               />
             </div>
           </div>
@@ -798,8 +809,8 @@ export function CollaborationPage() {
           </div>
         )}
 
-        {/* Kanban + Sidebar — toggleable */}
-        {sidebarOpen && (<>
+        {/* Kanban + Sidebar — only in chat view */}
+        {activeView === 'chat' && sidebarOpen && (<>
           <div className="w-96 bg-gray-50 dark:bg-gray-900/50 flex flex-col border-r border-gray-200 dark:border-gray-700">
             {/* Task Header with + and AI buttons */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">

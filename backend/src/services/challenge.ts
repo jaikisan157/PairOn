@@ -357,6 +357,14 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
         socket.to(`challenge:${data.sessionId}`).emit('code:file-delete', data);
     });
 
+    socket.on('code:file-lock', (data: { sessionId: string; path: string; userId: string; userName: string }) => {
+        socket.to(`challenge:${data.sessionId}`).emit('code:file-lock', data);
+    });
+
+    socket.on('code:file-unlock', (data: { sessionId: string; path: string; userId: string }) => {
+        socket.to(`challenge:${data.sessionId}`).emit('code:file-unlock', data);
+    });
+
     // ===== Update task =====
     socket.on('challenge:update-task', async (sessionId: string, task: any) => {
         try {
