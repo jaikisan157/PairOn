@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { formatTime } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
+import { CollabIDE } from '@/components/CollabIDE';
 import type { TaskStatus } from '@/types';
 
 // ===== Types =====
@@ -82,6 +83,7 @@ export function CollaborationPage() {
   // UI state
   const [newMessage, setNewMessage] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeView, setActiveView] = useState<'chat' | 'code'>('chat');
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submissionLink, setSubmissionLink] = useState('');
   const [submissionDescription, setSubmissionDescription] = useState('');
@@ -655,6 +657,24 @@ export function CollaborationPage() {
               </div>
             </div>
 
+            {/* View toggle */}
+            <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+              <button
+                onClick={() => setActiveView('chat')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeView === 'chat' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+              >
+                <Send className="w-3 h-3" /> Chat
+              </button>
+              <button
+                onClick={() => setActiveView('code')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeView === 'code' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+              >
+                <span className="text-sm">💻</span> Code
+              </button>
+            </div>
+
             <div className="flex items-center gap-3">
               {/* Timer */}
               <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full ${timeRemaining < 300 ? 'bg-red-100 text-red-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
@@ -680,89 +700,103 @@ export function CollaborationPage() {
 
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
-        {/* Chat Panel */}
-        <div className="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700">
-          {/* Warning toast */}
-          <AnimatePresence>
-            {warningMessage && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="px-4 py-3 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800"
-              >
-                <p className="text-sm text-red-600 dark:text-red-400 font-medium">{warningMessage}</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* AI hint */}
-          <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center gap-2">
-            <Bot className="w-4 h-4 text-blue-500" />
-            <span className="text-xs text-blue-600 dark:text-blue-400">
-              Type <strong>@ai your question</strong> to ask the AI assistant
-            </span>
-          </div>
-
-          {/* Exit request banners */}
-          {exitRequestSent && (
-            <div className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 text-sm text-yellow-700">
-              ⏳ Exit request sent. Waiting for partner's response...
-            </div>
-          )}
-          {exitDeclined && (
-            <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 text-sm text-red-700">
-              ❌ Your exit request was declined.
-            </div>
-          )}
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex ${msg.senderId === user?.id ? 'justify-end' : 'justify-start'}`}>
-                {msg.type === 'system' ? (
-                  <div className="mx-auto px-4 py-2 bg-gray-100 dark:bg-gray-700/50 rounded-full text-xs text-gray-500 dark:text-gray-400 text-center max-w-md">
-                    {msg.content}
-                  </div>
-                ) : msg.type === 'ai' ? (
-                  <div className="max-w-[80%] px-4 py-3 bg-blue-50 dark:bg-blue-900/30 rounded-2xl border border-blue-200 dark:border-blue-700">
-                    <div className="flex items-center gap-1 mb-1">
-                      <Bot className="w-3 h-3 text-blue-500" />
-                      <span className="text-xs font-semibold text-blue-500">AI Assistant</span>
-                    </div>
-                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{msg.content}</p>
-                  </div>
-                ) : (
-                  <div className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${msg.senderId === user?.id
-                    ? 'bg-pairon-accent text-white rounded-br-md'
-                    : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-md shadow-sm'
-                    }`}>
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                    <span className={`text-[10px] mt-1 block ${msg.senderId === user?.id ? 'text-white/60' : 'text-gray-400'}`}>
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input */}
-          <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-            <div className="flex gap-2">
-              <Input
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Type a message... (or @ai your question)"
-                className="flex-1 rounded-full"
+        {/* Chat/Code area */}
+        {activeView === 'code' ? (
+          /* Full IDE view */
+          <div className="flex-1 flex flex-col">
+            <div className="flex-1 min-h-0">
+              <CollabIDE
+                sessionId={session.sessionId}
+                partnerId={session.partnerId}
+                projectTitle={session.projectIdea?.title || 'Untitled Project'}
               />
-              <Button type="submit" size="icon" disabled={!newMessage.trim()} className="rounded-full pairon-btn-primary">
-                <Send className="w-4 h-4" />
-              </Button>
             </div>
-          </form>
-        </div>
+          </div>
+        ) : (
+          /* Chat Panel */
+          <div className="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700">
+            {/* Warning toast */}
+            <AnimatePresence>
+              {warningMessage && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="px-4 py-3 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800"
+                >
+                  <p className="text-sm text-red-600 dark:text-red-400 font-medium">{warningMessage}</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* AI hint */}
+            <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center gap-2">
+              <Bot className="w-4 h-4 text-blue-500" />
+              <span className="text-xs text-blue-600 dark:text-blue-400">
+                Type <strong>@ai your question</strong> to ask the AI assistant
+              </span>
+            </div>
+
+            {/* Exit request banners */}
+            {exitRequestSent && (
+              <div className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 text-sm text-yellow-700">
+                ⏳ Exit request sent. Waiting for partner's response...
+              </div>
+            )}
+            {exitDeclined && (
+              <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 text-sm text-red-700">
+                ❌ Your exit request was declined.
+              </div>
+            )}
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {messages.map((msg) => (
+                <div key={msg.id} className={`flex ${msg.senderId === user?.id ? 'justify-end' : 'justify-start'}`}>
+                  {msg.type === 'system' ? (
+                    <div className="mx-auto px-4 py-2 bg-gray-100 dark:bg-gray-700/50 rounded-full text-xs text-gray-500 dark:text-gray-400 text-center max-w-md">
+                      {msg.content}
+                    </div>
+                  ) : msg.type === 'ai' ? (
+                    <div className="max-w-[80%] px-4 py-3 bg-blue-50 dark:bg-blue-900/30 rounded-2xl border border-blue-200 dark:border-blue-700">
+                      <div className="flex items-center gap-1 mb-1">
+                        <Bot className="w-3 h-3 text-blue-500" />
+                        <span className="text-xs font-semibold text-blue-500">AI Assistant</span>
+                      </div>
+                      <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{msg.content}</p>
+                    </div>
+                  ) : (
+                    <div className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${msg.senderId === user?.id
+                      ? 'bg-pairon-accent text-white rounded-br-md'
+                      : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-md shadow-sm'
+                      }`}>
+                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      <span className={`text-[10px] mt-1 block ${msg.senderId === user?.id ? 'text-white/60' : 'text-gray-400'}`}>
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input */}
+            <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <div className="flex gap-2">
+                <Input
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Type a message... (or @ai your question)"
+                  className="flex-1 rounded-full"
+                />
+                <Button type="submit" size="icon" disabled={!newMessage.trim()} className="rounded-full pairon-btn-primary">
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
 
         {/* Kanban + Sidebar — toggleable */}
         {sidebarOpen && (<>

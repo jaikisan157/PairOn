@@ -343,6 +343,20 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
         }
     });
 
+    // ===== Code file sync (Collaborative IDE) =====
+    socket.on('code:file-change', (data: { sessionId: string; path: string; content: string; senderId: string }) => {
+        // Broadcast to partner in the same challenge room
+        socket.to(`challenge:${data.sessionId}`).emit('code:file-change', data);
+    });
+
+    socket.on('code:file-create', (data: { sessionId: string; path: string; content: string; senderId: string }) => {
+        socket.to(`challenge:${data.sessionId}`).emit('code:file-create', data);
+    });
+
+    socket.on('code:file-delete', (data: { sessionId: string; path: string; senderId: string }) => {
+        socket.to(`challenge:${data.sessionId}`).emit('code:file-delete', data);
+    });
+
     // ===== Update task =====
     socket.on('challenge:update-task', async (sessionId: string, task: any) => {
         try {
