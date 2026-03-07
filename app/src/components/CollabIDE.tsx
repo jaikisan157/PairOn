@@ -738,7 +738,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     return (
         <div className={`flex flex-col bg-[#0d1117] text-white ${isFullscreen ? 'fixed inset-0 z-50' : 'h-full'}`}>
             {/* Top bar */}
-            <div className="flex items-center justify-between px-3 py-1.5 bg-[#161b22] border-b border-gray-800 flex-shrink-0">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-[#161b22] border-b border-gray-800 flex-shrink-0 overflow-hidden">
                 <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-gray-400">📁 {projectTitle}</span>
                     {activeFileLocked && (
@@ -798,13 +798,20 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 </div>
             </div>
 
-            {/* Main */}
-            <div className="flex flex-1 overflow-hidden">
-                {/* Search Panel */}
-                {showSearchPanel && <SearchPanel files={files} onOpenFile={switchToFile} onClose={() => setShowSearchPanel(false)} onReplace={replaceInFile} />}
-
-                {/* File explorer */}
-                <div className="flex-shrink-0 bg-[#0d1117] border-r border-gray-800 overflow-y-auto" style={{ width: sidebar.size }}>
+            {/* Main — CSS Grid ensures columns never exceed container width */}
+            <div className="flex-1 overflow-hidden" style={{
+                display: 'grid',
+                gridTemplateColumns: `${sidebar.size}px 5px 1fr 5px ${preview.size}px`,
+                minHeight: 0,
+            }}>
+                {/* File explorer (+ Search overlay) */}
+                <div className="bg-[#0d1117] border-r border-gray-800 overflow-hidden min-w-0 relative">
+                    {/* Search Panel overlays the sidebar */}
+                    {showSearchPanel && (
+                        <div className="absolute inset-0 z-20">
+                            <SearchPanel files={files} onOpenFile={switchToFile} onClose={() => setShowSearchPanel(false)} onReplace={replaceInFile} />
+                        </div>
+                    )}
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Explorer</span>
                         <div className="flex items-center gap-0.5">
@@ -820,13 +827,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 className="w-full bg-[#1e2030] border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500" />
                         </div>
                     )}
-                    <div className="p-1">{renderTree(tree)}</div>
+                    <div className="p-1 overflow-y-auto flex-1">{renderTree(tree)}</div>
                 </div>
                 {/* Sidebar resize divider */}
                 <ResizeDivider dividerRef={sidebar.dividerRef} />
 
                 {/* Editor + Terminal */}
-                <div className="flex-1 flex flex-col min-w-0">
+                <div className="flex flex-col min-w-0 overflow-hidden">
                     <div className="flex items-center bg-[#161b22] border-b border-gray-800 overflow-x-auto flex-shrink-0">
                         {openTabs.map(tab => {
                             const locked = isLockedByPartner(tab);
@@ -961,7 +968,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 <ResizeDivider dividerRef={preview.dividerRef} />
 
                 {/* Preview + Mini Chat */}
-                <div className="flex-shrink-0 border-l border-gray-800 bg-[#161b22] flex flex-col" style={{ width: preview.size }}>
+                <div className="border-l border-gray-800 bg-[#161b22] flex flex-col min-w-0 overflow-hidden">
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Preview</span>
                         <div className="flex items-center gap-1">
