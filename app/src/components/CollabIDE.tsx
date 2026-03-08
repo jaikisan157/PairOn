@@ -284,6 +284,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.writeln('               Next.js, Vite, Express, HTML/CSS');
         term.writeln('\x1b[31m  ✗ Not supported:\x1b[0m Python, Java, Go, Rust,');
         term.writeln('                    C/C++, Ruby, PHP, Swift');
+        term.writeln('\x1b[36m  💾 Storage:\x1b[0m Firebase, Supabase, localStorage,');
+        term.writeln('              REST APIs (no local MongoDB/PostgreSQL)');
         term.writeln('');
         term.writeln('\x1b[33m  Click "▶ Run" to boot the dev environment.\x1b[0m');
         term.writeln('');
@@ -786,18 +788,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <button className="p-1.5 text-gray-400 hover:text-blue-400 rounded transition-colors" title="IDE Info">
                             <Info className="w-3.5 h-3.5" />
                         </button>
-                        <div className="absolute right-0 top-full mt-1 w-64 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                        <div className="absolute right-0 top-full mt-1 w-72 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                             <p className="text-[10px] font-bold text-white mb-2">🖥️ IDE Tech Support</p>
                             <div className="mb-2">
                                 <p className="text-[10px] font-semibold text-green-400 mb-1">✅ Supported</p>
                                 <p className="text-[10px] text-gray-400 leading-relaxed">JavaScript, TypeScript, React, Vue, Svelte, Angular, Next.js, Vite, Express, HTML, CSS, SASS, Tailwind, Node.js</p>
                             </div>
-                            <div>
+                            <div className="mb-2">
                                 <p className="text-[10px] font-semibold text-red-400 mb-1">❌ Not Supported</p>
                                 <p className="text-[10px] text-gray-400 leading-relaxed">Python, Java, Go, Rust, C/C++, Ruby, PHP, Swift, Kotlin, .NET, Dart</p>
                             </div>
-                            <div className="mt-2 pt-2 border-t border-gray-700">
-                                <p className="text-[9px] text-gray-500">Powered by WebContainers — runs Node.js in the browser</p>
+                            <div className="mb-2">
+                                <p className="text-[10px] font-semibold text-blue-400 mb-1">💾 Data Storage</p>
+                                <p className="text-[10px] text-gray-400 leading-relaxed">✅ Firebase, Supabase, localStorage, IndexedDB, REST APIs, JSON files</p>
+                                <p className="text-[10px] text-gray-400 leading-relaxed mt-0.5">❌ Local MongoDB, PostgreSQL, MySQL, Redis</p>
+                            </div>
+                            <div className="pt-2 border-t border-gray-700">
+                                <p className="text-[9px] text-gray-500">Powered by WebContainers — runs Node.js in the browser. Use cloud databases (Firebase/Supabase) for data storage.</p>
                             </div>
                         </div>
                     </div>
