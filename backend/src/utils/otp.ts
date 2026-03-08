@@ -34,18 +34,36 @@ let transporter: nodemailer.Transporter | null = null;
 async function getTransporter(): Promise<nodemailer.Transporter> {
     if (transporter) return transporter;
 
-    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+
+    if (smtpHost && smtpUser && smtpPass) {
+        console.log(`📧 Connecting to SMTP: ${smtpHost}:${process.env.SMTP_PORT || '587'} as ${smtpUser}`);
         transporter = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
+            host: smtpHost,
             port: parseInt(process.env.SMTP_PORT || '587'),
             secure: process.env.SMTP_SECURE === 'true',
             auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS,
+                user: smtpUser,
+                pass: smtpPass,
             },
         });
-    } else {
+
+        // Verify connection
+        try {
+            await transporter.verify();
+            console.log('✅ SMTP connection verified successfully');
+        } catch (err) {
+            console.error('❌ SMTP connection verification failed:', err);
+            // Reset and fall through to Ethereal
+            transporter = null;
+        }
+    }
+
+    if (!transporter) {
         // Fallback: use Ethereal (free test SMTP)
+        console.log('📧 Using Ethereal test email (no real emails sent). Preview URLs will be logged.');
         const testAccount = await nodemailer.createTestAccount();
         transporter = nodemailer.createTransport({
             host: 'smtp.ethereal.email',
@@ -56,7 +74,6 @@ async function getTransporter(): Promise<nodemailer.Transporter> {
                 pass: testAccount.pass,
             },
         });
-        console.log('📧 Using Ethereal test email. Preview URLs will be logged.');
     }
 
     return transporter;
@@ -66,8 +83,13 @@ async function getTransporter(): Promise<nodemailer.Transporter> {
 export async function sendOTPEmail(email: string, code: string): Promise<void> {
     try {
         const transport = await getTransporter();
+        // Use SMTP_USER as from address (most reliable with Gmail)
+        const fromAddress = process.env.SMTP_USER || 'noreply@pairon.dev';
+
+        console.log(`📧 Sending OTP to ${email} from ${fromAddress}...`);
+
         const info = await transport.sendMail({
-            from: process.env.SMTP_FROM || '"PairOn" <noreply@pairon.dev>',
+            from: `"PairOn" <${fromAddress}>`,
             to: email,
             subject: 'PairOn - Your Verification Code',
             html: `
@@ -82,13 +104,16 @@ export async function sendOTPEmail(email: string, code: string): Promise<void> {
       `,
         });
 
+        console.log(`✅ OTP email sent successfully. MessageId: ${info.messageId}`);
+
         // Log preview URL in dev (Ethereal)
         const previewUrl = nodemailer.getTestMessageUrl(info);
         if (previewUrl) {
             console.log('📧 OTP email preview:', previewUrl);
         }
-    } catch (error) {
-        console.error('Failed to send OTP email:', error);
+    } catch (error: any) {
+        console.error('❌ Failed to send OTP email:', error?.message || error);
+        console.error('   Full error:', JSON.stringify(error, null, 2));
         throw new Error('Failed to send verification email');
     }
 }
