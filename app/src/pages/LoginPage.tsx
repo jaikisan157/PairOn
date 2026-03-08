@@ -73,6 +73,8 @@ export function LoginPage() {
               handleGoogleLogin(response.credential);
             }
           },
+          ux_mode: 'popup',
+          itp_support: true,
         });
         (window as any).google.accounts.id.renderButton(googleBtnRef.current, {
           theme: theme === 'dark' ? 'filled_black' : 'outline',
