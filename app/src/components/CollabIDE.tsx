@@ -7,12 +7,12 @@ import '@xterm/xterm/css/xterm.css';
 import {
     FolderOpen, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
-    Trash2, Pencil, Copy, FolderPlus, Search, Sun, Moon, Map as MapIcon, Hammer, Clock,
-    MoreVertical, Columns, GitCompare,
+    Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer,
+    MoreVertical,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
-import { useToasts, ToastContainer, SearchPanel, Breadcrumb, RecentFiles, DiffViewer, usePanelResize, ResizeDivider } from './CollabIDEHelpers';
+import { useToasts, ToastContainer, Breadcrumb, usePanelResize, ResizeDivider } from './CollabIDEHelpers';
 
 // ===== Types =====
 interface FileNode { name: string; type: 'file' | 'directory'; children?: FileNode[]; }
@@ -112,7 +112,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [isFullscreen, setIsFullscreen] = useState(false);
 
     // Editor settings
-    const [showMinimap, setShowMinimap] = useState(false);
     const [editorTheme, setEditorTheme] = useState<'vs-dark' | 'vs' | 'hc-black'>('vs-dark');
     const [fontSize, setFontSize] = useState(14);
 
@@ -121,18 +120,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [quickOpenQuery, setQuickOpenQuery] = useState('');
     const quickOpenInputRef = useRef<HTMLInputElement>(null);
 
-    // New features
-    const [recentFiles, setRecentFiles] = useState<string[]>([]);
-    const [showRecentFiles, setShowRecentFiles] = useState(false);
-    const [showSearchPanel, setShowSearchPanel] = useState(false);
     const { toasts, addToast } = useToasts();
-
-    // Split editor
-    const [splitView, setSplitView] = useState(false);
-    const [splitFile, setSplitFile] = useState<string | null>(null);
-
-    // Diff viewer
-    const [diffFile, setDiffFile] = useState<{ path: string; original: string } | null>(null);
 
     // Drag & drop
     const [draggedPath, setDraggedPath] = useState<string | null>(null);
@@ -153,6 +141,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const fitAddonRef = useRef<FitAddon | null>(null);
     const webcontainerRef = useRef<WebContainer | null>(null);
     const shellProcessRef = useRef<any>(null);
+    const shellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
     const filesRef = useRef(files);
     const lockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,7 +172,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 e.preventDefault(); setShowQuickOpen(true); setQuickOpenQuery('');
                 setTimeout(() => quickOpenInputRef.current?.focus(), 50);
             }
-            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') { e.preventDefault(); setShowSearchPanel(p => !p); }
             if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 28)); }
             if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); }
         };
@@ -226,8 +214,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         }
         setActiveFile(path);
         if (!openTabs.includes(path)) setOpenTabs(prev => [...prev, path]);
-        // Track recent files
-        setRecentFiles(prev => [path, ...prev.filter(p => p !== path)].slice(0, 10));
     }, [getOrCreateModel, openTabs]);
 
     // Handle editor mount — set up model system
@@ -276,6 +262,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const term = new XTermTerminal({
             theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', cursorAccent: '#0d1117', selectionBackground: '#264f78' },
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace", fontSize: 13, cursorBlink: true, convertEol: true,
+            allowProposedApi: true,
         });
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
@@ -286,6 +273,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.writeln('\x1b[1;35m║   🚀 PairOn Collaborative IDE   ║\x1b[0m');
         term.writeln('\x1b[1;35m╚══════════════════════════════════╝\x1b[0m');
         term.writeln(''); term.writeln('\x1b[33mClick "▶ Run" to boot the dev environment.\x1b[0m'); term.writeln('');
+
+        // Pipe keyboard input to the shell process
+        term.onData((data: string) => {
+            if (shellWriterRef.current) {
+                shellWriterRef.current.write(data);
+            }
+        });
+
         const ro = new ResizeObserver(() => { try { fitAddon.fit(); } catch { /* */ } });
         if (terminalRef.current) ro.observe(terminalRef.current);
         return () => { ro.disconnect(); term.dispose(); xtermRef.current = null; };
@@ -398,15 +393,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             await wc.mount(toWebContainerFS(filesRef.current));
             if (term) term.writeln('\x1b[32m✓ Files mounted\x1b[0m');
             wc.on('server-ready', (_port: number, url: string) => { setPreviewUrl(url); if (term) term.writeln(`\x1b[32m✓ Preview ready at ${url}\x1b[0m`); });
-            if (term) term.writeln('\x1b[36m📦 Installing dependencies...\x1b[0m');
-            const install = await wc.spawn('npm', ['install']);
-            install.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); } }));
-            if (await install.exit !== 0) { if (term) term.writeln('\x1b[31m✗ npm install failed\x1b[0m'); setIsBooting(false); return; }
-            if (term) term.writeln('\x1b[32m✓ Dependencies installed\x1b[0m\n\x1b[36m🚀 Starting dev server...\x1b[0m');
-            const dev = await wc.spawn('npm', ['run', 'dev']);
-            shellProcessRef.current = dev; setIsRunning(true);
-            dev.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); } }));
+
+            // Spawn an interactive shell (like VS Code terminal)
+            const shellProcess = await wc.spawn('jsh', { terminal: { cols: term?.cols || 80, rows: term?.rows || 24 } });
+            shellProcessRef.current = shellProcess;
+
+            // Pipe shell output to xterm
+            shellProcess.output.pipeTo(new WritableStream({ write(data) { if (term) term.write(data); } }));
+
+            // Get shell input writer for keyboard
+            const input = shellProcess.input.getWriter();
+            shellWriterRef.current = input;
+
+            setIsRunning(true);
             setIsBooting(false);
+
+            // Auto-run npm install && npm run dev
+            await input.write('npm install && npm run dev\n');
         } catch (err: any) {
             if (term) { term.writeln(`\x1b[31m✗ Failed: ${err.message}\x1b[0m`); term.writeln('\x1b[33mℹ Requires Chromium browser\x1b[0m'); }
             setIsBooting(false);
@@ -414,7 +417,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     }, [isBooting]);
 
     const stopServer = useCallback(() => {
-        if (shellProcessRef.current) { shellProcessRef.current.kill(); shellProcessRef.current = null; setIsRunning(false); setPreviewUrl(''); if (xtermRef.current) xtermRef.current.writeln('\n\x1b[33m■ Stopped\x1b[0m'); }
+        if (shellProcessRef.current) {
+            shellProcessRef.current.kill();
+            shellProcessRef.current = null;
+            shellWriterRef.current = null;
+            setIsRunning(false); setPreviewUrl('');
+            if (xtermRef.current) xtermRef.current.writeln('\n\x1b[33m■ Stopped\x1b[0m');
+        }
     }, []);
 
     // ===== File operations =====
@@ -584,20 +593,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         setContextMenu(null);
     }, [addToast]);
 
-    // Replace across files (for search panel)
-    const replaceInFile = useCallback((path: string, oldText: string, newText: string) => {
-        const content = files[path];
-        if (!content) return;
-        const updated = content.replaceAll(oldText, newText);
-        setFiles(prev => { const next = { ...prev, [path]: updated }; autosave(next); return next; });
-        const model = modelsRef.current.get(path);
-        if (model && !model.isDisposed()) { suppressSyncRef.current = true; model.setValue(updated); suppressSyncRef.current = false; }
-        if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(path, updated).catch(() => { });
-        const socket = socketService.getSocket();
-        socket?.emit('code:file-change', { sessionId, path, content: updated, senderId: socket?.id });
-        addToast(`Replaced in ${path.split('/').pop()}`, 'success');
-    }, [files, sessionId, autosave, addToast]);
-
     // Prettier format
     const formatFile = useCallback(async () => {
         const content = files[activeFile];
@@ -761,37 +756,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <button onClick={buildProject} className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors" title="Build (npm run build)">
                         <Hammer className="w-3 h-3" /> Build
                     </button>
-                    <div className="relative">
-                        <button onClick={() => setShowRecentFiles(!showRecentFiles)} className="p-1.5 text-gray-400 hover:text-white rounded" title="Recent files">
-                            <Clock className="w-3.5 h-3.5" />
-                        </button>
-                        {showRecentFiles && <RecentFiles recentFiles={recentFiles} onOpenFile={switchToFile} onClose={() => setShowRecentFiles(false)} />}
-                    </div>
-                    <button onClick={() => setShowSearchPanel(!showSearchPanel)} className={`p-1.5 rounded transition-colors ${showSearchPanel ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`} title="Search across files (Ctrl+Shift+F)">
-                        <Search className="w-3.5 h-3.5" />
-                    </button>
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => setShowMinimap(!showMinimap)} className={`p-1.5 rounded transition-colors ${showMinimap ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`} title="Toggle minimap">
-                        <MapIcon className="w-3.5 h-3.5" />
-                    </button>
                     <button onClick={() => setEditorTheme(t => t === 'vs-dark' ? 'vs' : t === 'vs' ? 'hc-black' : 'vs-dark')}
                         className="p-1.5 text-gray-400 hover:text-white rounded" title={`Theme: ${editorTheme}`}>
                         {editorTheme === 'vs' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
                     </button>
                     <span className="text-[10px] text-gray-500 px-1">{fontSize}px</span>
-                    <button onClick={() => { setShowQuickOpen(true); setQuickOpenQuery(''); setTimeout(() => quickOpenInputRef.current?.focus(), 50); }}
-                        className="p-1.5 text-gray-400 hover:text-white rounded" title="Quick Open (Ctrl+P)">
-                        <Search className="w-3.5 h-3.5" />
-                    </button>
                     <button onClick={formatFile} className="p-1.5 text-gray-400 hover:text-white rounded" title="Format with Prettier">✨</button>
-                    <button onClick={() => { setSplitView(!splitView); if (!splitView && !splitFile) setSplitFile(activeFile); }}
-                        className={`p-1.5 rounded transition-colors ${splitView ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`} title="Split editor">
-                        <Columns className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => { if (activeFile) setDiffFile({ path: activeFile, original: '' }); }}
-                        className="p-1.5 text-gray-400 hover:text-white rounded" title="Show diff">
-                        <GitCompare className="w-3.5 h-3.5" />
-                    </button>
                     <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 text-gray-400 hover:text-white rounded">
                         {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                     </button>
@@ -804,14 +775,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 gridTemplateColumns: `${sidebar.size}px 5px 1fr 5px ${preview.size}px`,
                 minHeight: 0,
             }}>
-                {/* File explorer (+ Search overlay) */}
+                {/* File explorer */}
                 <div className="bg-[#0d1117] border-r border-gray-800 overflow-hidden min-w-0 relative">
-                    {/* Search Panel overlays the sidebar */}
-                    {showSearchPanel && (
-                        <div className="absolute inset-0 z-20">
-                            <SearchPanel files={files} onOpenFile={switchToFile} onClose={() => setShowSearchPanel(false)} onReplace={replaceInFile} />
-                        </div>
-                    )}
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Explorer</span>
                         <div className="flex items-center gap-0.5">
@@ -864,7 +829,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             <Editor
                                 height="100%" theme={editorTheme} onMount={handleEditorMount}
                                 options={{
-                                    minimap: { enabled: showMinimap }, fontSize,
+                                    minimap: { enabled: false }, fontSize,
                                     fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
                                     lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true,
                                     tabSize: 2, wordWrap: 'on', bracketPairColorization: { enabled: true },
@@ -872,30 +837,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 }}
                             />
                         </div>
-                        {/* Split Editor */}
-                        {splitView && splitFile && (
-                            <>
-                                <div className="w-1 flex-shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500/50 transition-colors" />
-                                <div className="flex-1 relative">
-                                    <div className="flex items-center px-2 py-0.5 bg-[#161b22] border-b border-gray-800">
-                                        <select value={splitFile} onChange={e => setSplitFile(e.target.value)}
-                                            className="bg-transparent text-[10px] text-gray-400 outline-none cursor-pointer">
-                                            {Object.keys(files).map(p => <option key={p} value={p} className="bg-[#1e2030]">{p}</option>)}
-                                        </select>
-                                    </div>
-                                    <Editor
-                                        height="calc(100% - 24px)" theme={editorTheme}
-                                        path={`split-${splitFile}`}
-                                        value={files[splitFile] || ''}
-                                        options={{
-                                            minimap: { enabled: false }, fontSize, readOnly: true,
-                                            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                                            lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true,
-                                        }}
-                                    />
-                                </div>
-                            </>
-                        )}
                     </div>
 
                     {/* Terminal resize handle */}
@@ -1074,7 +1015,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setShowQuickOpen(false)}>
                     <div className="bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl w-[420px] overflow-hidden" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700">
-                            <Search className="w-4 h-4 text-gray-500" />
+                            <span className="text-[11px]">🔍</span>
                             <input ref={quickOpenInputRef} autoFocus value={quickOpenQuery} onChange={(e) => setQuickOpenQuery(e.target.value)}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Escape') setShowQuickOpen(false);
@@ -1101,15 +1042,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 </div>
             )}
 
-            {/* Diff Viewer Modal */}
-            {diffFile && (
-                <DiffViewer
-                    original={diffFile.original}
-                    modified={files[diffFile.path] || ''}
-                    fileName={diffFile.path}
-                    onClose={() => setDiffFile(null)}
-                />
-            )}
 
             {/* Toast notifications */}
             <ToastContainer toasts={toasts} />
