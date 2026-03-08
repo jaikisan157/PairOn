@@ -7,7 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 import {
     FolderOpen, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
-    Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer,
+    Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer, Info,
     MoreVertical,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
@@ -75,6 +75,13 @@ function toWebContainerFS(files: Record<string, string>): Record<string, any> {
 // Autosave key
 const AUTOSAVE_KEY = (sid: string) => `pairon_ide_${sid}`;
 const AUTOSAVE_DEBOUNCE = 1000;
+
+// Blocked extensions (not supported by WebContainers)
+const BLOCKED_EXTENSIONS = ['py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'rb', 'php', 'swift', 'kt', 'scala', 'cs', 'ex', 'exs', 'r', 'lua', 'pl', 'dart'];
+const isBlockedExtension = (filename: string): boolean => {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    return BLOCKED_EXTENSIONS.includes(ext);
+};
 
 export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, userId, userName, messages, onSendMessage, lastSeenMessageCount, onMessagesSeen }: CollabIDEProps) {
     // Files as plain object for easy serialization
@@ -269,10 +276,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.open(terminalRef.current);
         setTimeout(() => { try { fitAddon.fit(); } catch { /* */ } }, 100);
         xtermRef.current = term; fitAddonRef.current = fitAddon;
-        term.writeln('\x1b[1;35m╔══════════════════════════════════╗\x1b[0m');
-        term.writeln('\x1b[1;35m║   🚀 PairOn Collaborative IDE   ║\x1b[0m');
-        term.writeln('\x1b[1;35m╚══════════════════════════════════╝\x1b[0m');
-        term.writeln(''); term.writeln('\x1b[33mClick "▶ Run" to boot the dev environment.\x1b[0m'); term.writeln('');
+        term.writeln('\x1b[1;35m╔════════════════════════════════════════╗\x1b[0m');
+        term.writeln('\x1b[1;35m║     🚀 PairOn Collaborative IDE       ║\x1b[0m');
+        term.writeln('\x1b[1;35m╚════════════════════════════════════════╝\x1b[0m');
+        term.writeln('');
+        term.writeln('\x1b[32m  ✓ Supported:\x1b[0m JS, TS, React, Vue, Svelte,');
+        term.writeln('               Next.js, Vite, Express, HTML/CSS');
+        term.writeln('\x1b[31m  ✗ Not supported:\x1b[0m Python, Java, Go, Rust,');
+        term.writeln('                    C/C++, Ruby, PHP, Swift');
+        term.writeln('');
+        term.writeln('\x1b[33m  Click "▶ Run" to boot the dev environment.\x1b[0m');
+        term.writeln('');
 
         // Pipe keyboard input to the shell process
         term.onData((data: string) => {
@@ -429,6 +443,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // ===== File operations =====
     const createFile = useCallback((filename: string) => {
         if (!filename.trim()) return;
+        if (isBlockedExtension(filename)) {
+            const ext = filename.split('.').pop()?.toUpperCase();
+            addToast(`❌ .${ext} files are not supported. This IDE runs on Node.js — only JS/TS/web files are supported.`, 'error');
+            setShowNewFile(false); setNewFileName('');
+            return;
+        }
         setFiles(prev => { const next = { ...prev, [filename]: '' }; autosave(next); return next; });
         switchToFile(filename);
         if (webcontainerRef.current) {
@@ -444,7 +464,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (parts.length > 1) {
             setExpandedDirs(prev => { const n = new Set(prev); for (let i = 1; i < parts.length; i++) n.add(parts.slice(0, i).join('/')); return n; });
         }
-    }, [sessionId, autosave, switchToFile]);
+    }, [sessionId, autosave, switchToFile, addToast]);
 
     const deleteFile = useCallback((path: string) => {
         // Delete all files with this prefix (handles directories)
@@ -472,6 +492,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
     const renameFile = useCallback((oldPath: string, newName: string) => {
         if (!newName.trim()) { setRenamingPath(null); return; }
+        if (isBlockedExtension(newName)) {
+            const ext = newName.split('.').pop()?.toUpperCase();
+            addToast(`❌ .${ext} files are not supported. Only JS/TS/web files are allowed.`, 'error');
+            setRenamingPath(null); return;
+        }
         const parts = oldPath.split('/');
         parts[parts.length - 1] = newName;
         const newPath = parts.join('/');
@@ -757,6 +782,25 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <Hammer className="w-3 h-3" /> Build
                     </button>
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
+                    <div className="relative group">
+                        <button className="p-1.5 text-gray-400 hover:text-blue-400 rounded transition-colors" title="IDE Info">
+                            <Info className="w-3.5 h-3.5" />
+                        </button>
+                        <div className="absolute right-0 top-full mt-1 w-64 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                            <p className="text-[10px] font-bold text-white mb-2">🖥️ IDE Tech Support</p>
+                            <div className="mb-2">
+                                <p className="text-[10px] font-semibold text-green-400 mb-1">✅ Supported</p>
+                                <p className="text-[10px] text-gray-400 leading-relaxed">JavaScript, TypeScript, React, Vue, Svelte, Angular, Next.js, Vite, Express, HTML, CSS, SASS, Tailwind, Node.js</p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-semibold text-red-400 mb-1">❌ Not Supported</p>
+                                <p className="text-[10px] text-gray-400 leading-relaxed">Python, Java, Go, Rust, C/C++, Ruby, PHP, Swift, Kotlin, .NET, Dart</p>
+                            </div>
+                            <div className="mt-2 pt-2 border-t border-gray-700">
+                                <p className="text-[9px] text-gray-500">Powered by WebContainers — runs Node.js in the browser</p>
+                            </div>
+                        </div>
+                    </div>
                     <button onClick={() => setEditorTheme(t => t === 'vs-dark' ? 'vs' : t === 'vs' ? 'hc-black' : 'vs-dark')}
                         className="p-1.5 text-gray-400 hover:text-white rounded" title={`Theme: ${editorTheme}`}>
                         {editorTheme === 'vs' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
