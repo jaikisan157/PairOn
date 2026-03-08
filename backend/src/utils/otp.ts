@@ -1,19 +1,19 @@
 import nodemailer from 'nodemailer';
-
-// Try to use Resend if available, fallback to nodemailer
-let resendClient: any = null;
-try {
-    const { Resend } = require('resend');
-    if (process.env.RESEND_API_KEY) {
-        resendClient = new Resend(process.env.RESEND_API_KEY);
-        console.log('📧 Using Resend HTTP API for emails');
-    }
-} catch (e) {
-    // resend not installed, will use nodemailer
-}
+import { Resend } from 'resend';
 
 // In-memory OTP store: email -> { code, expiresAt }
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
+
+// Initialize Resend if API key is available
+const resendClient = process.env.RESEND_API_KEY
+    ? new Resend(process.env.RESEND_API_KEY)
+    : null;
+
+if (resendClient) {
+    console.log('📧 Using Resend HTTP API for emails');
+} else {
+    console.log('📧 No RESEND_API_KEY found, will use SMTP/Ethereal fallback');
+}
 
 // Generate a 6-digit OTP
 export function generateOTP(): string {
@@ -40,7 +40,7 @@ export function verifyOTP(email: string, code: string): boolean {
     return true;
 }
 
-// HTML template for OTP email
+// HTML template
 function getOtpHtml(code: string): string {
     return `
     <div style="font-family: -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
@@ -50,88 +50,68 @@ function getOtpHtml(code: string): string {
         <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #6C5CE7;">${code}</span>
       </div>
       <p style="color: #888; text-align: center; font-size: 13px;">This code expires in 5 minutes. Do not share it.</p>
-    </div>
-  `;
+    </div>`;
 }
 
-// ===== Send via Resend (HTTP API — works on Render, Railway, etc.) =====
+// Send via Resend (HTTP - works everywhere)
 async function sendViaResend(email: string, code: string): Promise<void> {
-    const { data, error } = await resendClient.emails.send({
+    const { data, error } = await resendClient!.emails.send({
         from: 'PairOn <onboarding@resend.dev>',
         to: [email],
         subject: 'PairOn - Your Verification Code',
         html: getOtpHtml(code),
     });
-
     if (error) {
-        console.error('❌ Resend error:', error);
-        throw new Error('Failed to send verification email');
+        console.error('❌ Resend error:', JSON.stringify(error));
+        throw new Error(error.message || 'Resend failed');
     }
     console.log(`✅ OTP sent via Resend. ID: ${data?.id}`);
 }
 
-// ===== Send via Nodemailer (SMTP — works locally, NOT on Render free tier) =====
+// Send via Nodemailer (SMTP - works locally)
 let transporter: nodemailer.Transporter | null = null;
 
-async function getTransporter(): Promise<nodemailer.Transporter> {
-    if (transporter) return transporter;
-
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-
-    if (smtpUser && smtpPass) {
-        console.log(`📧 Setting up Gmail SMTP for ${smtpUser}...`);
-        transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: { user: smtpUser, pass: smtpPass },
-        });
-    } else {
-        console.log('📧 No email credentials. Using Ethereal test email.');
-        const testAccount = await nodemailer.createTestAccount();
-        transporter = nodemailer.createTransport({
-            host: 'smtp.ethereal.email',
-            port: 587,
-            secure: false,
-            auth: { user: testAccount.user, pass: testAccount.pass },
-        });
+async function sendViaSMTP(email: string, code: string): Promise<void> {
+    if (!transporter) {
+        const smtpUser = process.env.SMTP_USER;
+        const smtpPass = process.env.SMTP_PASS;
+        if (smtpUser && smtpPass) {
+            transporter = nodemailer.createTransport({
+                service: 'gmail',
+                auth: { user: smtpUser, pass: smtpPass },
+            });
+        } else {
+            const testAccount = await nodemailer.createTestAccount();
+            transporter = nodemailer.createTransport({
+                host: 'smtp.ethereal.email', port: 587, secure: false,
+                auth: { user: testAccount.user, pass: testAccount.pass },
+            });
+        }
     }
-    return transporter;
-}
 
-async function sendViaNodemailer(email: string, code: string): Promise<void> {
-    const transport = await getTransporter();
     const fromAddress = process.env.SMTP_USER || 'noreply@pairon.dev';
-
-    const sendPromise = transport.sendMail({
+    const info = await transporter.sendMail({
         from: `"PairOn" <${fromAddress}>`,
         to: email,
         subject: 'PairOn - Your Verification Code',
         html: getOtpHtml(code),
     });
-
-    const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Email send timeout (10s). SMTP may be blocked.')), 10000)
-    );
-
-    const info = await Promise.race([sendPromise, timeoutPromise]) as any;
     console.log(`✅ OTP sent via SMTP. MessageId: ${info?.messageId}`);
-
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) console.log('📧 Preview:', previewUrl);
 }
 
-// ===== Main send function: tries Resend first, falls back to SMTP =====
+// Main send function
 export async function sendOTPEmail(email: string, code: string): Promise<void> {
     console.log(`📧 Sending OTP to ${email}...`);
-
     try {
         if (resendClient) {
             await sendViaResend(email, code);
         } else {
-            await sendViaNodemailer(email, code);
+            await sendViaSMTP(email, code);
         }
     } catch (error: any) {
         console.error('❌ Failed to send OTP:', error?.message || error);
-        throw new Error('Failed to send verification email. Please try again.');
+        throw new Error('Failed to send verification email');
     }
 }

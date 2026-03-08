@@ -69,6 +69,33 @@ class ApiService {
         return this.handleResponse<{ user: any }>(response);
     }
 
+    async googleAuth(credential: string) {
+        const response = await fetch(`${this.baseUrl}/api/auth/google`, {
+            method: 'POST',
+            headers: this.getHeaders(false),
+            body: JSON.stringify({ credential }),
+        });
+        return this.handleResponse<{ token: string; user: any }>(response);
+    }
+
+    async sendOTP(email: string) {
+        const response = await fetch(`${this.baseUrl}/api/auth/send-otp`, {
+            method: 'POST',
+            headers: this.getHeaders(false),
+            body: JSON.stringify({ email }),
+        });
+        return this.handleResponse<{ message: string }>(response);
+    }
+
+    async verifyOTP(email: string, code: string) {
+        const response = await fetch(`${this.baseUrl}/api/auth/verify-otp`, {
+            method: 'POST',
+            headers: this.getHeaders(false),
+            body: JSON.stringify({ email, code }),
+        });
+        return this.handleResponse<{ verified: boolean }>(response);
+    }
+
     // ===== User Profile =====
 
     async getProfile() {
@@ -155,37 +182,6 @@ class ApiService {
             headers: this.getHeaders(false),
         });
         return this.handleResponse<{ valid: boolean; certificate: any }>(response);
-    }
-
-    // ===== Google Auth =====
-
-    async googleAuth(credential: string) {
-        const response = await fetch(`${this.baseUrl}/api/auth/google`, {
-            method: 'POST',
-            headers: this.getHeaders(false),
-            body: JSON.stringify({ credential }),
-        });
-        return this.handleResponse<{ token: string; user: any }>(response);
-    }
-
-    // ===== OTP =====
-
-    async sendOTP(email: string) {
-        const response = await fetch(`${this.baseUrl}/api/auth/send-otp`, {
-            method: 'POST',
-            headers: this.getHeaders(false),
-            body: JSON.stringify({ email }),
-        });
-        return this.handleResponse<{ message: string }>(response);
-    }
-
-    async verifyOTP(email: string, code: string) {
-        const response = await fetch(`${this.baseUrl}/api/auth/verify-otp`, {
-            method: 'POST',
-            headers: this.getHeaders(false),
-            body: JSON.stringify({ email, code }),
-        });
-        return this.handleResponse<{ verified: boolean }>(response);
     }
 
     // ===== Friends =====
