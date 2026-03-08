@@ -1,33 +1,18 @@
 import nodemailer from 'nodemailer';
-import { Resend } from 'resend';
 
 // In-memory OTP store: email -> { code, expiresAt }
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
 
-// Initialize Resend if API key is available
-const resendClient = process.env.RESEND_API_KEY
-    ? new Resend(process.env.RESEND_API_KEY)
-    : null;
-
-if (resendClient) {
-    console.log('📧 Using Resend HTTP API for emails');
-} else {
-    console.log('📧 No RESEND_API_KEY found, will use SMTP/Ethereal fallback');
-}
-
-// Generate a 6-digit OTP
 export function generateOTP(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Store OTP for email (5 min expiry)
 export function storeOTP(email: string): string {
     const code = generateOTP();
     otpStore.set(email, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
     return code;
 }
 
-// Verify OTP
 export function verifyOTP(email: string, code: string): boolean {
     const entry = otpStore.get(email);
     if (!entry) return false;
@@ -36,11 +21,10 @@ export function verifyOTP(email: string, code: string): boolean {
         return false;
     }
     if (entry.code !== code) return false;
-    otpStore.delete(email); // One-time use
+    otpStore.delete(email);
     return true;
 }
 
-// HTML template
 function getOtpHtml(code: string): string {
     return `
     <div style="font-family: -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 32px;">
@@ -53,22 +37,36 @@ function getOtpHtml(code: string): string {
     </div>`;
 }
 
-// Send via Resend (HTTP - works everywhere)
-async function sendViaResend(email: string, code: string): Promise<void> {
-    const { data, error } = await resendClient!.emails.send({
-        from: 'PairOn <onboarding@resend.dev>',
-        to: [email],
-        subject: 'PairOn - Your Verification Code',
-        html: getOtpHtml(code),
+// ===== METHOD 1: Brevo HTTP API (free, 300/day, sends to ANYONE) =====
+async function sendViaBrevo(email: string, code: string): Promise<void> {
+    const senderEmail = process.env.BREVO_SENDER_EMAIL || process.env.SMTP_USER || 'noreply@pairon.dev';
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+            'accept': 'application/json',
+            'api-key': process.env.BREVO_API_KEY!,
+            'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+            sender: { name: 'PairOn', email: senderEmail },
+            to: [{ email }],
+            subject: 'PairOn - Your Verification Code',
+            htmlContent: getOtpHtml(code),
+        }),
     });
-    if (error) {
-        console.error('❌ Resend error:', JSON.stringify(error));
-        throw new Error(error.message || 'Resend failed');
+
+    if (!response.ok) {
+        const err = await response.text();
+        console.error('❌ Brevo error:', err);
+        throw new Error('Brevo email failed');
     }
-    console.log(`✅ OTP sent via Resend. ID: ${data?.id}`);
+
+    const data: any = await response.json();
+    console.log(`✅ OTP sent via Brevo. MessageId: ${data.messageId}`);
 }
 
-// Send via Nodemailer (SMTP - works locally)
+// ===== METHOD 2: Gmail SMTP (works locally, blocked on Render free tier) =====
 let transporter: nodemailer.Transporter | null = null;
 
 async function sendViaSMTP(email: string, code: string): Promise<void> {
@@ -96,18 +94,21 @@ async function sendViaSMTP(email: string, code: string): Promise<void> {
         subject: 'PairOn - Your Verification Code',
         html: getOtpHtml(code),
     });
+
     console.log(`✅ OTP sent via SMTP. MessageId: ${info?.messageId}`);
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) console.log('📧 Preview:', previewUrl);
 }
 
-// Main send function
+// ===== Main: Brevo (deployed) > Gmail SMTP (local) > Ethereal (fallback) =====
 export async function sendOTPEmail(email: string, code: string): Promise<void> {
     console.log(`📧 Sending OTP to ${email}...`);
     try {
-        if (resendClient) {
-            await sendViaResend(email, code);
+        if (process.env.BREVO_API_KEY) {
+            console.log('📧 Using Brevo HTTP API');
+            await sendViaBrevo(email, code);
         } else {
+            console.log('📧 Using SMTP');
             await sendViaSMTP(email, code);
         }
     } catch (error: any) {
