@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff, Zap, ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,18 @@ import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { api } from '@/lib/api';
 import { socketService } from '@/lib/socket';
+
+// Google OAuth SVG icon
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+      <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
+      <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853" />
+      <path d="M3.964 10.706A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05" />
+      <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335" />
+    </svg>
+  );
+}
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -21,7 +33,7 @@ export function LoginPage() {
   const { login } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
-  const googleBtnRef = useRef<HTMLDivElement>(null);
+  const [searchParams] = useSearchParams();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,55 +50,48 @@ export function LoginPage() {
     }
   };
 
-  // Google Sign-In
-  const handleGoogleLogin = async (credential: string) => {
+  // Handle Google OAuth redirect callback
+  useEffect(() => {
+    const code = searchParams.get('code');
+    if (!code) return;
+
+    // Remove code from URL to prevent re-processing
+    window.history.replaceState({}, '', '/login');
+
     setGoogleLoading(true);
     setError('');
-    try {
-      const { token, user } = await api.googleAuth(credential);
-      localStorage.setItem('pairon_token', token);
-      localStorage.setItem('pairon_user', JSON.stringify(user));
-      socketService.connect(token);
-      window.location.href = '/dashboard';
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Google sign-in failed');
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
 
-  useEffect(() => {
-    // Load Google Identity Services
+    api.googleAuth(code)
+      .then(({ token, user }) => {
+        localStorage.setItem('pairon_token', token);
+        localStorage.setItem('pairon_user', JSON.stringify(user));
+        socketService.connect(token);
+        window.location.href = '/dashboard';
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Google sign-in failed');
+        setGoogleLoading(false);
+      });
+  }, [searchParams]);
+
+  // Google Sign-In via redirect
+  const handleGoogleSignIn = () => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
     if (!clientId) return;
 
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if ((window as any).google && googleBtnRef.current) {
-        (window as any).google.accounts.id.initialize({
-          client_id: clientId,
-          callback: (response: any) => {
-            if (response.credential) {
-              handleGoogleLogin(response.credential);
-            }
-          },
-          ux_mode: 'popup',
-          itp_support: true,
-        });
-        (window as any).google.accounts.id.renderButton(googleBtnRef.current, {
-          theme: theme === 'dark' ? 'filled_black' : 'outline',
-          size: 'large',
-          width: '100%',
-          text: 'signin_with',
-        });
-      }
-    };
-    document.body.appendChild(script);
-    return () => { try { document.body.removeChild(script); } catch { } };
-  }, [theme]);
+    const redirectUri = `${window.location.origin}/login`;
+    const scope = 'openid email profile';
+
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${clientId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&response_type=code` +
+      `&scope=${encodeURIComponent(scope)}` +
+      `&access_type=offline` +
+      `&prompt=select_account`;
+
+    window.location.href = googleAuthUrl;
+  };
 
   return (
     <div className="min-h-screen bg-pairon-bg dark:bg-gray-900 flex items-center justify-center p-4">
@@ -138,17 +143,25 @@ export function LoginPage() {
             Sign in to continue building together
           </p>
 
-          {/* Google Sign-In */}
+          {/* Google Sign-In Button */}
           {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
             <>
-              <div ref={googleBtnRef} className="flex justify-center mb-4" />
-              {googleLoading && (
-                <div className="text-center mb-4">
-                  <Loader2 className="w-5 h-5 animate-spin inline text-pairon-accent" />
-                  <span className="text-sm text-gray-500 ml-2">Signing in with Google...</span>
-                </div>
-              )}
-              <div className="relative mb-4">
+              <Button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={googleLoading}
+                className="w-full flex items-center justify-center gap-3 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-xl py-3 h-auto font-medium transition-colors"
+              >
+                {googleLoading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>
+                    <GoogleIcon />
+                    Sign in with Google
+                  </>
+                )}
+              </Button>
+              <div className="relative my-4">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-gray-200 dark:border-gray-700" />
                 </div>
@@ -160,13 +173,6 @@ export function LoginPage() {
               </div>
             </>
           )}
-
-          {/* Demo Credentials */}
-          <div className="bg-pairon-accent-light dark:bg-pairon-accent/10 rounded-xl p-4 mb-6">
-            <p className="text-sm text-gray-700 dark:text-gray-300">
-              <strong>New here?</strong> <a href="/register" className="text-pairon-accent hover:underline">Create an account</a> to start collaborating with others!
-            </p>
-          </div>
 
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl p-3 mb-4 text-sm">

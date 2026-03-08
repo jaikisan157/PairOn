@@ -87,7 +87,7 @@ router.post(
   }
 );
 
-// ===== Google Auth =====
+// ===== Google Auth (Authorization Code flow) =====
 router.post(
   '/google',
   [body('credential').exists()],
@@ -95,17 +95,42 @@ router.post(
     try {
       const { credential } = req.body;
 
-      const ticket = await googleClient.verifyIdToken({
-        idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID,
+      // Determine redirect URI (same as frontend uses)
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const redirectUri = `${frontendUrl}/login`;
+
+      // Exchange authorization code for tokens
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: credential,
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+        }),
       });
 
-      const payload = ticket.getPayload();
-      if (!payload || !payload.email) {
-        return res.status(400).json({ message: 'Invalid Google token' });
+      const tokenData = await tokenResponse.json() as any;
+
+      if (!tokenResponse.ok) {
+        console.error('Google token exchange failed:', tokenData);
+        return res.status(400).json({ message: 'Google authentication failed' });
       }
 
-      const { email, name, picture, sub: googleId } = payload;
+      // Fetch user info using the access token
+      const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+
+      const userInfo = await userInfoResponse.json() as any;
+
+      if (!userInfo.email) {
+        return res.status(400).json({ message: 'Could not get email from Google' });
+      }
+
+      const { email, name, picture, id: googleId } = userInfo;
 
       // Find or create user
       let user = await User.findOne({ email });
@@ -113,13 +138,14 @@ router.post(
       if (!user) {
         user = new User({
           email,
-          password: `google_${googleId}_${Date.now()}`, // placeholder, won't be used for login
+          password: `google_${googleId}_${Date.now()}`,
           name: name || email.split('@')[0],
           avatar: picture || '',
           credits: 100,
           googleId,
         });
         await user.save();
+        console.log(`✅ New Google user created: ${email}`);
       }
 
       // Update last active
@@ -132,6 +158,8 @@ router.post(
         email: user.email,
         role: user.role,
       });
+
+      console.log(`✅ Google login successful: ${email}`);
 
       res.json({
         token,
