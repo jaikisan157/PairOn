@@ -276,16 +276,30 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.open(terminalRef.current);
         setTimeout(() => { try { fitAddon.fit(); } catch { /* */ } }, 100);
         xtermRef.current = term; fitAddonRef.current = fitAddon;
-        term.writeln('\x1b[1;35m╔════════════════════════════════════════╗\x1b[0m');
-        term.writeln('\x1b[1;35m║     🚀 PairOn Collaborative IDE       ║\x1b[0m');
-        term.writeln('\x1b[1;35m╚════════════════════════════════════════╝\x1b[0m');
+        term.writeln('\x1b[1;35m╔══════════════════════════════════════════════════╗\x1b[0m');
+        term.writeln('\x1b[1;35m║        🚀 PairOn Collaborative IDE          ║\x1b[0m');
+        term.writeln('\x1b[1;35m╚══════════════════════════════════════════════════╝\x1b[0m');
         term.writeln('');
-        term.writeln('\x1b[32m  ✓ Supported:\x1b[0m JS, TS, React, Vue, Svelte,');
-        term.writeln('               Next.js, Vite, Express, HTML/CSS');
-        term.writeln('\x1b[31m  ✗ Not supported:\x1b[0m Python, Java, Go, Rust,');
-        term.writeln('                    C/C++, Ruby, PHP, Swift');
-        term.writeln('\x1b[36m  💾 Storage:\x1b[0m Firebase, Supabase, localStorage,');
-        term.writeln('              REST APIs (no local MongoDB/PostgreSQL)');
+        term.writeln('\x1b[1;37m  This IDE runs Node.js in the browser (WebContainers).\x1b[0m');
+        term.writeln('\x1b[1;37m  It only supports HTTP connections — no raw TCP sockets.\x1b[0m');
+        term.writeln('');
+        term.writeln('\x1b[1;32m  ✅ WILL WORK:\x1b[0m');
+        term.writeln('\x1b[32m  • Languages:\x1b[0m JavaScript, TypeScript');
+        term.writeln('\x1b[32m  • Frameworks:\x1b[0m React, Vue, Svelte, Angular, Next.js');
+        term.writeln('\x1b[32m  • Build tools:\x1b[0m Vite, Webpack, esbuild');
+        term.writeln('\x1b[32m  • Backend:\x1b[0m Express, Fastify, Hono (HTTP only)');
+        term.writeln('\x1b[32m  • Styling:\x1b[0m CSS, SASS, Tailwind, Styled-Components');
+        term.writeln('\x1b[32m  • Databases:\x1b[0m Firebase, Supabase, Appwrite (HTTP APIs)');
+        term.writeln('\x1b[32m  • Storage:\x1b[0m localStorage, IndexedDB, JSON files');
+        term.writeln('\x1b[32m  • Packages:\x1b[0m Any npm package that runs on Node.js');
+        term.writeln('');
+        term.writeln('\x1b[1;31m  ❌ WILL NOT WORK:\x1b[0m');
+        term.writeln('\x1b[31m  • Languages:\x1b[0m Python, Java, Go, Rust, C/C++, PHP');
+        term.writeln('\x1b[31m  • Databases:\x1b[0m MongoDB/Mongoose, PostgreSQL, MySQL, Redis');
+        term.writeln('\x1b[31m  • Reason:\x1b[0m These need TCP sockets, not available here');
+        term.writeln('');
+        term.writeln('\x1b[1;36m  💡 TIP:\x1b[0m Use \x1b[1;33mFirebase\x1b[0m or \x1b[1;33mSupabase\x1b[0m instead of MongoDB!');
+        term.writeln('\x1b[36m         npm install firebase  |  npm install @supabase/supabase-js\x1b[0m');
         term.writeln('');
         term.writeln('\x1b[33m  Click "▶ Run" to boot the dev environment.\x1b[0m');
         term.writeln('');
@@ -788,23 +802,42 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <button className="p-1.5 text-gray-400 hover:text-blue-400 rounded transition-colors" title="IDE Info">
                             <Info className="w-3.5 h-3.5" />
                         </button>
-                        <div className="absolute right-0 top-full mt-1 w-72 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-                            <p className="text-[10px] font-bold text-white mb-2">🖥️ IDE Tech Support</p>
-                            <div className="mb-2">
-                                <p className="text-[10px] font-semibold text-green-400 mb-1">✅ Supported</p>
-                                <p className="text-[10px] text-gray-400 leading-relaxed">JavaScript, TypeScript, React, Vue, Svelte, Angular, Next.js, Vite, Express, HTML, CSS, SASS, Tailwind, Node.js</p>
+                        <div className="absolute right-0 top-full mt-1 w-80 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3.5 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 max-h-[70vh] overflow-y-auto">
+                            <p className="text-[11px] font-bold text-white mb-1">🖥️ IDE Compatibility Guide</p>
+                            <p className="text-[9px] text-gray-500 mb-3">This IDE runs Node.js in the browser. Only HTTP connections are supported — no TCP sockets.</p>
+
+                            <div className="mb-2.5">
+                                <p className="text-[10px] font-semibold text-green-400 mb-1.5">✅ Will Work</p>
+                                <div className="space-y-1 text-[10px] text-gray-400">
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">Languages:</strong> JavaScript, TypeScript</p>
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">Frameworks:</strong> React, Vue, Svelte, Angular, Next.js, Nuxt</p>
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">Build:</strong> Vite, Webpack, esbuild, SWC</p>
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">Backend:</strong> Express, Fastify, Hono (HTTP servers)</p>
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">Styling:</strong> CSS, SASS, Tailwind, Styled-Components</p>
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">Databases:</strong> Firebase, Supabase, Appwrite</p>
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">Storage:</strong> localStorage, IndexedDB, JSON files</p>
+                                    <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">APIs:</strong> fetch, axios — any HTTP/REST API</p>
+                                </div>
                             </div>
-                            <div className="mb-2">
-                                <p className="text-[10px] font-semibold text-red-400 mb-1">❌ Not Supported</p>
-                                <p className="text-[10px] text-gray-400 leading-relaxed">Python, Java, Go, Rust, C/C++, Ruby, PHP, Swift, Kotlin, .NET, Dart</p>
+
+                            <div className="mb-2.5">
+                                <p className="text-[10px] font-semibold text-red-400 mb-1.5">❌ Will NOT Work</p>
+                                <div className="space-y-1 text-[10px] text-gray-400">
+                                    <p><span className="text-red-400/70">•</span> <strong className="text-gray-300">Languages:</strong> Python, Java, Go, Rust, C/C++, PHP, Ruby, Swift</p>
+                                    <p><span className="text-red-400/70">•</span> <strong className="text-gray-300">Databases:</strong> MongoDB/Mongoose, PostgreSQL, MySQL, Redis, SQLite</p>
+                                    <p><span className="text-red-400/70">•</span> <strong className="text-gray-300">Why:</strong> These need TCP socket connections, which aren't available in the browser</p>
+                                </div>
                             </div>
-                            <div className="mb-2">
-                                <p className="text-[10px] font-semibold text-blue-400 mb-1">💾 Data Storage</p>
-                                <p className="text-[10px] text-gray-400 leading-relaxed">✅ Firebase, Supabase, localStorage, IndexedDB, REST APIs, JSON files</p>
-                                <p className="text-[10px] text-gray-400 leading-relaxed mt-0.5">❌ Local MongoDB, PostgreSQL, MySQL, Redis</p>
+
+                            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-2.5 mb-2">
+                                <p className="text-[10px] font-semibold text-blue-400 mb-1">💡 Need a database? Use these instead:</p>
+                                <p className="text-[9px] text-gray-400 font-mono">npm install firebase</p>
+                                <p className="text-[9px] text-gray-400 font-mono">npm install @supabase/supabase-js</p>
+                                <p className="text-[9px] text-gray-500 mt-1">These connect over HTTP and work perfectly here!</p>
                             </div>
+
                             <div className="pt-2 border-t border-gray-700">
-                                <p className="text-[9px] text-gray-500">Powered by WebContainers — runs Node.js in the browser. Use cloud databases (Firebase/Supabase) for data storage.</p>
+                                <p className="text-[9px] text-gray-500">Powered by WebContainers (StackBlitz) — Node.js runtime in the browser</p>
                             </div>
                         </div>
                     </div>
