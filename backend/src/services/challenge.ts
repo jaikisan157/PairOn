@@ -566,14 +566,8 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             const partnerId = session.participants.find(p => p !== userId);
             const partner = partnerId ? await User.findById(partnerId) : null;
 
-            // Get match for project idea
-            const match = await Match.findOne({
-                $or: [
-                    { user1Id: userId, user2Id: partnerId },
-                    { user1Id: partnerId, user2Id: userId },
-                ],
-                status: 'active',
-            });
+            // Get match using the session's stored matchId (not a loose query!)
+            const match = await Match.findById(session.matchId);
 
             socket.emit('challenge:rejoined', {
                 session: {
@@ -658,13 +652,9 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
 
     socket.on('challenge:approve-project-edit', async (data: { sessionId: string; title: string; description: string }) => {
         try {
-            const match = await Match.findOne({
-                $or: [
-                    { user1Id: userId },
-                    { user2Id: userId },
-                ],
-                status: 'active',
-            });
+            const session = await CollaborationSession.findById(data.sessionId);
+            if (!session) return;
+            const match = await Match.findById(session.matchId);
             if (match && match.projectIdea) {
                 match.projectIdea.title = data.title;
                 match.projectIdea.description = data.description;

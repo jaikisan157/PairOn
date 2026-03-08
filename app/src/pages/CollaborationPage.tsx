@@ -147,6 +147,12 @@ export function CollaborationPage() {
     // Matched!
     socket.on('challenge:matched', (data: any) => {
       console.log('[Challenge] Matched!', data);
+      // Guard: if we already have a session, ignore matches for different sessions
+      const currentSession = sessionRef.current;
+      if (currentSession && currentSession.sessionId && currentSession.sessionId !== data.sessionId) {
+        console.log('[Challenge] Ignoring match for different session:', data.sessionId);
+        return;
+      }
       setStatus('matched');
       setSession({
         sessionId: data.sessionId,
