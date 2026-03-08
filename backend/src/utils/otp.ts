@@ -28,42 +28,42 @@ export function verifyOTP(email: string, code: string): boolean {
     return true;
 }
 
-// Create transporter (use env vars or fallback to ethereal for dev)
+// Create transporter
 let transporter: nodemailer.Transporter | null = null;
 
 async function getTransporter(): Promise<nodemailer.Transporter> {
     if (transporter) return transporter;
 
-    const smtpHost = process.env.SMTP_HOST;
     const smtpUser = process.env.SMTP_USER;
     const smtpPass = process.env.SMTP_PASS;
 
-    if (smtpHost && smtpUser && smtpPass) {
-        console.log(`📧 Connecting to SMTP: ${smtpHost}:${process.env.SMTP_PORT || '587'} as ${smtpUser}`);
+    if (smtpUser && smtpPass) {
+        // Use Gmail with SSL on port 465 (works on Render, Railway, etc.)
+        // Also try service: 'gmail' which auto-configures the right settings
+        console.log(`📧 Setting up Gmail SMTP for ${smtpUser}...`);
         transporter = nodemailer.createTransport({
-            host: smtpHost,
-            port: parseInt(process.env.SMTP_PORT || '587'),
-            secure: process.env.SMTP_SECURE === 'true',
+            service: 'gmail',
             auth: {
                 user: smtpUser,
                 pass: smtpPass,
             },
         });
 
-        // Verify connection
+        // Verify connection with timeout
         try {
-            await transporter.verify();
-            console.log('✅ SMTP connection verified successfully');
-        } catch (err) {
-            console.error('❌ SMTP connection verification failed:', err);
-            // Reset and fall through to Ethereal
-            transporter = null;
+            await Promise.race([
+                transporter.verify(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP verify timeout')), 10000))
+            ]);
+            console.log('✅ Gmail SMTP connection verified');
+        } catch (err: any) {
+            console.error('❌ Gmail SMTP verification failed:', err?.message);
+            console.log('📧 Will still attempt to send emails...');
+            // Don't reset - still try to send, verify() can fail on some hosts but sending works
         }
-    }
-
-    if (!transporter) {
+    } else {
         // Fallback: use Ethereal (free test SMTP)
-        console.log('📧 Using Ethereal test email (no real emails sent). Preview URLs will be logged.');
+        console.log('📧 No SMTP credentials found. Using Ethereal test email.');
         const testAccount = await nodemailer.createTestAccount();
         transporter = nodemailer.createTransport({
             host: 'smtp.ethereal.email',
@@ -83,12 +83,12 @@ async function getTransporter(): Promise<nodemailer.Transporter> {
 export async function sendOTPEmail(email: string, code: string): Promise<void> {
     try {
         const transport = await getTransporter();
-        // Use SMTP_USER as from address (most reliable with Gmail)
         const fromAddress = process.env.SMTP_USER || 'noreply@pairon.dev';
 
-        console.log(`📧 Sending OTP to ${email} from ${fromAddress}...`);
+        console.log(`📧 Sending OTP to ${email}...`);
 
-        const info = await transport.sendMail({
+        // Send with timeout to prevent hanging
+        const sendPromise = transport.sendMail({
             from: `"PairOn" <${fromAddress}>`,
             to: email,
             subject: 'PairOn - Your Verification Code',
@@ -104,16 +104,19 @@ export async function sendOTPEmail(email: string, code: string): Promise<void> {
       `,
         });
 
-        console.log(`✅ OTP email sent successfully. MessageId: ${info.messageId}`);
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Email send timeout (15s). SMTP may be blocked on this host.')), 15000)
+        );
 
-        // Log preview URL in dev (Ethereal)
+        const info = await Promise.race([sendPromise, timeoutPromise]) as any;
+        console.log(`✅ OTP email sent! MessageId: ${info?.messageId}`);
+
         const previewUrl = nodemailer.getTestMessageUrl(info);
         if (previewUrl) {
-            console.log('📧 OTP email preview:', previewUrl);
+            console.log('📧 Preview URL:', previewUrl);
         }
     } catch (error: any) {
-        console.error('❌ Failed to send OTP email:', error?.message || error);
-        console.error('   Full error:', JSON.stringify(error, null, 2));
-        throw new Error('Failed to send verification email');
+        console.error('❌ Failed to send OTP:', error?.message || error);
+        throw new Error('Failed to send verification email. Please try again.');
     }
 }
