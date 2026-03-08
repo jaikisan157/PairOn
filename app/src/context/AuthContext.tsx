@@ -49,29 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Listen for force-logout (another device/tab logged in)
-  useEffect(() => {
-    const socket = socketService.getSocket();
-    if (!socket) return;
-
-    const handleForceLogout = (reason: string) => {
-      alert(`⚠️ Session terminated: ${reason || 'You logged in from another device.'}`);
-      socketService.disconnect();
-      localStorage.removeItem('pairon_token');
-      localStorage.removeItem('pairon_user');
-      localStorage.removeItem('challenge_session');
-      setState({
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        isLoading: false,
-      });
-      window.location.href = '/login';
-    };
-
-    socket.on('session:force-logout', handleForceLogout);
-    return () => { socket.off('session:force-logout', handleForceLogout); };
-  }, [state.isAuthenticated]);
+  // (Single session enforcement removed per user request)
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     const { token, user } = await api.login(credentials.email, credentials.password);

@@ -368,11 +368,7 @@ export function CollaborationPage() {
       startCountdown(new Date(data.session.endsAt));
     });
 
-    // Force logout
-    socket.on('session:force-logout', () => {
-      cleanupAndLeave();
-      navigate('/login');
-    });
+    // (Force logout removed)
 
     // Partner activity updates
     socket.on('challenge:partner-activity', (data: any) => {
