@@ -20,7 +20,10 @@ const activeChallengeSockets: Map<string, Set<string>> = new Map(); // socketId 
 const sessionWarnings: Map<string, number> = new Map(); // `${sessionId}:${userId}` -> count
 
 // Pending exit requests: sessionId -> { requesterId, requesterName, reason }
-const pendingExitRequests: Map<string, { requesterId: string; requesterName: string; reason: string }> = new Map();
+const pendingExitRequests = new Map<string, { requesterId: string; requesterName: string; reason: string }>();
+
+// Pending project edit proposals: sessionId -> proposal data
+const pendingProjectEdits = new Map<string, { proposerId: string; proposerName: string; title: string; description: string }>();
 
 // Heartbeat / activity tracking: sessionId:userId -> lastActiveTimestamp
 const userActivity: Map<string, number> = new Map();
@@ -467,7 +470,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             pendingExitRequests.delete(sessionId);
 
             await CollaborationSession.findByIdAndUpdate(sessionId, {
-                $set: { status: 'completed' }
+                $set: { status: 'mutual_quit' }
             });
 
             clearSessionTimer(sessionId);
@@ -520,9 +523,9 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
 
             pendingExitRequests.delete(sessionId);
 
-            // Use findByIdAndUpdate to guarantee DB write
+            // Set abandoned for the quitter, partner_skipped for the partner
             await CollaborationSession.findByIdAndUpdate(sessionId, {
-                $set: { status: 'partner_skipped' }
+                $set: { status: 'partner_skipped', quitterId: userId }
             });
 
             clearSessionTimer(sessionId);
@@ -594,10 +597,38 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 });
             }
 
+            // Send pending project edit proposal if exists
+            const pendingEdit = pendingProjectEdits.get(sessionId);
+            if (pendingEdit && pendingEdit.proposerId !== userId) {
+                socket.emit('challenge:project-edit-proposed', {
+                    sessionId,
+                    ...pendingEdit,
+                });
+            }
+
             // Notify partner that user is back
             io.to(`user:${partnerId}`).emit('challenge:partner-activity', { sessionId, status: 'online' });
         } catch (error) {
             console.error('Challenge rejoin error:', error);
+        }
+    });
+
+    // ===== Typing indicator =====
+    socket.on('challenge:typing', async (sessionId: string) => {
+        const session = await CollaborationSession.findById(sessionId).catch(() => null);
+        if (!session) return;
+        const partnerId = session.participants.find((p: string) => p !== userId);
+        if (partnerId) {
+            io.to(`user:${partnerId}`).emit('challenge:partner-typing', { sessionId });
+        }
+    });
+
+    socket.on('challenge:stop-typing', async (sessionId: string) => {
+        const session = await CollaborationSession.findById(sessionId).catch(() => null);
+        if (!session) return;
+        const partnerId = session.participants.find((p: string) => p !== userId);
+        if (partnerId) {
+            io.to(`user:${partnerId}`).emit('challenge:partner-stop-typing', { sessionId });
         }
     });
 
@@ -645,6 +676,14 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 title: data.title,
                 description: data.description,
             });
+
+            // Also store for offline delivery
+            pendingProjectEdits.set(data.sessionId, {
+                proposerId: userId,
+                proposerName: user?.name || 'Partner',
+                title: data.title,
+                description: data.description,
+            });
         } catch (error) {
             console.error('Project edit proposal error:', error);
         }
@@ -652,6 +691,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
 
     socket.on('challenge:approve-project-edit', async (data: { sessionId: string; title: string; description: string }) => {
         try {
+            pendingProjectEdits.delete(data.sessionId);
             const session = await CollaborationSession.findById(data.sessionId);
             if (!session) return;
             const match = await Match.findById(session.matchId);
@@ -670,6 +710,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
     });
 
     socket.on('challenge:decline-project-edit', async (data: { sessionId: string }) => {
+        pendingProjectEdits.delete(data.sessionId);
         const session = await CollaborationSession.findById(data.sessionId).catch(() => null);
         if (!session) return;
         const partnerId = session.participants.find((p: string) => p !== userId);

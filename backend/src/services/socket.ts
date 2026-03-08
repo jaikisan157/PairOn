@@ -190,6 +190,7 @@ export function setupSocketHandlers(io: Server) {
             mode: match?.mode || 'sprint',
             projectIdea: match?.projectIdea,
             status: sess.status,
+            quitterId: (sess as any).quitterId || null,
             startedAt: sess.startedAt,
             endsAt: sess.endsAt,
             tasksTotal: (sess.tasks as any[])?.length || 0,

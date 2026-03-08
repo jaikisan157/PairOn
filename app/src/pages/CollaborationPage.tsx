@@ -127,12 +127,34 @@ export function CollaborationPage() {
   // Project edit proposal
   const [incomingProjectEdit, setIncomingProjectEdit] = useState<{ proposerName: string; title: string; description: string } | null>(null);
 
+  // Typing indicator
+  const [partnerTyping, setPartnerTyping] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gracefulEndRef = useRef(false);
   const sessionRef = useRef<ChallengeSession | null>(null);
+
+  // Audio notification helper
+  const playSound = useCallback((type: 'message' | 'connect' | 'disconnect' | 'send') => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.value = 0.08;
+      if (type === 'message') { osc.frequency.value = 800; osc.type = 'sine'; gain.gain.value = 0.1; }
+      else if (type === 'connect') { osc.frequency.value = 600; osc.type = 'sine'; }
+      else if (type === 'disconnect') { osc.frequency.value = 300; osc.type = 'triangle'; }
+      else if (type === 'send') { osc.frequency.value = 500; osc.type = 'sine'; gain.gain.value = 0.04; }
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch { /* audio not available */ }
+  }, []);
 
   // Keep sessionRef in sync
   useEffect(() => {
@@ -224,6 +246,21 @@ export function CollaborationPage() {
         }
         return { ...prev, messages: [...prev.messages, message] };
       });
+      // Play sound for partner messages (not system, not own)
+      if (message.senderId !== user?.id && message.type !== 'system') {
+        playSound('message');
+      }
+    });
+
+    // Typing indicators
+    socket.on('challenge:partner-typing', () => {
+      setPartnerTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 3000);
+    });
+    socket.on('challenge:partner-stop-typing', () => {
+      setPartnerTyping(false);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     });
 
     // Task updated
@@ -317,7 +354,10 @@ export function CollaborationPage() {
 
     // Partner activity updates
     socket.on('challenge:partner-activity', (data: any) => {
+      const prev = partnerStatus;
       setPartnerStatus(data.status);
+      if (data.status === 'online' && prev !== 'online') playSound('connect');
+      else if (data.status === 'offline' && prev !== 'offline') playSound('disconnect');
     });
 
     // Project edit proposed by partner
@@ -365,6 +405,8 @@ export function CollaborationPage() {
         s.removeAllListeners('challenge:project-updated');
         s.removeAllListeners('challenge:project-edit-declined');
         s.removeAllListeners('challenge:task-deleted');
+        s.removeAllListeners('challenge:partner-typing');
+        s.removeAllListeners('challenge:partner-stop-typing');
       }
       if (timerRef.current) clearInterval(timerRef.current);
       if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
@@ -571,8 +613,10 @@ export function CollaborationPage() {
 
     // Send user message to server
     socketService.getSocket()?.emit('challenge:message', session.sessionId, msg);
+    socketService.getSocket()?.emit('challenge:stop-typing', session.sessionId);
+    playSound('send');
     setNewMessage('');
-  }, [newMessage, session, user?.id]);
+  }, [newMessage, session, user?.id, playSound]);
 
   const handleRequestExit = useCallback(() => {
     if (!session || !exitReason.trim() || exitReason.trim().length < 5) return;
@@ -862,12 +906,31 @@ export function CollaborationPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Typing indicator */}
+            {partnerTyping && (
+              <div className="px-4 py-1 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                <span className="flex gap-0.5">
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </span>
+                {session?.partnerName} is typing...
+              </div>
+            )}
+
             {/* Input */}
             <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <div className="flex gap-2">
                 <Input
                   value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
+                  onChange={(e) => {
+                    setNewMessage(e.target.value);
+                    if (session && e.target.value.trim()) {
+                      socketService.getSocket()?.emit('challenge:typing', session.sessionId);
+                    } else if (session) {
+                      socketService.getSocket()?.emit('challenge:stop-typing', session.sessionId);
+                    }
+                  }}
                   placeholder="Type a message... (or @ai your question)"
                   className="flex-1 rounded-full"
                 />

@@ -82,6 +82,25 @@ export function setupQuickChatHandlers(io: Server, socket: Socket) {
         quickChatQueue.delete(userId);
     });
 
+    // ===== Typing indicator =====
+    socket.on('quickchat:typing', async (chatId: string) => {
+        const chat = await QuickChat.findById(chatId).catch(() => null);
+        if (!chat || chat.status !== 'active') return;
+        const partnerId = chat.participants.find((p: string) => p !== userId);
+        if (partnerId) {
+            io.to(`user:${partnerId}`).emit('quickchat:partner-typing', { chatId });
+        }
+    });
+
+    socket.on('quickchat:stop-typing', async (chatId: string) => {
+        const chat = await QuickChat.findById(chatId).catch(() => null);
+        if (!chat || chat.status !== 'active') return;
+        const partnerId = chat.participants.find((p: string) => p !== userId);
+        if (partnerId) {
+            io.to(`user:${partnerId}`).emit('quickchat:partner-stop-typing', { chatId });
+        }
+    });
+
     // ===== Send message (with moderation) =====
     socket.on('quickchat:message', async (chatId: string, content: string) => {
         try {

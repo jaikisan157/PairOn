@@ -65,7 +65,8 @@ export interface ICollaborationSession extends Document {
   messages: IMessage[];
   tasks: ITask[];
   submission?: ISubmission;
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'active' | 'completed' | 'abandoned' | 'ended' | 'partner_skipped' | 'mutual_quit';
+  quitterId?: string;
   startedAt: Date;
   endsAt: Date;
 }

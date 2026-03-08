@@ -104,8 +104,12 @@ const CollaborationSessionSchema = new Schema<ICollaborationSession>(
     },
     status: {
       type: String,
-      enum: ['active', 'completed', 'abandoned', 'ended', 'partner_skipped'],
+      enum: ['active', 'completed', 'abandoned', 'ended', 'partner_skipped', 'mutual_quit'],
       default: 'active',
+    },
+    quitterId: {
+      type: String,
+      default: null,
     },
     startedAt: {
       type: Date,

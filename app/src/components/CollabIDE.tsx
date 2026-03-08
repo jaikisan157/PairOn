@@ -802,7 +802,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <button className="p-1.5 text-gray-400 hover:text-blue-400 rounded transition-colors" title="IDE Info">
                             <Info className="w-3.5 h-3.5" />
                         </button>
-                        <div className="absolute right-0 top-full mt-1 w-80 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3.5 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 max-h-[70vh] overflow-y-auto">
+                        <div className="absolute right-0 top-full mt-1 w-80 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3.5 z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 max-h-[80vh] overflow-y-auto">
                             <p className="text-[11px] font-bold text-white mb-1">🖥️ IDE Compatibility Guide</p>
                             <p className="text-[9px] text-gray-500 mb-3">This IDE runs Node.js in the browser. Only HTTP connections are supported — no TCP sockets.</p>
 
