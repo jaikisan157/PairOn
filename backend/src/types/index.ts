@@ -17,6 +17,7 @@ export interface IUser extends Document {
   badges: IBadge[];
   isOnline: boolean;
   lastActive: Date;
+  loginSessionId?: string;
   role: 'user' | 'admin';
   // Moderation
   warnings: number;
@@ -179,6 +180,7 @@ export interface JWTPayload {
   userId: string;
   email: string;
   role: 'user' | 'admin';
+  loginSessionId?: string;
 }
 
 // Socket.io Events

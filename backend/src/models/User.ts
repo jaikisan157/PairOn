@@ -80,6 +80,10 @@ const UserSchema = new Schema<IUser>(
       type: Date,
       default: Date.now,
     },
+    loginSessionId: {
+      type: String,
+      default: '',
+    },
     role: {
       type: String,
       enum: ['user', 'admin'],

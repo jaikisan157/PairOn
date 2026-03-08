@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { body, validationResult } from 'express-validator';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
@@ -148,7 +149,9 @@ router.post(
         console.log(`✅ New Google user created: ${email}`);
       }
 
-      // Update last active
+      // Update session logic for single-device login
+      const sessionId = crypto.randomUUID();
+      user.loginSessionId = sessionId;
       user.lastActive = new Date();
       user.isOnline = true;
       await user.save();
@@ -157,6 +160,7 @@ router.post(
         userId: user._id.toString(),
         email: user.email,
         role: user.role,
+        loginSessionId: sessionId,
       });
 
       console.log(`✅ Google login successful: ${email}`);
@@ -196,11 +200,13 @@ router.post(
       }
 
       // Create user
+      const sessionId = crypto.randomUUID();
       const user = new User({
         email,
         password,
         name,
         credits: 100,
+        loginSessionId: sessionId,
       });
 
       await user.save();
@@ -210,6 +216,7 @@ router.post(
         userId: user._id.toString(),
         email: user.email,
         role: user.role,
+        loginSessionId: sessionId,
       });
 
       res.status(201).json({
@@ -251,7 +258,9 @@ router.post(
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
-      // Update last active
+      // Update session for single-device login
+      const sessionId = crypto.randomUUID();
+      user.loginSessionId = sessionId;
       user.lastActive = new Date();
       user.isOnline = true;
       await user.save();
@@ -261,6 +270,7 @@ router.post(
         userId: user._id.toString(),
         email: user.email,
         role: user.role,
+        loginSessionId: sessionId,
       });
 
       res.json({

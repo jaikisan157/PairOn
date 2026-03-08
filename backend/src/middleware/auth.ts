@@ -11,7 +11,9 @@ declare global {
   }
 }
 
-export const authMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+import { User } from '../models'; // Added to check session ID
+
+export const authMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -28,6 +30,16 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction):
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET) as JWTPayload;
+
+    // Single-device login enforcement
+    if (decoded.loginSessionId) {
+      const dbUser = await User.findById(decoded.userId).select('loginSessionId').lean();
+      if (!dbUser || dbUser.loginSessionId !== decoded.loginSessionId) {
+        res.status(401).json({ message: 'Session expired. You logged in from another device.' });
+        return;
+      }
+    }
+
     req.user = decoded;
     next();
   } catch (error) {

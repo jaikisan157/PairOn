@@ -33,6 +33,10 @@ class SocketService {
         return this.socket;
     }
 
+    onConnectError(callback: (err: Error) => void) {
+        this.socket?.on('connect_error', callback);
+    }
+
     disconnect() {
         if (this.socket) {
             this.socket.disconnect();

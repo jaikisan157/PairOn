@@ -49,7 +49,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // (Single session enforcement removed per user request)
+  // Listen for session expiration (another device/tab logged in)
+  useEffect(() => {
+    if (!state.isAuthenticated) return;
+
+    const handleConnectError = (err: Error) => {
+      if (err.message === 'SESSION_EXPIRED') {
+        alert('⚠️ Session terminated: You logged in from another device.');
+        socketService.disconnect();
+        localStorage.removeItem('pairon_token');
+        localStorage.removeItem('pairon_user');
+        localStorage.removeItem('challenge_session');
+        setState({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          isLoading: false,
+        });
+        window.location.href = '/login';
+      }
+    };
+
+    socketService.onConnectError(handleConnectError);
+  }, [state.isAuthenticated]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     const { token, user } = await api.login(credentials.email, credentials.password);

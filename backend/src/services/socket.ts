@@ -21,7 +21,7 @@ export function setupSocketHandlers(io: Server) {
   // Start quickchat inactivity checker (5 min timeout)
   startQuickChatInactivityChecker(io);
   // ===== Socket.io JWT Authentication Middleware =====
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;
 
     if (!token) {
@@ -34,11 +34,24 @@ export function setupSocketHandlers(io: Server) {
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET) as JWTPayload;
+
+      // Single-device login enforcement
+      if (decoded.loginSessionId) {
+        const dbUser = await User.findById(decoded.userId).select('loginSessionId').lean();
+        if (!dbUser || dbUser.loginSessionId !== decoded.loginSessionId) {
+          // We can send a specific error string so the UI knows
+          return next(new Error('SESSION_EXPIRED'));
+        }
+      }
+
       socket.data.userId = decoded.userId;
       socket.data.email = decoded.email;
       socket.data.role = decoded.role;
       next();
     } catch (error) {
+      if (error instanceof Error && error.message === 'SESSION_EXPIRED') {
+        return next(error);
+      }
       return next(new Error('Invalid or expired token'));
     }
   });
