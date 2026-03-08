@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 import { User } from '../models';
 import { generateToken } from '../middleware/auth';
+import { storeOTP, verifyOTP, sendOTPEmail } from '../utils/otp';
 
 const router = Router();
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Helper: build safe user response (never leak password/internals)
 function safeUserResponse(user: any) {
@@ -33,7 +37,114 @@ function safeUserResponse(user: any) {
   };
 }
 
-// Register
+// ===== Send OTP =====
+router.post(
+  '/send-otp',
+  [body('email').isEmail().normalizeEmail()],
+  async (req: any, res: any) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { email } = req.body;
+      const code = storeOTP(email);
+      await sendOTPEmail(email, code);
+      res.json({ message: 'OTP sent to your email' });
+    } catch (error) {
+      console.error('Send OTP error:', error);
+      res.status(500).json({ message: 'Failed to send OTP' });
+    }
+  }
+);
+
+// ===== Verify OTP =====
+router.post(
+  '/verify-otp',
+  [
+    body('email').isEmail().normalizeEmail(),
+    body('code').isLength({ min: 6, max: 6 }),
+  ],
+  async (req: any, res: any) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { email, code } = req.body;
+      const valid = verifyOTP(email, code);
+      if (!valid) {
+        return res.status(400).json({ message: 'Invalid or expired OTP' });
+      }
+
+      res.json({ verified: true });
+    } catch (error) {
+      console.error('Verify OTP error:', error);
+      res.status(500).json({ message: 'Verification failed' });
+    }
+  }
+);
+
+// ===== Google Auth =====
+router.post(
+  '/google',
+  [body('credential').exists()],
+  async (req: any, res: any) => {
+    try {
+      const { credential } = req.body;
+
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+
+      const payload = ticket.getPayload();
+      if (!payload || !payload.email) {
+        return res.status(400).json({ message: 'Invalid Google token' });
+      }
+
+      const { email, name, picture, sub: googleId } = payload;
+
+      // Find or create user
+      let user = await User.findOne({ email });
+
+      if (!user) {
+        user = new User({
+          email,
+          password: `google_${googleId}_${Date.now()}`, // placeholder, won't be used for login
+          name: name || email.split('@')[0],
+          avatar: picture || '',
+          credits: 100,
+          googleId,
+        });
+        await user.save();
+      }
+
+      // Update last active
+      user.lastActive = new Date();
+      user.isOnline = true;
+      await user.save();
+
+      const token = generateToken({
+        userId: user._id.toString(),
+        email: user.email,
+        role: user.role,
+      });
+
+      res.json({
+        token,
+        user: safeUserResponse(user),
+      });
+    } catch (error) {
+      console.error('Google auth error:', error);
+      res.status(500).json({ message: 'Google authentication failed' });
+    }
+  }
+);
+
+// ===== Register =====
 router.post(
   '/register',
   [
@@ -84,7 +195,7 @@ router.post(
   }
 );
 
-// Login
+// ===== Login =====
 router.post(
   '/login',
   [
@@ -135,7 +246,7 @@ router.post(
   }
 );
 
-// Get current user
+// ===== Get current user =====
 router.get('/me', async (req: any, res: any) => {
   try {
     const authHeader = req.headers.authorization;

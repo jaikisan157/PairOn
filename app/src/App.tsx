@@ -11,6 +11,7 @@ import {
   QuickConnectPage,
   OnboardingPage,
   CreditsPage,
+  FriendsPage,
 } from '@/pages';
 import { useAuth } from '@/context/AuthContext';
 
@@ -68,6 +69,7 @@ function AppRoutes() {
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/quick-connect" element={<ProtectedRoute><QuickConnectPage /></ProtectedRoute>} />
       <Route path="/credits" element={<ProtectedRoute><CreditsPage /></ProtectedRoute>} />
+      <Route path="/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute><AdminDashboardPage /></ProtectedRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />

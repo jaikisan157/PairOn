@@ -24,6 +24,7 @@ export interface IUser extends Document {
   remarkRemovedAt?: Date;
   chatPriority: number;
   onboardingComplete: boolean;
+  googleId?: string;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;

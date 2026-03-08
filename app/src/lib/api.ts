@@ -156,6 +156,98 @@ class ApiService {
         });
         return this.handleResponse<{ valid: boolean; certificate: any }>(response);
     }
+
+    // ===== Google Auth =====
+
+    async googleAuth(credential: string) {
+        const response = await fetch(`${this.baseUrl}/api/auth/google`, {
+            method: 'POST',
+            headers: this.getHeaders(false),
+            body: JSON.stringify({ credential }),
+        });
+        return this.handleResponse<{ token: string; user: any }>(response);
+    }
+
+    // ===== OTP =====
+
+    async sendOTP(email: string) {
+        const response = await fetch(`${this.baseUrl}/api/auth/send-otp`, {
+            method: 'POST',
+            headers: this.getHeaders(false),
+            body: JSON.stringify({ email }),
+        });
+        return this.handleResponse<{ message: string }>(response);
+    }
+
+    async verifyOTP(email: string, code: string) {
+        const response = await fetch(`${this.baseUrl}/api/auth/verify-otp`, {
+            method: 'POST',
+            headers: this.getHeaders(false),
+            body: JSON.stringify({ email, code }),
+        });
+        return this.handleResponse<{ verified: boolean }>(response);
+    }
+
+    // ===== Friends =====
+
+    async sendFriendRequest(recipientId: string) {
+        const response = await fetch(`${this.baseUrl}/api/friends/request`, {
+            method: 'POST',
+            headers: this.getHeaders(),
+            body: JSON.stringify({ recipientId }),
+        });
+        return this.handleResponse<{ message: string; friendship: any }>(response);
+    }
+
+    async acceptFriendRequest(friendshipId: string) {
+        const response = await fetch(`${this.baseUrl}/api/friends/accept`, {
+            method: 'POST',
+            headers: this.getHeaders(),
+            body: JSON.stringify({ friendshipId }),
+        });
+        return this.handleResponse<{ message: string; friendship: any }>(response);
+    }
+
+    async declineFriendRequest(friendshipId: string) {
+        const response = await fetch(`${this.baseUrl}/api/friends/decline`, {
+            method: 'POST',
+            headers: this.getHeaders(),
+            body: JSON.stringify({ friendshipId }),
+        });
+        return this.handleResponse<{ message: string }>(response);
+    }
+
+    async removeFriend(friendshipId: string) {
+        const response = await fetch(`${this.baseUrl}/api/friends/${friendshipId}`, {
+            method: 'DELETE',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ message: string }>(response);
+    }
+
+    async getFriends() {
+        const response = await fetch(`${this.baseUrl}/api/friends/list`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ friends: any[] }>(response);
+    }
+
+    async getPendingFriendRequests() {
+        const response = await fetch(`${this.baseUrl}/api/friends/pending`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ pending: any[] }>(response);
+    }
+
+    async getFriendshipStatus(otherUserId: string) {
+        const response = await fetch(`${this.baseUrl}/api/friends/status/${otherUserId}`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ status: string; friendshipId?: string; isRequester?: boolean }>(response);
+    }
 }
 
 export const api = new ApiService();

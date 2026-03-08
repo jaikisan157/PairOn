@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff, Zap, ArrowLeft, Loader2 } from 'lucide-react';
@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { api } from '@/lib/api';
+import { socketService } from '@/lib/socket';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -14,10 +16,12 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const { login } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const googleBtnRef = useRef<HTMLDivElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,6 +37,54 @@ export function LoginPage() {
       setIsLoading(false);
     }
   };
+
+  // Google Sign-In
+  const handleGoogleLogin = async (credential: string) => {
+    setGoogleLoading(true);
+    setError('');
+    try {
+      const { token, user } = await api.googleAuth(credential);
+      localStorage.setItem('pairon_token', token);
+      localStorage.setItem('pairon_user', JSON.stringify(user));
+      socketService.connect(token);
+      window.location.href = '/dashboard';
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Google sign-in failed');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // Load Google Identity Services
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId) return;
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      if ((window as any).google && googleBtnRef.current) {
+        (window as any).google.accounts.id.initialize({
+          client_id: clientId,
+          callback: (response: any) => {
+            if (response.credential) {
+              handleGoogleLogin(response.credential);
+            }
+          },
+        });
+        (window as any).google.accounts.id.renderButton(googleBtnRef.current, {
+          theme: theme === 'dark' ? 'filled_black' : 'outline',
+          size: 'large',
+          width: '100%',
+          text: 'signin_with',
+        });
+      }
+    };
+    document.body.appendChild(script);
+    return () => { try { document.body.removeChild(script); } catch { } };
+  }, [theme]);
 
   return (
     <div className="min-h-screen bg-pairon-bg dark:bg-gray-900 flex items-center justify-center p-4">
@@ -83,6 +135,29 @@ export function LoginPage() {
           <p className="text-gray-600 dark:text-gray-400 text-center mb-6">
             Sign in to continue building together
           </p>
+
+          {/* Google Sign-In */}
+          {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+            <>
+              <div ref={googleBtnRef} className="flex justify-center mb-4" />
+              {googleLoading && (
+                <div className="text-center mb-4">
+                  <Loader2 className="w-5 h-5 animate-spin inline text-pairon-accent" />
+                  <span className="text-sm text-gray-500 ml-2">Signing in with Google...</span>
+                </div>
+              )}
+              <div className="relative mb-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200 dark:border-gray-700" />
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-white dark:bg-gray-800 px-3 text-gray-500 dark:text-gray-400">
+                    or sign in with email
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Demo Credentials */}
           <div className="bg-pairon-accent-light dark:bg-pairon-accent/10 rounded-xl p-4 mb-6">

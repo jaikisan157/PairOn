@@ -106,6 +106,10 @@ const UserSchema = new Schema<IUser>(
       type: Boolean,
       default: false,
     },
+    googleId: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,

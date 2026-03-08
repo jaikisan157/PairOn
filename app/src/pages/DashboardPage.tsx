@@ -11,6 +11,7 @@ import {
   ArrowRight,
   LogOut,
   User,
+  Users,
   History,
   Sun,
   Moon,
@@ -253,6 +254,13 @@ export function DashboardPage() {
                 title="Quick Connect"
               >
                 <MessageCircle className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              </button>
+              <button
+                onClick={() => navigate('/friends')}
+                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Friends"
+              >
+                <Users className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
               <button
                 onClick={toggleTheme}
