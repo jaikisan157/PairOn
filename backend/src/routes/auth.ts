@@ -193,6 +193,12 @@ router.post(
 
       const { email, password, name } = req.body;
 
+      // Password strength validation
+      if (!/[A-Z]/.test(password)) return res.status(400).json({ message: 'Password must contain at least one uppercase letter' });
+      if (!/[a-z]/.test(password)) return res.status(400).json({ message: 'Password must contain at least one lowercase letter' });
+      if (!/[0-9]/.test(password)) return res.status(400).json({ message: 'Password must contain at least one number' });
+      if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) return res.status(400).json({ message: 'Password must contain at least one special character' });
+
       // Check if user exists
       const existingUser = await User.findOne({ email });
       if (existingUser) {

@@ -56,9 +56,9 @@ const UserSchema = new Schema<IUser>(
     },
     reputation: {
       type: Number,
-      default: 0,
+      default: 100,
       min: 0,
-      max: 5,
+      max: 100,
     },
     completedProjects: {
       type: Number,

@@ -11,7 +11,7 @@ export interface IUser extends Document {
   experienceLevel: 'beginner' | 'intermediate' | 'advanced' | 'expert';
   bio: string;
   credits: number;
-  reputation: number;
+  reputation: number; // 0-100
   completedProjects: number;
   previousMatches: string[];
   badges: IBadge[];

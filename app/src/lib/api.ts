@@ -123,6 +123,14 @@ class ApiService {
         return this.handleResponse<{ stats: any }>(response);
     }
 
+    async getOnlineCount() {
+        const response = await fetch(`${this.baseUrl}/api/users/online-count`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ onlineCount: number }>(response);
+    }
+
     // ===== Credits =====
 
     async getCreditHistory(page = 1) {

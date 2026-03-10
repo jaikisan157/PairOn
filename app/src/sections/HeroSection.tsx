@@ -48,7 +48,7 @@ export function HeroSection() {
   };
 
   return (
-    <section className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-pairon-bg dark:bg-gray-900">
+    <section className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-pairon-bg dark:bg-gray-900 pt-24 pb-20">
       {/* Gradient Spotlight */}
       <div className="absolute inset-0 pairon-gradient-spotlight pointer-events-none" />
 
@@ -128,7 +128,7 @@ export function HeroSection() {
           </div>
 
           {/* Right Image Panel */}
-          <div className="hidden lg:block relative w-[41%] p-6">
+          <div className="hidden lg:block relative w-[41%] p-6 pb-10">
             <motion.div
               initial={{ opacity: 0, x: 60, scale: 0.985 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
@@ -175,7 +175,7 @@ export function HeroSection() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.9, duration: 0.4 }}
-        className="absolute bottom-8 left-1/2 -translate-x-1/2 hidden lg:flex items-center gap-6"
+        className="mt-6 hidden lg:flex items-center justify-center gap-6"
       >
         {[
           'Real-time matching',

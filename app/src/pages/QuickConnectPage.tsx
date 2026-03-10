@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
+import { isMobileOrTablet } from '@/lib/deviceDetect';
 
 type QuickChatMode = 'doubt' | 'tech-talk';
 type ChatStatus = 'idle' | 'searching' | 'chatting' | 'ended';
@@ -287,6 +288,10 @@ export function QuickConnectPage() {
 
     const handleSendProposal = useCallback(() => {
         if (!activeChat || !selectedIdea) return;
+        if (isMobileOrTablet()) {
+            alert('⚠️ Collaboration projects require a desktop/laptop. Please switch to a PC to start a project.');
+            return;
+        }
         socketService.proposeCollab({
             recipientId: activeChat.partnerId,
             mode: proposalMode,
@@ -507,6 +512,10 @@ export function QuickConnectPage() {
                                 </Button>
                                 <Button
                                     onClick={() => {
+                                        if (isMobileOrTablet()) {
+                                            alert('⚠️ Collaboration projects require a desktop/laptop. Please switch to a PC to accept this proposal.');
+                                            return;
+                                        }
                                         socketService.acceptProposal(viewingProposal.id);
                                         setIncomingProposals(prev => prev.filter(p => p.id !== viewingProposal.id));
                                         setViewingProposal(null);

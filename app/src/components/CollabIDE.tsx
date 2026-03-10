@@ -912,6 +912,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             )}
                             <Editor
                                 height="100%" theme={editorTheme} onMount={handleEditorMount}
+                                language={getLanguage(activeFile)}
+                                defaultLanguage="typescript"
                                 options={{
                                     minimap: { enabled: false }, fontSize,
                                     fontFamily: "'JetBrains Mono', 'Fira Code', monospace",

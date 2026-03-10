@@ -41,8 +41,26 @@ export function RegisterPage() {
       setError('Email is required');
       return;
     }
+
+    // Password constraints
     if (password.length < 8) {
       setError('Password must be at least 8 characters');
+      return;
+    }
+    if (!/[A-Z]/.test(password)) {
+      setError('Password must contain at least one uppercase letter');
+      return;
+    }
+    if (!/[a-z]/.test(password)) {
+      setError('Password must contain at least one lowercase letter');
+      return;
+    }
+    if (!/[0-9]/.test(password)) {
+      setError('Password must contain at least one number');
+      return;
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+      setError('Password must contain at least one special character (!@#$%^&*...)');
       return;
     }
 
@@ -254,9 +272,19 @@ export function RegisterPage() {
                         )}
                       </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Must be at least 8 characters
-                    </p>
+                    <div className="mt-2 space-y-1">
+                      {[
+                        { label: '8+ characters', met: password.length >= 8 },
+                        { label: 'Uppercase letter', met: /[A-Z]/.test(password) },
+                        { label: 'Lowercase letter', met: /[a-z]/.test(password) },
+                        { label: 'Number', met: /[0-9]/.test(password) },
+                        { label: 'Special character (!@#$...)', met: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password) },
+                      ].map(({ label, met }) => (
+                        <p key={label} className={`text-xs flex items-center gap-1.5 ${met ? 'text-green-500' : 'text-gray-400'}`}>
+                          {met ? '✓' : '○'} {label}
+                        </p>
+                      ))}
+                    </div>
                   </div>
 
                   <Button

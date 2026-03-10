@@ -152,4 +152,15 @@ router.get('/search', authMiddleware, adminMiddleware, async (req: any, res: any
   }
 });
 
+// Get online collaborators count
+router.get('/online-count', authMiddleware, async (_req: any, res: any) => {
+  try {
+    const count = await User.countDocuments({ isOnline: true });
+    res.json({ onlineCount: count });
+  } catch (error) {
+    console.error('Online count error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;

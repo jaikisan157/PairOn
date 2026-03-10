@@ -32,6 +32,8 @@ import { useTheme } from '@/context/ThemeContext';
 import { MATCH_MODES, CHALLENGE_RULES } from '@/data/constants';
 import { formatDuration } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
+import { api } from '@/lib/api';
+import { isMobileOrTablet } from '@/lib/deviceDetect';
 import type { MatchMode } from '@/types';
 
 const iconMap = {
@@ -58,11 +60,22 @@ export function DashboardPage() {
   // Proposals
   const [proposals, setProposals] = useState<any[]>([]);
 
+  // Online collaborators count
+  const [onlineCount, setOnlineCount] = useState(0);
+
   // Active long-running sessions (24hr/7day)
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
 
   // Session history
   const [sessionHistory, setSessionHistory] = useState<any[]>([]);
+
+  // Fetch online collaborator count
+  useEffect(() => {
+    const fetchCount = () => api.getOnlineCount().then(d => setOnlineCount(d.onlineCount)).catch(() => { });
+    fetchCount();
+    const interval = setInterval(fetchCount, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Listen for challenge events
   useEffect(() => {
@@ -177,6 +190,10 @@ export function DashboardPage() {
 
   const handleStartMatching = () => {
     if (!selectedMode) return;
+    if (isMobileOrTablet()) {
+      alert('⚠️ Collaboration projects require a desktop/laptop. The code editor and workspace only work on PC. Please switch to a desktop to start matching.');
+      return;
+    }
     // Block if user has an active session
     if (activeSessions.length > 0) {
       const sess = activeSessions[0];
@@ -414,9 +431,18 @@ export function DashboardPage() {
             transition={{ delay: 0.2 }}
             className="bg-white dark:bg-gray-800 rounded-[28px] shadow-card p-8 mb-8"
           >
-            <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white mb-6">
-              Choose your mode
-            </h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white">
+                Choose your mode
+              </h2>
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
+                </span>
+                <span className="font-medium">{onlineCount} online now</span>
+              </div>
+            </div>
 
             <div className="grid sm:grid-cols-3 gap-4 mb-6">
               {MATCH_MODES.map((mode) => {

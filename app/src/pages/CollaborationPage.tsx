@@ -138,42 +138,42 @@ export function CollaborationPage() {
   const gracefulEndRef = useRef(false);
   const sessionRef = useRef<ChallengeSession | null>(null);
 
-  // Audio notification helper — musical note sequences
+  // Audio notification helper — soft, pleasant sounds
   const playSound = useCallback((type: 'message' | 'connect' | 'disconnect' | 'send') => {
     try {
       const ctx = new AudioContext();
-      const vol = 0.06;
 
-      const playNote = (freq: number, startTime: number, duration: number, wave: OscillatorType = 'sine', noteVol = vol) => {
+      const playNote = (freq: number, startTime: number, duration: number, wave: OscillatorType = 'triangle', vol = 0.04) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.type = wave;
         osc.frequency.value = freq;
-        gain.gain.setValueAtTime(noteVol, ctx.currentTime + startTime);
+        // Smooth fade in then fade out — no harsh clicks
+        gain.gain.setValueAtTime(0, ctx.currentTime + startTime);
+        gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + startTime + 0.02);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + duration);
         osc.start(ctx.currentTime + startTime);
-        osc.stop(ctx.currentTime + startTime + duration);
+        osc.stop(ctx.currentTime + startTime + duration + 0.05);
       };
 
       if (type === 'connect') {
-        // Ascending C-E-G (happy major chord arpeggio)
-        playNote(523, 0, 0.15);      // C5
-        playNote(659, 0.1, 0.15);    // E5
-        playNote(784, 0.2, 0.2);     // G5
+        // Warm ascending chime: D5 → F#5 → A5 (D major)
+        playNote(587, 0, 0.25, 'triangle', 0.035);
+        playNote(740, 0.12, 0.25, 'triangle', 0.035);
+        playNote(880, 0.24, 0.35, 'sine', 0.03);
       } else if (type === 'disconnect') {
-        // Descending G-E-C (reverse)
-        playNote(784, 0, 0.15, 'triangle');   // G5
-        playNote(659, 0.1, 0.15, 'triangle'); // E5
-        playNote(523, 0.2, 0.2, 'triangle');  // C5
+        // Gentle descending: A4 → F4
+        playNote(440, 0, 0.3, 'sine', 0.03);
+        playNote(349, 0.15, 0.35, 'sine', 0.025);
       } else if (type === 'message') {
-        // Two quick ascending notes (subtle notification)
-        playNote(660, 0, 0.1, 'sine', 0.05);    // E5
-        playNote(880, 0.08, 0.12, 'sine', 0.05); // A5
+        // Soft double-ping like a notification chime
+        playNote(830, 0, 0.12, 'sine', 0.03);
+        playNote(1046, 0.1, 0.15, 'sine', 0.025);
       } else if (type === 'send') {
-        // Single soft short blip
-        playNote(600, 0, 0.08, 'sine', 0.03);
+        // Tiny subtle click
+        playNote(700, 0, 0.06, 'sine', 0.02);
       }
     } catch { /* audio not available */ }
   }, []);
