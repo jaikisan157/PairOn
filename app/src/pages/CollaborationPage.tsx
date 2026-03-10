@@ -372,10 +372,7 @@ export function CollaborationPage() {
 
     // Partner activity updates
     socket.on('challenge:partner-activity', (data: any) => {
-      const prev = partnerStatus;
       setPartnerStatus(data.status);
-      if (data.status === 'online' && prev !== 'online') playSound('connect');
-      else if (data.status === 'offline' && prev !== 'offline') playSound('disconnect');
     });
 
     // Project edit proposed by partner

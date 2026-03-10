@@ -556,7 +556,7 @@ export function setupSocketHandlers(io: Server) {
         const recentMessages = session.messages.slice(-10).map(m => `${m.senderId === userId ? userName : 'Partner'}: ${m.content}`).join('\n');
 
         let aiResponse: string;
-        const groqApiKey = process.env.GROK_API_KEY;
+        const groqApiKey = process.env.GROQ_API_KEY || process.env.GROK_API_KEY;
 
         if (groqApiKey) {
           // Use Groq API

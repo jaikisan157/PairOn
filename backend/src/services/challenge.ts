@@ -215,7 +215,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 .join('\n');
 
             let aiResponse: string;
-            const groqApiKey = process.env.GROK_API_KEY; // works with Groq key too
+            const groqApiKey = process.env.GROQ_API_KEY || process.env.GROK_API_KEY;
 
             if (groqApiKey) {
                 try {
@@ -251,7 +251,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                     aiResponse = `@${userName}, AI is temporarily unavailable. Try again in a moment.`;
                 }
             } else {
-                aiResponse = `@${userName}, AI is not configured. Ask the admin to set up GROK_API_KEY.`;
+                aiResponse = `@${userName}, AI is not configured. Set GROQ_API_KEY in .env (get free key from console.groq.com).`;
             }
 
             const aiMsg = {
@@ -282,7 +282,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             const projectTitle = match?.projectIdea?.title || 'Unknown Project';
             const projectDesc = match?.projectIdea?.description || '';
 
-            const GROQ_API_KEY = process.env.GROK_API_KEY || process.env.GROQ_API_KEY;
+            const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GROK_API_KEY;
             if (!GROQ_API_KEY) {
                 socket.emit('challenge:task-suggestions', { tasks: [], error: 'AI not configured' });
                 return;

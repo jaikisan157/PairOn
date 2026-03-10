@@ -411,7 +411,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const isLockedByPartner = useCallback((path: string) => { const l = fileLocks.get(path); return l && l.userId !== userId; }, [fileLocks, userId]);
     const getLockerName = useCallback((path: string) => fileLocks.get(path)?.userName || 'Partner', [fileLocks]);
 
-    // ===== Boot WebContainer =====
+    // ===== Boot WebContainer (auto-boots on mount for immediate terminal) =====
     const bootWebContainer = useCallback(async () => {
         if (webcontainerRef.current || isBooting) return;
         setIsBooting(true);
@@ -435,16 +435,32 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             const input = shellProcess.input.getWriter();
             shellWriterRef.current = input;
 
-            setIsRunning(true);
             setIsBooting(false);
-
-            // Auto-run npm install && npm run dev
-            await input.write('npm install && npm run dev\n');
+            if (term) term.writeln('\x1b[32m✓ Shell ready — you can type commands now\x1b[0m\n');
         } catch (err: any) {
             if (term) { term.writeln(`\x1b[31m✗ Failed: ${err.message}\x1b[0m`); term.writeln('\x1b[33mℹ Requires Chromium browser\x1b[0m'); }
             setIsBooting(false);
         }
     }, [isBooting]);
+
+    // Auto-boot WebContainer when IDE mounts
+    useEffect(() => {
+        // Small delay to let terminal initialize first
+        const timer = setTimeout(() => { bootWebContainer(); }, 500);
+        return () => clearTimeout(timer);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Run project (npm install && npm run dev)
+    const runProject = useCallback(async () => {
+        if (!shellWriterRef.current) {
+            // If WC hasn't booted yet, boot it first
+            await bootWebContainer();
+        }
+        if (shellWriterRef.current) {
+            setIsRunning(true);
+            shellWriterRef.current.write('npm install && npm run dev\n');
+        }
+    }, [bootWebContainer]);
 
     const stopServer = useCallback(() => {
         if (shellProcessRef.current) {
@@ -785,7 +801,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 </div>
                 <div className="flex items-center gap-1">
                     {!isRunning ? (
-                        <button onClick={bootWebContainer} disabled={isBooting}
+                        <button onClick={runProject} disabled={isBooting}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-md transition-colors">
                             {isBooting ? (<><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Booting...</>) : (<><Play className="w-3 h-3" /> Run</>)}
                         </button>
