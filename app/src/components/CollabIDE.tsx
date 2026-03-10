@@ -5,7 +5,7 @@ import { Terminal as XTermTerminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import {
-    FolderOpen, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
+    FolderOpen, Folder, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
     Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer, Info,
     MoreVertical,
@@ -122,6 +122,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['src']));
     const [showNewFile, setShowNewFile] = useState(false);
     const [newFileName, setNewFileName] = useState('');
+    const [newFileParent, setNewFileParent] = useState<string>(''); // which dir the new-file input is inside
+    const [newItemType, setNewItemType] = useState<'file' | 'folder'>('file');
+    const [folders, setFolders] = useState<Set<string>>(() => {
+        // Derive initial folders from file paths
+        const saved = localStorage.getItem(AUTOSAVE_KEY(sessionId));
+        const f = new Set<string>();
+        const paths = saved ? Object.keys(JSON.parse(saved) || {}) : Object.keys(DEFAULT_FILES);
+        for (const p of paths) { const segs = p.split('/'); for (let i = 1; i < segs.length; i++) f.add(segs.slice(0, i).join('/')); }
+        return f;
+    });
 
     // WebContainer & terminal
     const [, setWebcontainer] = useState<WebContainer | null>(null);
@@ -556,7 +566,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (isBlockedExtension(filename)) {
             const ext = filename.split('.').pop()?.toUpperCase();
             addToast(`❌ .${ext} files are not supported. This IDE runs on Node.js — only JS/TS/web files are supported.`, 'error');
-            setShowNewFile(false); setNewFileName('');
+            setShowNewFile(false); setNewFileName(''); setNewFileParent('');
             return;
         }
         setFiles(prev => { const next = { ...prev, [filename]: '' }; autosave(next); return next; });
@@ -568,10 +578,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         }
         const socket = socketService.getSocket();
         socket?.emit('code:file-create', { sessionId, path: filename, content: '', senderId: socket?.id });
-        setShowNewFile(false); setNewFileName('');
-        // Auto-expand parent dirs
+        setShowNewFile(false); setNewFileName(''); setNewFileParent('');
+        // Register parent dirs in folders set & auto-expand
         const parts = filename.split('/');
         if (parts.length > 1) {
+            setFolders(prev => { const n = new Set(prev); for (let i = 1; i < parts.length; i++) n.add(parts.slice(0, i).join('/')); return n; });
             setExpandedDirs(prev => { const n = new Set(prev); for (let i = 1; i < parts.length; i++) n.add(parts.slice(0, i).join('/')); return n; });
         }
     }, [sessionId, autosave, switchToFile, addToast]);
@@ -658,18 +669,22 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         setContextMenu(null);
     }, [files, sessionId, autosave, switchToFile]);
 
-    // Create folder
+    // Create folder — just register in folders Set, no .gitkeep files
     const createFolder = useCallback((parentPath?: string) => {
         const folderName = prompt('Folder name:', 'new-folder');
-        if (!folderName) return;
+        if (!folderName?.trim()) return;
         const fullPath = parentPath ? `${parentPath}/${folderName}` : folderName;
-        // Create a .gitkeep to represent the folder
-        const keepPath = `${fullPath}/.gitkeep`;
-        setFiles(prev => { const next = { ...prev, [keepPath]: '' }; autosave(next); return next; });
+        // Register this folder and all parent folders
+        setFolders(prev => {
+            const n = new Set(prev);
+            const segments = fullPath.split('/');
+            for (let i = 1; i <= segments.length; i++) n.add(segments.slice(0, i).join('/'));
+            return n;
+        });
         setExpandedDirs(prev => { const n = new Set(prev); n.add(fullPath); return n; });
         if (webcontainerRef.current) webcontainerRef.current.fs.mkdir(fullPath, { recursive: true }).catch(() => { });
         setContextMenu(null);
-    }, [autosave]);
+    }, []);
 
     // Save As
     const saveAs = useCallback((path: string) => {
@@ -779,23 +794,52 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const buildTree = useCallback((): FileNode[] => {
         const root: FileNode[] = [];
         const dirMap = new Map<string, FileNode>();
-        const paths = Object.keys(files).sort();
-        for (const path of paths) {
-            const parts = path.split('/');
-            if (parts.length === 1) { root.push({ name: parts[0], type: 'file' }); continue; }
-            for (let i = 0; i < parts.length - 1; i++) {
-                const dirPath = parts.slice(0, i + 1).join('/');
-                if (!dirMap.has(dirPath)) {
-                    const dirNode: FileNode = { name: parts[i], type: 'directory', children: [] };
-                    dirMap.set(dirPath, dirNode);
-                    if (i === 0) { if (!root.find(n => n.name === parts[0] && n.type === 'directory')) root.push(dirNode); }
-                    else { dirMap.get(parts.slice(0, i).join('/'))?.children?.push(dirNode); }
+
+        // Helper to ensure a directory node exists in the tree
+        const ensureDir = (dirPath: string) => {
+            if (dirMap.has(dirPath)) return;
+            const parts = dirPath.split('/');
+            // Ensure parents first
+            for (let i = 1; i <= parts.length; i++) {
+                const dp = parts.slice(0, i).join('/');
+                if (dirMap.has(dp)) continue;
+                const dirNode: FileNode = { name: parts[i - 1], type: 'directory', children: [] };
+                dirMap.set(dp, dirNode);
+                if (i === 1) {
+                    if (!root.find(n => n.name === parts[0] && n.type === 'directory')) root.push(dirNode);
+                } else {
+                    const parentPath = parts.slice(0, i - 1).join('/');
+                    const parent = dirMap.get(parentPath);
+                    if (parent && !parent.children?.find(c => c.name === parts[i - 1] && c.type === 'directory')) {
+                        parent.children?.push(dirNode);
+                    }
                 }
             }
-            dirMap.get(parts.slice(0, -1).join('/'))?.children?.push({ name: parts[parts.length - 1], type: 'file' });
+        };
+
+        // Register all explicit folders first
+        for (const f of folders) ensureDir(f);
+
+        // Add files
+        const paths = Object.keys(files).filter(p => !p.endsWith('/.gitkeep')).sort();
+        for (const path of paths) {
+            const parts = path.split('/');
+            if (parts.length === 1) {
+                if (!root.find(n => n.name === parts[0] && n.type === 'file')) {
+                    root.push({ name: parts[0], type: 'file' });
+                }
+                continue;
+            }
+            // Ensure parent dirs exist
+            ensureDir(parts.slice(0, -1).join('/'));
+            const parentDir = dirMap.get(parts.slice(0, -1).join('/'));
+            const fileName = parts[parts.length - 1];
+            if (parentDir && !parentDir.children?.find(c => c.name === fileName && c.type === 'file')) {
+                parentDir.children?.push({ name: fileName, type: 'file' });
+            }
         }
         return root;
-    }, [files]);
+    }, [files, folders]);
 
     const renderTree = (nodes: FileNode[], prefix = '') => {
         const sorted = [...nodes].sort((a, b) => { if (a.type !== b.type) return a.type === 'directory' ? -1 : 1; return a.name.localeCompare(b.name); });
@@ -823,10 +867,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (draggedPath && draggedPath !== fullPath) moveFile(draggedPath, fullPath); setDraggedPath(null); }}>
                         <div className="w-full flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:bg-[#1e2030] hover:text-gray-200 transition-colors rounded group"
-                            draggable onDragStart={() => setDraggedPath(fullPath)}>
+                            draggable onDragStart={() => setDraggedPath(fullPath)}
+                            onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, path: fullPath, type: 'directory' }); }}>
                             <button onClick={() => toggleDir(fullPath)} className="flex items-center gap-1 flex-1 text-left">
                                 {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                                <FolderOpen className="w-3.5 h-3.5 text-blue-400" />
+                                {isExpanded ? <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> : <Folder className="w-3.5 h-3.5 text-blue-400" />}
                                 <span className="flex-1">{node.name}</span>
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, path: fullPath, type: 'directory' }); }}
@@ -834,7 +879,30 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 <MoreVertical className="w-3 h-3" />
                             </button>
                         </div>
-                        {isExpanded && node.children && <div className="ml-3 border-l border-gray-800">{renderTree(node.children, fullPath)}</div>}
+                        {isExpanded && (
+                            <div className="ml-3 border-l border-gray-800">
+                                {/* Inline new-file/folder input for this directory */}
+                                {showNewFile && newFileParent === fullPath && (
+                                    <div className="px-2 py-0.5">
+                                        <input autoFocus value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && newFileName.trim()) {
+                                                    if (newItemType === 'folder') {
+                                                        createFolder(fullPath);
+                                                    } else {
+                                                        createFile(`${fullPath}/${newFileName}`);
+                                                    }
+                                                }
+                                                if (e.key === 'Escape') { setShowNewFile(false); setNewFileName(''); setNewFileParent(''); }
+                                            }}
+                                            onBlur={() => { setShowNewFile(false); setNewFileName(''); setNewFileParent(''); }}
+                                            placeholder={newItemType === 'folder' ? 'folder-name' : 'filename.tsx'}
+                                            className="w-full bg-[#1e2030] border border-blue-500 rounded px-1.5 py-0.5 text-xs text-white placeholder-gray-600 outline-none" />
+                                    </div>
+                                )}
+                                {node.children && renderTree(node.children, fullPath)}
+                            </div>
+                        )}
                     </div>
                 );
             }
@@ -967,25 +1035,35 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
             }>
                 {/* File explorer */}
-                < div className="bg-[#0d1117] border-r border-gray-800 overflow-hidden min-w-0 relative" >
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
+                <div className="bg-[#0d1117] border-r border-gray-800 flex flex-col min-w-0 relative" >
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Explorer</span>
                         <div className="flex items-center gap-0.5">
                             <button onClick={() => createFolder()} className="p-0.5 text-gray-500 hover:text-white rounded" title="New folder"><FolderPlus className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setShowNewFile(true)} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => { setShowNewFile(true); setNewFileParent(''); setNewItemType('file'); setNewFileName(''); }} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
                         </div>
                     </div>
-                    {
-                        showNewFile && (
-                            <div className="px-2 py-1 border-b border-gray-800">
-                                <input autoFocus value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') createFile(newFileName); if (e.key === 'Escape') { setShowNewFile(false); setNewFileName(''); } }}
-                                    placeholder="src/components/Button.tsx"
-                                    className="w-full bg-[#1e2030] border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500" />
-                            </div>
-                        )
-                    }
-                    <div className="p-1 overflow-y-auto flex-1">{renderTree(tree)}</div>
+                    {/* Root-level new file input (when no parent dir selected) */}
+                    {showNewFile && newFileParent === '' && (
+                        <div className="px-2 py-1 border-b border-gray-800 flex-shrink-0">
+                            <input autoFocus value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && newFileName.trim()) {
+                                        if (newItemType === 'folder') {
+                                            const name = prompt('Folder name:', newFileName);
+                                            if (name) { setFolders(prev => { const n = new Set(prev); n.add(name); return n; }); setExpandedDirs(prev => { const n = new Set(prev); n.add(name); return n; }); }
+                                        } else {
+                                            createFile(newFileName);
+                                        }
+                                    }
+                                    if (e.key === 'Escape') { setShowNewFile(false); setNewFileName(''); }
+                                }}
+                                onBlur={() => { setShowNewFile(false); setNewFileName(''); }}
+                                placeholder="filename.tsx or path/to/file.tsx"
+                                className="w-full bg-[#1e2030] border border-blue-500 rounded px-2 py-1 text-xs text-white placeholder-gray-600 outline-none" />
+                        </div>
+                    )}
+                    <div className="p-1 overflow-y-auto flex-1" style={{ minHeight: 0 }}>{renderTree(tree)}</div>
                 </div >
                 {/* Sidebar resize divider */}
                 < ResizeDivider dividerRef={sidebar.dividerRef} />
@@ -1223,10 +1301,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             </>
                         )}
                         {contextMenu.type === 'directory' && (
-                            <button onClick={() => createFolder(contextMenu.path)}
-                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
-                                <FolderPlus className="w-3 h-3" /> New Subfolder
-                            </button>
+                            <>
+                                <button onClick={() => {
+                                    setNewFileParent(contextMenu.path);
+                                    setNewItemType('file');
+                                    setNewFileName('');
+                                    setShowNewFile(true);
+                                    setExpandedDirs(prev => { const n = new Set(prev); n.add(contextMenu.path); return n; });
+                                    setContextMenu(null);
+                                }}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                                    <Plus className="w-3 h-3" /> New File
+                                </button>
+                                <button onClick={() => createFolder(contextMenu.path)}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                                    <FolderPlus className="w-3 h-3" /> New Subfolder
+                                </button>
+                            </>
                         )}
                         {contextMenu.type === 'file' && /\.(js|ts|mjs)$/.test(contextMenu.path) && (
                             <button onClick={() => runFile(contextMenu.path)}
