@@ -27,6 +27,7 @@ import { formatTime } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
 import { playMessageSound, playSendSound } from '@/lib/audio';
 import { CollabIDE } from '@/components/CollabIDE';
+import { UserProfileModal } from '@/components/UserProfileModal';
 import type { TaskStatus } from '@/types';
 
 // ===== Types =====
@@ -131,6 +132,9 @@ export function CollaborationPage() {
   // Typing indicator
   const [partnerTyping, setPartnerTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // User profile modal
+  const [showPartnerProfile, setShowPartnerProfile] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -741,7 +745,12 @@ export function CollaborationPage() {
                   {MODE_LABELS[session.mode]}
                 </h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  with <strong>{session.partnerName}</strong>
+                  with{' '}
+                  <strong
+                    className="cursor-pointer hover:text-blue-500 hover:underline transition-colors"
+                    onClick={() => setShowPartnerProfile(true)}
+                    title="View profile & add friend"
+                  >{session.partnerName}</strong>
                   <span className={`inline-block w-2 h-2 rounded-full ml-1 ${partnerStatus === 'online' ? 'bg-green-500' : partnerStatus === 'away' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`} title={`Partner is ${partnerStatus}`} />
                   <span className="text-yellow-500"> ⭐ {session.partnerReputation}</span>
                   {session.projectIdea && ` • ${session.projectIdea.title}`}
@@ -1375,6 +1384,17 @@ export function CollaborationPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Partner profile modal */}
+      {showPartnerProfile && session && (
+        <UserProfileModal
+          userId={session.partnerId}
+          userName={session.partnerName}
+          userReputation={session.partnerReputation}
+          isOnline={partnerStatus === 'online'}
+          onClose={() => setShowPartnerProfile(false)}
+        />
+      )}
     </div>
   );
 }

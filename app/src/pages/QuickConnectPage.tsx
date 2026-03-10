@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
 import { isMobileOrTablet } from '@/lib/deviceDetect';
+import { UserProfileModal } from '@/components/UserProfileModal';
 
 type QuickChatMode = 'doubt' | 'tech-talk';
 type ChatStatus = 'idle' | 'searching' | 'chatting' | 'ended';
@@ -72,6 +73,9 @@ export function QuickConnectPage() {
     const [showEndConfirm, setShowEndConfirm] = useState(false);
     const [incomingProposals, setIncomingProposals] = useState<any[]>([]);
     const [viewingProposal, setViewingProposal] = useState<any | null>(null);
+
+    // User profile modal
+    const [showPartnerProfile, setShowPartnerProfile] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -696,7 +700,11 @@ export function QuickConnectPage() {
                                     </span>
                                 </div>
                                 <div>
-                                    <p className="font-medium text-gray-900 dark:text-white text-sm">
+                                    <p
+                                        className="font-medium text-gray-900 dark:text-white text-sm cursor-pointer hover:text-blue-500 hover:underline transition-colors"
+                                        onClick={() => setShowPartnerProfile(true)}
+                                        title="View profile & add friend"
+                                    >
                                         {activeChat.partnerName}
                                     </p>
                                     <p className="text-xs text-gray-500">
@@ -975,6 +983,17 @@ export function QuickConnectPage() {
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Partner profile modal */}
+            {showPartnerProfile && activeChat && (
+                <UserProfileModal
+                    userId={activeChat.partnerId}
+                    userName={activeChat.partnerName}
+                    userReputation={activeChat.partnerReputation}
+                    isOnline={activeChat.status === 'active'}
+                    onClose={() => setShowPartnerProfile(false)}
+                />
+            )}
         </div>
     );
 }
