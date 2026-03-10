@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { formatTime } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
+import { playMessageSound, playSendSound } from '@/lib/audio';
 import { CollabIDE } from '@/components/CollabIDE';
 import type { TaskStatus } from '@/types';
 
@@ -138,45 +139,6 @@ export function CollaborationPage() {
   const gracefulEndRef = useRef(false);
   const sessionRef = useRef<ChallengeSession | null>(null);
 
-  // Audio notification helper — soft, pleasant sounds
-  const playSound = useCallback((type: 'message' | 'connect' | 'disconnect' | 'send') => {
-    try {
-      const ctx = new AudioContext();
-
-      const playNote = (freq: number, startTime: number, duration: number, wave: OscillatorType = 'triangle', vol = 0.04) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = wave;
-        osc.frequency.value = freq;
-        // Smooth fade in then fade out — no harsh clicks
-        gain.gain.setValueAtTime(0, ctx.currentTime + startTime);
-        gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + startTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + duration);
-        osc.start(ctx.currentTime + startTime);
-        osc.stop(ctx.currentTime + startTime + duration + 0.05);
-      };
-
-      if (type === 'connect') {
-        // Warm ascending chime: D5 → F#5 → A5 (D major)
-        playNote(587, 0, 0.25, 'triangle', 0.035);
-        playNote(740, 0.12, 0.25, 'triangle', 0.035);
-        playNote(880, 0.24, 0.35, 'sine', 0.03);
-      } else if (type === 'disconnect') {
-        // Gentle descending: A4 → F4
-        playNote(440, 0, 0.3, 'sine', 0.03);
-        playNote(349, 0.15, 0.35, 'sine', 0.025);
-      } else if (type === 'message') {
-        // Soft double-ping like a notification chime
-        playNote(830, 0, 0.12, 'sine', 0.03);
-        playNote(1046, 0.1, 0.15, 'sine', 0.025);
-      } else if (type === 'send') {
-        // Tiny subtle click
-        playNote(700, 0, 0.06, 'sine', 0.02);
-      }
-    } catch { /* audio not available */ }
-  }, []);
 
   // Keep sessionRef in sync
   useEffect(() => {
@@ -270,7 +232,7 @@ export function CollaborationPage() {
       });
       // Play sound for partner messages (not system, not own)
       if (message.senderId !== user?.id && message.type !== 'system') {
-        playSound('message');
+        playMessageSound();
       }
     });
 
@@ -629,9 +591,9 @@ export function CollaborationPage() {
     // Send user message to server
     socketService.getSocket()?.emit('challenge:message', session.sessionId, msg);
     socketService.getSocket()?.emit('challenge:stop-typing', session.sessionId);
-    playSound('send');
+    playSendSound();
     setNewMessage('');
-  }, [newMessage, session, user?.id, playSound]);
+  }, [newMessage, session, user?.id]);
 
   const handleRequestExit = useCallback(() => {
     if (!session || !exitReason.trim() || exitReason.trim().length < 5) return;

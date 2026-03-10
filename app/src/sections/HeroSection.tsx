@@ -144,7 +144,6 @@ export function HeroSection() {
               <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
             </motion.div>
 
-            {/* Floating Badge */}
             <motion.div
               initial={{ opacity: 0, y: 18, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -166,30 +165,30 @@ export function HeroSection() {
                 </div>
               </div>
             </motion.div>
+
+            {/* Feature Pills — inside the right panel */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.9, duration: 0.4 }}
+              className="mt-4 flex items-center justify-center gap-5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl px-5 py-3 shadow-sm"
+            >
+              {[
+                'Real-time matching',
+                'Built-in workspace',
+                'Earn credits',
+              ].map((feature) => (
+                <div
+                  key={feature}
+                  className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
+                >
+                  <CheckCircle className="w-4 h-4 text-pairon-accent" />
+                  {feature}
+                </div>
+              ))}
+            </motion.div>
           </div>
         </div>
-      </motion.div>
-
-      {/* Feature Pills */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.9, duration: 0.4 }}
-        className="mt-6 hidden lg:flex items-center justify-center gap-6"
-      >
-        {[
-          'Real-time matching',
-          'Built-in workspace',
-          'Earn credits',
-        ].map((feature) => (
-          <div
-            key={feature}
-            className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
-          >
-            <CheckCircle className="w-4 h-4 text-pairon-accent" />
-            {feature}
-          </div>
-        ))}
       </motion.div>
     </section>
   );

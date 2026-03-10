@@ -34,6 +34,7 @@ import { formatDuration } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
 import { api } from '@/lib/api';
 import { isMobileOrTablet } from '@/lib/deviceDetect';
+import { playMatchSound } from '@/lib/audio';
 import type { MatchMode } from '@/types';
 
 const iconMap = {
@@ -126,6 +127,7 @@ export function DashboardPage() {
         tasks: data.tasks || [],
       }));
 
+      playMatchSound();
       navigate('/collaborate');
     });
 

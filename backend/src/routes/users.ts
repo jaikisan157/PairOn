@@ -163,4 +163,18 @@ router.get('/online-count', authMiddleware, async (_req: any, res: any) => {
   }
 });
 
+// One-time migration: fix existing users with reputation 0 → 100
+router.post('/migrate-reputation', authMiddleware, async (_req: any, res: any) => {
+  try {
+    const result = await User.updateMany(
+      { reputation: { $lt: 100 } },
+      { $set: { reputation: 100 } }
+    );
+    res.json({ message: `Updated ${result.modifiedCount} users to reputation 100` });
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;

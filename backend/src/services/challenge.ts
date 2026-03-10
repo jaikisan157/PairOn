@@ -883,9 +883,12 @@ async function findChallengePartner(
         tasks: session.tasks,
     };
 
-    // Emit to BOTH (exactly like Quick Chat: socket.emit + io.to(socketId))
+    // Emit to BOTH users (use user room AND socket ID for reliability)
     socket.emit('challenge:matched', matchData1);
     io.to(best.socketId).emit('challenge:matched', matchData2);
+    // Also emit to user rooms as backup (in case socketId is stale from reconnect)
+    io.to(`user:${userId}`).emit('challenge:matched', matchData1);
+    io.to(`user:${best.userId}`).emit('challenge:matched', matchData2);
 
     console.log(`[Challenge] Matched ${userId} + ${best.userId} for ${mode}`);
 

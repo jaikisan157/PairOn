@@ -35,10 +35,37 @@ interface CollabIDEProps {
 function getLanguage(filename: string): string {
     const ext = filename.split('.').pop()?.toLowerCase() || '';
     const map: Record<string, string> = {
-        ts: 'typescript', tsx: 'typescriptreact', js: 'javascript', jsx: 'javascriptreact',
-        css: 'css', html: 'html', json: 'json', md: 'markdown', py: 'python',
-        go: 'go', rs: 'rust', yml: 'yaml', yaml: 'yaml', sh: 'shell', env: 'plaintext', txt: 'plaintext',
+        // Web fundamentals
+        ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+        css: 'css', scss: 'scss', sass: 'scss', less: 'less',
+        html: 'html', htm: 'html', xml: 'xml', svg: 'xml',
+        json: 'json', jsonc: 'json', json5: 'json',
+        md: 'markdown', mdx: 'markdown',
+        // Config files
+        yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini',
+        env: 'shell', gitignore: 'plaintext', dockerignore: 'plaintext',
+        // Shell
+        sh: 'shell', bash: 'shell', zsh: 'shell', fish: 'shell',
+        bat: 'bat', cmd: 'bat', ps1: 'powershell',
+        // Backend languages
+        py: 'python', rb: 'ruby', php: 'php', java: 'java',
+        go: 'go', rs: 'rust', cs: 'csharp', fs: 'fsharp',
+        swift: 'swift', kt: 'kotlin', kts: 'kotlin', scala: 'scala',
+        lua: 'lua', r: 'r', pl: 'perl', dart: 'dart',
+        // Systems
+        c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp',
+        // Data / Query
+        sql: 'sql', graphql: 'graphql', gql: 'graphql',
+        // Misc
+        dockerfile: 'dockerfile', makefile: 'plaintext',
+        txt: 'plaintext', log: 'plaintext', csv: 'plaintext',
+        vue: 'html', svelte: 'html', astro: 'html',
     };
+    // Handle special filenames
+    const name = filename.split('/').pop()?.toLowerCase() || '';
+    if (name === 'dockerfile') return 'dockerfile';
+    if (name === 'makefile' || name === 'cmakelists.txt') return 'plaintext';
+    if (name.startsWith('.env')) return 'shell';
     return map[ext] || 'plaintext';
 }
 
@@ -151,6 +178,20 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const shellWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
     const filesRef = useRef(files);
     const lockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Multi-terminal state
+    interface TerminalInstance {
+        id: string;
+        label: string;
+        term: XTermTerminal;
+        fitAddon: FitAddon;
+        shellProcess: any;
+        shellWriter: WritableStreamDefaultWriter<string> | null;
+        container: HTMLDivElement | null;
+    }
+    const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
+    const [terminalTabs, setTerminalTabs] = useState<{ id: string; label: string }[]>([]);
+    const [activeTerminalId, setActiveTerminalId] = useState<string>('');
     const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const suppressSyncRef = useRef(false);
 
@@ -263,7 +304,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         });
     }, [activeFile, sessionId, getOrCreateModel, autosave]);
 
-    // ===== Initialize Terminal =====
+    // ===== Initialize first terminal =====
     useEffect(() => {
         if (!terminalRef.current || xtermRef.current) return;
         const term = new XTermTerminal({
@@ -283,37 +324,32 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.writeln('\x1b[1;37m  This IDE runs Node.js in the browser (WebContainers).\x1b[0m');
         term.writeln('\x1b[1;37m  It only supports HTTP connections — no raw TCP sockets.\x1b[0m');
         term.writeln('');
-        term.writeln('\x1b[1;32m  ✅ WILL WORK:\x1b[0m');
-        term.writeln('\x1b[32m  • Languages:\x1b[0m JavaScript, TypeScript');
-        term.writeln('\x1b[32m  • Frameworks:\x1b[0m React, Vue, Svelte, Angular, Next.js');
-        term.writeln('\x1b[32m  • Build tools:\x1b[0m Vite, Webpack, esbuild');
-        term.writeln('\x1b[32m  • Backend:\x1b[0m Express, Fastify, Hono (HTTP only)');
-        term.writeln('\x1b[32m  • Styling:\x1b[0m CSS, SASS, Tailwind, Styled-Components');
-        term.writeln('\x1b[32m  • Databases:\x1b[0m Firebase, Supabase, Appwrite (HTTP APIs)');
-        term.writeln('\x1b[32m  • Storage:\x1b[0m localStorage, IndexedDB, JSON files');
-        term.writeln('\x1b[32m  • Packages:\x1b[0m Any npm package that runs on Node.js');
+        term.writeln('\x1b[1;32m  ✅ WILL WORK:\x1b[0m JS, TS, React, Vue, Svelte, Next.js, Express');
+        term.writeln('\x1b[1;31m  ❌ WON\'T WORK:\x1b[0m Python, Java, Go, MongoDB, PostgreSQL (need TCP)');
         term.writeln('');
-        term.writeln('\x1b[1;31m  ❌ WILL NOT WORK:\x1b[0m');
-        term.writeln('\x1b[31m  • Languages:\x1b[0m Python, Java, Go, Rust, C/C++, PHP');
-        term.writeln('\x1b[31m  • Databases:\x1b[0m MongoDB/Mongoose, PostgreSQL, MySQL, Redis');
-        term.writeln('\x1b[31m  • Reason:\x1b[0m These need TCP sockets, not available here');
-        term.writeln('');
-        term.writeln('\x1b[1;36m  💡 TIP:\x1b[0m Use \x1b[1;33mFirebase\x1b[0m or \x1b[1;33mSupabase\x1b[0m instead of MongoDB!');
-        term.writeln('\x1b[36m         npm install firebase  |  npm install @supabase/supabase-js\x1b[0m');
-        term.writeln('');
-        term.writeln('\x1b[33m  Click "▶ Run" to boot the dev environment.\x1b[0m');
+        term.writeln('\x1b[1;36m  💡 TIP:\x1b[0m Use Firebase/Supabase instead of MongoDB!');
+        term.writeln('\x1b[33m  Click ▶ Run or type commands below.\x1b[0m');
         term.writeln('');
 
-        // Pipe keyboard input to the shell process
+        // Pipe keyboard input to the active shell process
         term.onData((data: string) => {
             if (shellWriterRef.current) {
                 shellWriterRef.current.write(data);
             }
         });
 
+        // Store as first terminal instance
+        const firstId = 'term-1';
+        terminalsRef.current.set(firstId, {
+            id: firstId, label: 'bash', term, fitAddon,
+            shellProcess: null, shellWriter: null, container: terminalRef.current,
+        });
+        setTerminalTabs([{ id: firstId, label: 'bash' }]);
+        setActiveTerminalId(firstId);
+
         const ro = new ResizeObserver(() => { try { fitAddon.fit(); } catch { /* */ } });
         if (terminalRef.current) ro.observe(terminalRef.current);
-        return () => { ro.disconnect(); term.dispose(); xtermRef.current = null; };
+        return () => { ro.disconnect(); term.dispose(); xtermRef.current = null; terminalsRef.current.clear(); };
     }, []);
 
     // ===== Socket: File sync + Locks =====
@@ -944,12 +980,44 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     {/* Terminal resize handle */}
                     <ResizeDivider dividerRef={terminal.dividerRef} direction="vertical" />
                     <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
-                        <div className="flex items-center justify-between px-3 py-1 bg-[#161b22] border-b border-gray-800">
-                            <div className="flex items-center gap-0">
-                                <button onClick={() => setActiveTermTab('shell')}
-                                    className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${activeTermTab === 'shell' ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
-                                    <Terminal className="w-3 h-3" /> Shell
-                                </button>
+                        <div className="flex items-center justify-between px-2 py-1 bg-[#161b22] border-b border-gray-800">
+                            <div className="flex items-center gap-0 overflow-x-auto">
+                                {terminalTabs.map((tab) => (
+                                    <button key={tab.id} onClick={() => { setActiveTermTab('shell'); setActiveTerminalId(tab.id); }}
+                                        className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors whitespace-nowrap ${activeTermTab === 'shell' && activeTerminalId === tab.id ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
+                                        <Terminal className="w-3 h-3" /> {tab.label}
+                                    </button>
+                                ))}
+                                {terminalTabs.length < 4 && (
+                                    <button onClick={() => {
+                                        // Add new terminal tab (shell instance created on WC boot)
+                                        const newId = `term-${terminalTabs.length + 1}`;
+                                        setTerminalTabs(prev => [...prev, { id: newId, label: `bash ${prev.length + 1}` }]);
+                                        setActiveTerminalId(newId);
+                                        setActiveTermTab('shell');
+                                        // Spawn a new shell if WC is booted
+                                        if (webcontainerRef.current && xtermRef.current) {
+                                            (async () => {
+                                                try {
+                                                    const term = xtermRef.current!;
+                                                    const shell = await webcontainerRef.current!.spawn('jsh', { terminal: { cols: term.cols || 80, rows: term.rows || 24 } });
+                                                    const writer = shell.input.getWriter();
+                                                    shell.output.pipeTo(new WritableStream({ write(data) { term.write(data); } }));
+                                                    terminalsRef.current.set(newId, {
+                                                        id: newId, label: `bash ${terminalTabs.length + 1}`,
+                                                        term, fitAddon: fitAddonRef.current!, shellProcess: shell, shellWriter: writer, container: terminalRef.current,
+                                                    });
+                                                    // Switch active writer
+                                                    shellWriterRef.current = writer;
+                                                    shellProcessRef.current = shell;
+                                                } catch { /* WC not ready */ }
+                                            })();
+                                        }
+                                    }} className="p-0.5 ml-1 text-gray-500 hover:text-white hover:bg-gray-700 rounded" title="New terminal">
+                                        <Plus className="w-3 h-3" />
+                                    </button>
+                                )}
+                                <div className="w-px h-3 bg-gray-700 mx-1" />
                                 <button onClick={() => setActiveTermTab('output')}
                                     className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${activeTermTab === 'output' ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
                                     Output {outputLines.length > 0 && <span className="bg-gray-700 text-[9px] px-1 rounded">{outputLines.length}</span>}
