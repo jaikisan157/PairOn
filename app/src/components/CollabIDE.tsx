@@ -126,6 +126,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // WebContainer & terminal
     const [, setWebcontainer] = useState<WebContainer | null>(null);
     const [isBooting, setIsBooting] = useState(false);
+    const [bootProgress, setBootProgress] = useState(0);
     const [isRunning, setIsRunning] = useState(false);
     const [previewUrl, setPreviewUrl] = useState('');
 
@@ -152,6 +153,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // Quick open (Ctrl+P)
     const [showQuickOpen, setShowQuickOpen] = useState(false);
     const [quickOpenQuery, setQuickOpenQuery] = useState('');
+    const [showIdeInfo, setShowIdeInfo] = useState(false);
     const quickOpenInputRef = useRef<HTMLInputElement>(null);
 
     const { toasts, addToast } = useToasts();
@@ -268,6 +270,39 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const handleEditorMount: OnMount = useCallback((editor, monaco) => {
         editorRef.current = editor;
         monacoRef.current = monaco;
+
+        // Configure TypeScript to support JSX (fixes red underlines for .tsx/.jsx files)
+        monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+            target: monaco.languages.typescript.ScriptTarget.Latest,
+            module: monaco.languages.typescript.ModuleKind.ESNext,
+            moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+            jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+            jsxImportSource: 'react',
+            allowJs: true,
+            allowSyntheticDefaultImports: true,
+            esModuleInterop: true,
+            forceConsistentCasingInFileNames: true,
+            strict: false,
+            skipLibCheck: true,
+            noEmit: true,
+            isolatedModules: true,
+            resolveJsonModule: true,
+        });
+        monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+            target: monaco.languages.typescript.ScriptTarget.Latest,
+            module: monaco.languages.typescript.ModuleKind.ESNext,
+            jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+            allowJs: true,
+            allowSyntheticDefaultImports: true,
+            esModuleInterop: true,
+        });
+        // Suppress diagnostic severity for missing modules (not useful in browser IDE)
+        monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+            noSemanticValidation: false,
+            noSyntaxValidation: false,
+            diagnosticCodesToIgnore: [2307, 2304, 2552, 7016, 1259, 2691, 1005],
+        });
+
         // Create model for initial file
         const model = getOrCreateModel(activeFile, filesRef.current[activeFile] ?? '');
         if (model) editor.setModel(model);
@@ -451,15 +486,20 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const bootWebContainer = useCallback(async () => {
         if (webcontainerRef.current || isBooting) return;
         setIsBooting(true);
+        setBootProgress(10);
         const term = xtermRef.current;
         if (term) term.writeln('\x1b[36m⏳ Booting development environment...\x1b[0m');
         try {
+            setBootProgress(20);
             const wc = await WebContainer.boot();
+            setBootProgress(40);
             webcontainerRef.current = wc; setWebcontainer(wc);
             await wc.mount(toWebContainerFS(filesRef.current));
+            setBootProgress(60);
             if (term) term.writeln('\x1b[32m✓ Files mounted\x1b[0m');
             wc.on('server-ready', (_port: number, url: string) => { setPreviewUrl(url); if (term) term.writeln(`\x1b[32m✓ Preview ready at ${url}\x1b[0m`); });
 
+            setBootProgress(75);
             // Spawn an interactive shell (like VS Code terminal)
             const shellProcess = await wc.spawn('jsh', { terminal: { cols: term?.cols || 80, rows: term?.rows || 24 } });
             shellProcessRef.current = shellProcess;
@@ -471,11 +511,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             const input = shellProcess.input.getWriter();
             shellWriterRef.current = input;
 
+            setBootProgress(100);
             setIsBooting(false);
             if (term) term.writeln('\x1b[32m✓ Shell ready — you can type commands now\x1b[0m\n');
         } catch (err: any) {
             if (term) { term.writeln(`\x1b[31m✗ Failed: ${err.message}\x1b[0m`); term.writeln('\x1b[33mℹ Requires Chromium browser\x1b[0m'); }
             setIsBooting(false);
+            setBootProgress(0);
         }
     }, [isBooting]);
 
@@ -839,7 +881,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     {!isRunning ? (
                         <button onClick={runProject} disabled={isBooting}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-md transition-colors">
-                            {isBooting ? (<><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Booting...</>) : (<><Play className="w-3 h-3" /> Run</>)}
+                            {isBooting ? (
+                                <>
+                                    <div className="relative w-16 h-2 bg-gray-600 rounded-full overflow-hidden">
+                                        <div className="absolute inset-y-0 left-0 bg-green-400 rounded-full transition-all duration-500 ease-out" style={{ width: `${bootProgress}%` }} />
+                                    </div>
+                                    <span className="text-[9px] text-gray-400 ml-0.5">{bootProgress}%</span>
+                                </>
+                            ) : (<><Play className="w-3 h-3" /> Run</>)}
                         </button>
                     ) : (
                         <button onClick={stopServer} className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors">
@@ -850,14 +899,31 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <Hammer className="w-3 h-3" /> Build
                     </button>
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
-                    <div className="relative group">
-                        <button className="p-1.5 text-gray-400 hover:text-blue-400 rounded transition-colors" title="IDE Info">
+                    <div className="relative">
+                        <button onClick={() => setShowIdeInfo(!showIdeInfo)} className={`p-1.5 rounded transition-colors ${showIdeInfo ? 'text-blue-400 bg-blue-400/10' : 'text-gray-400 hover:text-blue-400'}`} title="IDE Info">
                             <Info className="w-3.5 h-3.5" />
                         </button>
-                        <div className="absolute right-0 top-full mt-1 w-80 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-3.5 z-[100] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 max-h-[80vh] overflow-y-auto">
-                            <p className="text-[11px] font-bold text-white mb-1">🖥️ IDE Compatibility Guide</p>
-                            <p className="text-[9px] text-gray-500 mb-3">This IDE runs Node.js in the browser. Only HTTP connections are supported — no TCP sockets.</p>
+                    </div>
+                    <button onClick={() => setEditorTheme(t => t === 'vs-dark' ? 'vs' : t === 'vs' ? 'hc-black' : 'vs-dark')}
+                        className="p-1.5 text-gray-400 hover:text-white rounded" title={`Theme: ${editorTheme}`}>
+                        {editorTheme === 'vs' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                    </button>
+                    <span className="text-[10px] text-gray-500 px-1">{fontSize}px</span>
+                    <button onClick={formatFile} className="p-1.5 text-gray-400 hover:text-white rounded" title="Format with Prettier">✨</button>
+                    <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 text-gray-400 hover:text-white rounded">
+                        {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                    </button>
+                </div>
 
+                {/* IDE Info overlay modal */}
+                {showIdeInfo && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowIdeInfo(false)}>
+                        <div className="w-80 bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl p-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-[11px] font-bold text-white">🖥️ IDE Compatibility Guide</p>
+                                <button onClick={() => setShowIdeInfo(false)} className="p-0.5 text-gray-500 hover:text-white"><X className="w-3 h-3" /></button>
+                            </div>
+                            <p className="text-[9px] text-gray-500 mb-3">This IDE runs Node.js in the browser. Only HTTP connections are supported — no TCP sockets.</p>
                             <div className="mb-2.5">
                                 <p className="text-[10px] font-semibold text-green-400 mb-1.5">✅ Will Work</p>
                                 <div className="space-y-1 text-[10px] text-gray-400">
@@ -871,48 +937,37 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                     <p><span className="text-green-400/70">•</span> <strong className="text-gray-300">APIs:</strong> fetch, axios — any HTTP/REST API</p>
                                 </div>
                             </div>
-
                             <div className="mb-2.5">
                                 <p className="text-[10px] font-semibold text-red-400 mb-1.5">❌ Will NOT Work</p>
                                 <div className="space-y-1 text-[10px] text-gray-400">
                                     <p><span className="text-red-400/70">•</span> <strong className="text-gray-300">Languages:</strong> Python, Java, Go, Rust, C/C++, PHP, Ruby, Swift</p>
                                     <p><span className="text-red-400/70">•</span> <strong className="text-gray-300">Databases:</strong> MongoDB/Mongoose, PostgreSQL, MySQL, Redis, SQLite</p>
-                                    <p><span className="text-red-400/70">•</span> <strong className="text-gray-300">Why:</strong> These need TCP socket connections, which aren't available in the browser</p>
+                                    <p><span className="text-red-400/70">•</span> <strong className="text-gray-300">Why:</strong> TCP socket connections not available in browser</p>
                                 </div>
                             </div>
-
                             <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-2.5 mb-2">
                                 <p className="text-[10px] font-semibold text-blue-400 mb-1">💡 Need a database? Use these instead:</p>
                                 <p className="text-[9px] text-gray-400 font-mono">npm install firebase</p>
                                 <p className="text-[9px] text-gray-400 font-mono">npm install @supabase/supabase-js</p>
                                 <p className="text-[9px] text-gray-500 mt-1">These connect over HTTP and work perfectly here!</p>
                             </div>
-
                             <div className="pt-2 border-t border-gray-700">
                                 <p className="text-[9px] text-gray-500">Powered by WebContainers (StackBlitz) — Node.js runtime in the browser</p>
                             </div>
                         </div>
                     </div>
-                    <button onClick={() => setEditorTheme(t => t === 'vs-dark' ? 'vs' : t === 'vs' ? 'hc-black' : 'vs-dark')}
-                        className="p-1.5 text-gray-400 hover:text-white rounded" title={`Theme: ${editorTheme}`}>
-                        {editorTheme === 'vs' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-                    </button>
-                    <span className="text-[10px] text-gray-500 px-1">{fontSize}px</span>
-                    <button onClick={formatFile} className="p-1.5 text-gray-400 hover:text-white rounded" title="Format with Prettier">✨</button>
-                    <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 text-gray-400 hover:text-white rounded">
-                        {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-                    </button>
-                </div>
-            </div>
+                )}
+            </div >
 
             {/* Main — CSS Grid ensures columns never exceed container width */}
-            <div className="flex-1 overflow-hidden" style={{
+            < div className="flex-1 overflow-hidden" style={{
                 display: 'grid',
                 gridTemplateColumns: `${sidebar.size}px 5px 1fr 5px ${preview.size}px`,
                 minHeight: 0,
-            }}>
+            }
+            }>
                 {/* File explorer */}
-                <div className="bg-[#0d1117] border-r border-gray-800 overflow-hidden min-w-0 relative">
+                < div className="bg-[#0d1117] border-r border-gray-800 overflow-hidden min-w-0 relative" >
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Explorer</span>
                         <div className="flex items-center gap-0.5">
@@ -920,21 +975,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             <button onClick={() => setShowNewFile(true)} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
                         </div>
                     </div>
-                    {showNewFile && (
-                        <div className="px-2 py-1 border-b border-gray-800">
-                            <input autoFocus value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') createFile(newFileName); if (e.key === 'Escape') { setShowNewFile(false); setNewFileName(''); } }}
-                                placeholder="src/components/Button.tsx"
-                                className="w-full bg-[#1e2030] border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500" />
-                        </div>
-                    )}
+                    {
+                        showNewFile && (
+                            <div className="px-2 py-1 border-b border-gray-800">
+                                <input autoFocus value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') createFile(newFileName); if (e.key === 'Escape') { setShowNewFile(false); setNewFileName(''); } }}
+                                    placeholder="src/components/Button.tsx"
+                                    className="w-full bg-[#1e2030] border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500" />
+                            </div>
+                        )
+                    }
                     <div className="p-1 overflow-y-auto flex-1">{renderTree(tree)}</div>
-                </div>
+                </div >
                 {/* Sidebar resize divider */}
-                <ResizeDivider dividerRef={sidebar.dividerRef} />
+                < ResizeDivider dividerRef={sidebar.dividerRef} />
 
                 {/* Editor + Terminal */}
-                <div className="flex flex-col min-w-0 overflow-hidden">
+                < div className="flex flex-col min-w-0 overflow-hidden" >
                     <div className="flex items-center bg-[#161b22] border-b border-gray-800 overflow-x-auto flex-shrink-0">
                         {openTabs.map(tab => {
                             const locked = isLockedByPartner(tab);
@@ -1045,41 +1102,43 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     </div>
 
                     {/* Inline Comment Panel */}
-                    {commentLine !== null && (
-                        <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#1e2030] border-t border-blue-500/30 p-2">
-                            <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                                <span>💬 Comment on line {commentLine}</span>
-                                <button onClick={() => { setCommentLine(null); setCommentText(''); }} className="ml-auto text-gray-500 hover:text-white"><X className="w-3 h-3" /></button>
-                            </div>
-                            {(comments[activeFile] || []).filter(c => c.line === commentLine).map(c => (
-                                <div key={c.id} className="flex items-start gap-1.5 mb-1 text-xs">
-                                    <span className="text-blue-400 font-medium">{c.userName}:</span>
-                                    <span className="text-gray-300">{c.text}</span>
+                    {
+                        commentLine !== null && (
+                            <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#1e2030] border-t border-blue-500/30 p-2">
+                                <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
+                                    <span>💬 Comment on line {commentLine}</span>
+                                    <button onClick={() => { setCommentLine(null); setCommentText(''); }} className="ml-auto text-gray-500 hover:text-white"><X className="w-3 h-3" /></button>
                                 </div>
-                            ))}
-                            <form onSubmit={(e) => {
-                                e.preventDefault();
-                                if (!commentText.trim() || commentLine === null) return;
-                                const newComment = { id: Date.now().toString(), line: commentLine, text: commentText, userId, userName, timestamp: Date.now() };
-                                setComments(prev => ({ ...prev, [activeFile]: [...(prev[activeFile] || []), newComment] }));
-                                const socket = socketService.getSocket();
-                                socket?.emit('code:comment', { sessionId, filePath: activeFile, comment: newComment, senderId: socket?.id });
-                                setCommentText('');
-                                addToast('Comment added', 'success');
-                            }} className="flex gap-1 mt-1">
-                                <input value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="Add a comment..."
-                                    className="flex-1 bg-[#0d1117] border border-gray-700 rounded px-2 py-1 text-[11px] text-white placeholder-gray-600 outline-none focus:border-blue-500" autoFocus />
-                                <button type="submit" className="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-500">Add</button>
-                            </form>
-                        </div>
-                    )}
-                </div>
+                                {(comments[activeFile] || []).filter(c => c.line === commentLine).map(c => (
+                                    <div key={c.id} className="flex items-start gap-1.5 mb-1 text-xs">
+                                        <span className="text-blue-400 font-medium">{c.userName}:</span>
+                                        <span className="text-gray-300">{c.text}</span>
+                                    </div>
+                                ))}
+                                <form onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (!commentText.trim() || commentLine === null) return;
+                                    const newComment = { id: Date.now().toString(), line: commentLine, text: commentText, userId, userName, timestamp: Date.now() };
+                                    setComments(prev => ({ ...prev, [activeFile]: [...(prev[activeFile] || []), newComment] }));
+                                    const socket = socketService.getSocket();
+                                    socket?.emit('code:comment', { sessionId, filePath: activeFile, comment: newComment, senderId: socket?.id });
+                                    setCommentText('');
+                                    addToast('Comment added', 'success');
+                                }} className="flex gap-1 mt-1">
+                                    <input value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="Add a comment..."
+                                        className="flex-1 bg-[#0d1117] border border-gray-700 rounded px-2 py-1 text-[11px] text-white placeholder-gray-600 outline-none focus:border-blue-500" autoFocus />
+                                    <button type="submit" className="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-500">Add</button>
+                                </form>
+                            </div>
+                        )
+                    }
+                </div >
 
                 {/* Preview resize divider */}
-                <ResizeDivider dividerRef={preview.dividerRef} />
+                < ResizeDivider dividerRef={preview.dividerRef} />
 
                 {/* Preview + Mini Chat */}
-                <div className="border-l border-gray-800 bg-[#161b22] flex flex-col min-w-0 overflow-hidden">
+                < div className="border-l border-gray-800 bg-[#161b22] flex flex-col min-w-0 overflow-hidden" >
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Preview</span>
                         <div className="flex items-center gap-1">
@@ -1117,104 +1176,110 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             </div>
                         </button>
                     </div>
-                    {showMiniChat && (
-                        <div className="h-56 flex flex-col border-t border-gray-800 bg-[#0d1117]">
-                            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                                {messages.slice(-20).map(msg => (
-                                    <div key={msg.id}>
-                                        {msg.type === 'system' ? <span className="text-[10px] text-gray-600 block text-center">{msg.content}</span> : (
-                                            <div className={`flex ${msg.senderId === userId ? 'justify-end' : 'justify-start'}`}>
-                                                <div className={`max-w-[85%] px-2.5 py-1.5 rounded-xl text-xs ${msg.senderId === userId ? 'bg-blue-600 text-white' : 'bg-[#1e2030] text-gray-300'}`}>{msg.content}</div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                                <div ref={miniChatEndRef} />
+                    {
+                        showMiniChat && (
+                            <div className="h-56 flex flex-col border-t border-gray-800 bg-[#0d1117]">
+                                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                                    {messages.slice(-20).map(msg => (
+                                        <div key={msg.id}>
+                                            {msg.type === 'system' ? <span className="text-[10px] text-gray-600 block text-center">{msg.content}</span> : (
+                                                <div className={`flex ${msg.senderId === userId ? 'justify-end' : 'justify-start'}`}>
+                                                    <div className={`max-w-[85%] px-2.5 py-1.5 rounded-xl text-xs ${msg.senderId === userId ? 'bg-blue-600 text-white' : 'bg-[#1e2030] text-gray-300'}`}>{msg.content}</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <div ref={miniChatEndRef} />
+                                </div>
+                                <form onSubmit={(e) => { e.preventDefault(); if (miniChatMsg.trim()) { onSendMessage(miniChatMsg); setMiniChatMsg(''); } }} className="p-2 border-t border-gray-800 flex gap-1.5">
+                                    <input value={miniChatMsg} onChange={(e) => setMiniChatMsg(e.target.value)} placeholder="Message..."
+                                        className="flex-1 bg-[#1e2030] border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500" />
+                                    <button type="submit" disabled={!miniChatMsg.trim()} className="p-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg"><Send className="w-3 h-3 text-white" /></button>
+                                </form>
                             </div>
-                            <form onSubmit={(e) => { e.preventDefault(); if (miniChatMsg.trim()) { onSendMessage(miniChatMsg); setMiniChatMsg(''); } }} className="p-2 border-t border-gray-800 flex gap-1.5">
-                                <input value={miniChatMsg} onChange={(e) => setMiniChatMsg(e.target.value)} placeholder="Message..."
-                                    className="flex-1 bg-[#1e2030] border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500" />
-                                <button type="submit" disabled={!miniChatMsg.trim()} className="p-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg"><Send className="w-3 h-3 text-white" /></button>
-                            </form>
-                        </div>
-                    )}
-                </div>
-            </div>
+                        )
+                    }
+                </div >
+            </div >
 
             {/* Context Menu */}
-            {contextMenu && (
-                <div className="fixed z-50 bg-[#1e2030] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
-                    <button onClick={() => { setRenameValue(contextMenu.path.split('/').pop() || ''); setRenamingPath(contextMenu.path); setContextMenu(null); }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
-                        <Pencil className="w-3 h-3" /> Rename
-                    </button>
-                    {contextMenu.type === 'file' && (
-                        <>
-                            <button onClick={() => duplicateFile(contextMenu.path)}
-                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
-                                <Copy className="w-3 h-3" /> Duplicate
-                            </button>
-                            <button onClick={() => saveAs(contextMenu.path)}
-                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
-                                <Download className="w-3 h-3" /> Save As
-                            </button>
-                        </>
-                    )}
-                    {contextMenu.type === 'directory' && (
-                        <button onClick={() => createFolder(contextMenu.path)}
+            {
+                contextMenu && (
+                    <div className="fixed z-50 bg-[#1e2030] border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
+                        <button onClick={() => { setRenameValue(contextMenu.path.split('/').pop() || ''); setRenamingPath(contextMenu.path); setContextMenu(null); }}
                             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
-                            <FolderPlus className="w-3 h-3" /> New Subfolder
+                            <Pencil className="w-3 h-3" /> Rename
                         </button>
-                    )}
-                    {contextMenu.type === 'file' && /\.(js|ts|mjs)$/.test(contextMenu.path) && (
-                        <button onClick={() => runFile(contextMenu.path)}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-green-400 hover:bg-green-500/10 transition-colors">
-                            <Play className="w-3 h-3" /> Run File
+                        {contextMenu.type === 'file' && (
+                            <>
+                                <button onClick={() => duplicateFile(contextMenu.path)}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                                    <Copy className="w-3 h-3" /> Duplicate
+                                </button>
+                                <button onClick={() => saveAs(contextMenu.path)}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                                    <Download className="w-3 h-3" /> Save As
+                                </button>
+                            </>
+                        )}
+                        {contextMenu.type === 'directory' && (
+                            <button onClick={() => createFolder(contextMenu.path)}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 hover:bg-[#2d2f3f] transition-colors">
+                                <FolderPlus className="w-3 h-3" /> New Subfolder
+                            </button>
+                        )}
+                        {contextMenu.type === 'file' && /\.(js|ts|mjs)$/.test(contextMenu.path) && (
+                            <button onClick={() => runFile(contextMenu.path)}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-green-400 hover:bg-green-500/10 transition-colors">
+                                <Play className="w-3 h-3" /> Run File
+                            </button>
+                        )}
+                        <div className="border-t border-gray-700 my-0.5" />
+                        <button onClick={() => { if (confirm(`Delete "${contextMenu.path}"?`)) deleteFile(contextMenu.path); else setContextMenu(null); }}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                            <Trash2 className="w-3 h-3" /> Delete
                         </button>
-                    )}
-                    <div className="border-t border-gray-700 my-0.5" />
-                    <button onClick={() => { if (confirm(`Delete "${contextMenu.path}"?`)) deleteFile(contextMenu.path); else setContextMenu(null); }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
-                        <Trash2 className="w-3 h-3" /> Delete
-                    </button>
-                </div>
-            )}
+                    </div>
+                )
+            }
 
             {/* Quick Open Modal (Ctrl+P) */}
-            {showQuickOpen && (
-                <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setShowQuickOpen(false)}>
-                    <div className="bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl w-[420px] overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700">
-                            <span className="text-[11px]">🔍</span>
-                            <input ref={quickOpenInputRef} autoFocus value={quickOpenQuery} onChange={(e) => setQuickOpenQuery(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Escape') setShowQuickOpen(false);
-                                    if (e.key === 'Enter' && quickOpenFiles.length > 0) { switchToFile(quickOpenFiles[0]); setShowQuickOpen(false); }
-                                }}
-                                placeholder="Search files by name..."
-                                className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none" />
-                        </div>
-                        <div className="max-h-[300px] overflow-y-auto">
-                            {quickOpenFiles.map(path => (
-                                <button key={path} onClick={() => { switchToFile(path); setShowQuickOpen(false); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#2d2f3f] transition-colors text-left">
-                                    <File className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
-                                    <span className="text-gray-300 truncate">{path}</span>
-                                    <span className="text-gray-600 ml-auto text-[10px]">{path.split('/').slice(0, -1).join('/')}</span>
-                                </button>
-                            ))}
-                            {quickOpenFiles.length === 0 && <div className="px-3 py-4 text-xs text-gray-500 text-center">No files found</div>}
-                        </div>
-                        <div className="px-3 py-1.5 border-t border-gray-700 text-[10px] text-gray-600 flex gap-3">
-                            <span>↑↓ Navigate</span><span>↵ Open</span><span>Esc Close</span>
+            {
+                showQuickOpen && (
+                    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setShowQuickOpen(false)}>
+                        <div className="bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl w-[420px] overflow-hidden" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700">
+                                <span className="text-[11px]">🔍</span>
+                                <input ref={quickOpenInputRef} autoFocus value={quickOpenQuery} onChange={(e) => setQuickOpenQuery(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Escape') setShowQuickOpen(false);
+                                        if (e.key === 'Enter' && quickOpenFiles.length > 0) { switchToFile(quickOpenFiles[0]); setShowQuickOpen(false); }
+                                    }}
+                                    placeholder="Search files by name..."
+                                    className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none" />
+                            </div>
+                            <div className="max-h-[300px] overflow-y-auto">
+                                {quickOpenFiles.map(path => (
+                                    <button key={path} onClick={() => { switchToFile(path); setShowQuickOpen(false); }}
+                                        className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#2d2f3f] transition-colors text-left">
+                                        <File className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                                        <span className="text-gray-300 truncate">{path}</span>
+                                        <span className="text-gray-600 ml-auto text-[10px]">{path.split('/').slice(0, -1).join('/')}</span>
+                                    </button>
+                                ))}
+                                {quickOpenFiles.length === 0 && <div className="px-3 py-4 text-xs text-gray-500 text-center">No files found</div>}
+                            </div>
+                            <div className="px-3 py-1.5 border-t border-gray-700 text-[10px] text-gray-600 flex gap-3">
+                                <span>↑↓ Navigate</span><span>↵ Open</span><span>Esc Close</span>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
 
             {/* Toast notifications */}
             <ToastContainer toasts={toasts} />
-        </div>
+        </div >
     );
 }
