@@ -1025,10 +1025,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         </div>
                     </div>
                 )}
-            </div >
+            </div>
 
             {/* Main — CSS Grid ensures columns never exceed container width */}
-            < div className="flex-1 overflow-hidden" style={{
+            <div className="flex-1 overflow-hidden" style={{
                 display: 'grid',
                 gridTemplateColumns: `${sidebar.size}px 5px 1fr 5px ${preview.size}px`,
                 minHeight: 0,
@@ -1064,12 +1064,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         </div>
                     )}
                     <div className="p-1 overflow-y-auto flex-1" style={{ minHeight: 0 }}>{renderTree(tree)}</div>
-                </div >
+                </div>
                 {/* Sidebar resize divider */}
-                < ResizeDivider dividerRef={sidebar.dividerRef} />
+                <ResizeDivider dividerRef={sidebar.dividerRef} />
 
                 {/* Editor + Terminal */}
-                < div className="flex flex-col min-w-0 overflow-hidden" >
+                <div className="flex flex-col min-w-0 overflow-hidden">
                     <div className="flex items-center bg-[#161b22] border-b border-gray-800 overflow-x-auto flex-shrink-0">
                         {openTabs.map(tab => {
                             const locked = isLockedByPartner(tab);
@@ -1210,13 +1210,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             </div>
                         )
                     }
-                </div >
+                </div>
 
                 {/* Preview resize divider */}
-                < ResizeDivider dividerRef={preview.dividerRef} />
+                <ResizeDivider dividerRef={preview.dividerRef} />
 
                 {/* Preview + Mini Chat */}
-                < div className="border-l border-gray-800 bg-[#161b22] flex flex-col min-w-0 overflow-hidden" >
+                <div className="border-l border-gray-800 bg-[#161b22] flex flex-col min-w-0 overflow-hidden" >
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Preview</span>
                         <div className="flex items-center gap-1">
@@ -1277,8 +1277,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             </div>
                         )
                     }
-                </div >
-            </div >
+                </div>
+            </div>
 
             {/* Context Menu */}
             {
@@ -1371,6 +1371,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             {/* Toast notifications */}
             <ToastContainer toasts={toasts} />
-        </div >
+        </div>
     );
 }
