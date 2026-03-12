@@ -453,11 +453,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }, 4000);
         });
 
-        // Notify partner a new terminal is open
-        socketService.getSocket()?.emit('terminal:create', sessionId, { terminalId: firstId, label: 'bash' });
-
         // Store as first terminal instance
         const firstId = 'term-1';
+
+        // Notify partner a new terminal is open
+        socketService.getSocket()?.emit('terminal:create', sessionId, { terminalId: firstId, label: 'bash' });
         terminalsRef.current.set(firstId, {
             id: firstId, label: 'bash', term, fitAddon,
             shellProcess: null, shellWriter: null, container,
@@ -1527,7 +1527,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                         <button key={tab.id} onClick={() => { setActiveTermTab('shell'); setActiveTerminalId(tab.id); }}
                                             className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors whitespace-nowrap ${activeTermTab === 'shell' && activeTerminalId === tab.id ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
                                             <Terminal className="w-3 h-3" />
-                                            {locked && <Lock className="w-2.5 h-2.5 text-yellow-400" title={`${terminalLocks.get(tab.id)?.userName} is using this terminal`} />}
+                                            {locked && <span title={`${terminalLocks.get(tab.id)?.userName} is using this terminal`}><Lock className="w-2.5 h-2.5 text-yellow-400" /></span>}
                                             {tab.label}
                                             {terminalTabs.length > 1 && (
                                                 <span
