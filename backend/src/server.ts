@@ -77,10 +77,11 @@ const apiLimiter = rateLimit({
 // Middleware
 app.use(cors({
   origin: (origin, callback) => {
+    // Allow same-origin requests (no Origin header) and explicitly listed origins
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(null, true); // Allow all during development
+      callback(new Error(`CORS: Origin '${origin}' is not allowed`));
     }
   },
   credentials: true,

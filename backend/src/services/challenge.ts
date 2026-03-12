@@ -25,6 +25,12 @@ const pendingExitRequests = new Map<string, { requesterId: string; requesterName
 // Pending project edit proposals: sessionId -> proposal data
 const pendingProjectEdits = new Map<string, { proposerId: string; proposerName: string; title: string; description: string }>();
 
+// IDE state per session (in-memory; lost on server restart)
+const ideSessionState = new Map<string, { files: Record<string, string>; folders: string[]; previewUrl?: string }>();
+
+// Terminal ownership per session: terminalId -> userId
+const ideTerminalOwners = new Map<string, Map<string, string>>();
+
 // Heartbeat / activity tracking: sessionId:userId -> lastActiveTimestamp
 const userActivity: Map<string, number> = new Map();
 const activityTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -383,6 +389,50 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
         socket.to(`challenge:${data.sessionId}`).emit('code:comment', data);
     });
 
+    // ===== IDE State Sync =====
+    socket.on('ide:state-update', (data: { sessionId: string; files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
+        ideSessionState.set(data.sessionId, { files: data.files, folders: data.folders, previewUrl: data.previewUrl });
+    });
+
+    socket.on('ide:push-state', (data: { sessionId: string; files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
+        ideSessionState.set(data.sessionId, { files: data.files, folders: data.folders, previewUrl: data.previewUrl });
+        socket.to(`challenge:${data.sessionId}`).emit('ide:state-snapshot', { files: data.files, folders: data.folders, previewUrl: data.previewUrl });
+    });
+
+    // ===== Terminal Collaboration =====
+    socket.on('terminal:output', (sessionId: string, data: { terminalId: string; chunk: string; label: string }) => {
+        socket.to(`challenge:${sessionId}`).emit('terminal:partner-output', data);
+    });
+
+    socket.on('terminal:create', (sessionId: string, data: { terminalId: string; label: string }) => {
+        socket.to(`challenge:${sessionId}`).emit('terminal:partner-create', data);
+    });
+
+    socket.on('terminal:close', (sessionId: string, data: { terminalId: string }) => {
+        const termOwners = ideTerminalOwners.get(sessionId);
+        if (termOwners) termOwners.delete(data.terminalId);
+        socket.to(`challenge:${sessionId}`).emit('terminal:partner-close', data);
+    });
+
+    socket.on('terminal:lock', (sessionId: string, data: { terminalId: string; userName: string }) => {
+        if (!ideTerminalOwners.has(sessionId)) ideTerminalOwners.set(sessionId, new Map());
+        ideTerminalOwners.get(sessionId)!.set(data.terminalId, userId);
+        socket.to(`challenge:${sessionId}`).emit('terminal:partner-lock', { ...data, userId });
+    });
+
+    socket.on('terminal:unlock', (sessionId: string, data: { terminalId: string }) => {
+        const termOwners = ideTerminalOwners.get(sessionId);
+        if (termOwners) termOwners.delete(data.terminalId);
+        socket.to(`challenge:${sessionId}`).emit('terminal:partner-unlock', data);
+    });
+
+    socket.on('ide:preview-url', (sessionId: string, url: string) => {
+        const state = ideSessionState.get(sessionId);
+        if (state) state.previewUrl = url;
+        else ideSessionState.set(sessionId, { files: {}, folders: [], previewUrl: url });
+        socket.to(`challenge:${sessionId}`).emit('ide:partner-preview-url', url);
+    });
+
     // ===== Update task =====
     socket.on('challenge:update-task', async (sessionId: string, task: any) => {
         try {
@@ -608,6 +658,12 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
 
             // Notify partner that user is back
             io.to(`user:${partnerId}`).emit('challenge:partner-activity', { sessionId, status: 'online' });
+
+            // Send stored IDE state snapshot to the rejoining user
+            const ideState = ideSessionState.get(sessionId);
+            if (ideState) socket.emit('ide:state-snapshot', ideState);
+            // Ask active partner to push their live state (overrides stored snapshot with freshest data)
+            socket.to(`challenge:${sessionId}`).emit('ide:partner-rejoined', { userId });
         } catch (error) {
             console.error('Challenge rejoin error:', error);
         }

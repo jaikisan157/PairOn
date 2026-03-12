@@ -77,6 +77,7 @@ export function QuickConnectPage() {
     // User profile modal
     const [showPartnerProfile, setShowPartnerProfile] = useState(false);
 
+    const [isPartnerMobile, setIsPartnerMobile] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll messages
@@ -84,111 +85,124 @@ export function QuickConnectPage() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [activeChat?.messages]);
 
-    // Setup socket listeners
+    // Setup socket listeners — poll until socket is ready to avoid missing events
     useEffect(() => {
-        socketService.onQuickChatMatched((data) => {
-            setChatStatus('chatting');
-            setActiveChat({
-                chatId: data.chatId,
-                partnerId: data.partnerId,
-                partnerName: data.partnerName,
-                partnerReputation: data.partnerReputation || 0,
+        let cleanedUp = false;
+        let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+        function attachListeners() {
+            const sock = socketService.getSocket();
+            if (!sock || cleanedUp) return false;
+
+            sock.on('quickchat:matched', (data: any) => {
+                setIsPartnerMobile(!!(data.isPartnerMobile));
+                setChatStatus('chatting');
+                setActiveChat({
+                    chatId: data.chatId,
+                    partnerId: data.partnerId,
+                    partnerName: data.partnerName,
+                    partnerReputation: data.partnerReputation || 0,
                 mode: data.mode,
                 topic: data.topic,
                 messages: [],
                 status: 'active',
                 rated: false,
+                });
             });
-        });
 
-        socketService.onQuickChatMessage((message: QuickMessage) => {
-            setActiveChat(prev => {
-                if (!prev) return prev;
-                // Replace optimistic message with server version
-                const isDupe = prev.messages.some(
-                    m => m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
-                );
-                if (isDupe) {
-                    return {
-                        ...prev,
-                        messages: prev.messages.map(m =>
-                            m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
-                                ? message : m
-                        ),
-                    };
+            sock.on('quickchat:message', (message: QuickMessage) => {
+                setActiveChat(prev => {
+                    if (!prev) return prev;
+                    const isDupe = prev.messages.some(
+                        m => m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
+                    );
+                    if (isDupe) {
+                        return {
+                            ...prev,
+                            messages: prev.messages.map(m =>
+                                m.senderId === message.senderId && m.content === message.content && m.id.startsWith('opt-')
+                                    ? message : m
+                            ),
+                        };
+                    }
+                    return { ...prev, messages: [...prev.messages, message] };
+                });
+            });
+
+            sock.on('quickchat:ended', (chatId: string) => {
+                setActiveChat(prev => {
+                    if (!prev || prev.chatId !== chatId) return prev;
+                    return { ...prev, status: 'ended' };
+                });
+                setChatStatus('ended');
+            });
+
+            sock.on('quickchat:waiting', () => { setChatStatus('searching'); });
+
+            sock.on('quickchat:warning', (data: { warningCount: number; message: string }) => {
+                setWarning(data);
+                setTimeout(() => setWarning(null), 8000);
+            });
+
+            sock.on('quickchat:blocked', (message: string) => {
+                setBlockedMessage(message);
+                setTimeout(() => setBlockedMessage(null), 5000);
+            });
+
+            sock.on('quickchat:rated', () => {
+                setActiveChat(prev => prev ? { ...prev, rated: true } : prev);
+            });
+
+            sock.on('collab:ai-ideas', (ideas: Array<{ title: string; description: string; category: string; difficulty: string }>) => {
+                setAiIdeas(ideas);
+                setLoadingIdeas(false);
+                if (ideas.length > 0) setSelectedIdea(ideas[0]);
+            });
+
+            sock.on('collab:proposal-received', (proposal: any) => {
+                if (!proposal.isSent) {
+                    setIncomingProposals(prev => [proposal, ...prev]);
                 }
-                return { ...prev, messages: [...prev.messages, message] };
             });
-        });
 
-        socketService.onQuickChatEnded((chatId: string) => {
-            setActiveChat(prev => {
-                if (!prev || prev.chatId !== chatId) return prev;
-                return { ...prev, status: 'ended' };
+            sock.on('challenge:matched', (data: any) => {
+                localStorage.setItem('challenge_session', JSON.stringify({
+                    sessionId: data.sessionId,
+                    matchId: data.matchId,
+                    partnerId: data.partnerId,
+                    partnerName: data.partnerName,
+                    partnerReputation: data.partnerReputation || 0,
+                    mode: data.mode,
+                    projectIdea: data.projectIdea,
+                    endsAt: data.endsAt,
+                    startedAt: data.startedAt,
+                    messages: data.messages || [],
+                    tasks: data.tasks || [],
+                }));
+                navigate('/collaborate');
             });
-            setChatStatus('ended');
-        });
 
-        socketService.onQuickChatWaiting(() => {
-            setChatStatus('searching');
-        });
+            sock.on('collab:proposal-declined', () => {
+                setProposalSent(false);
+                setProposalDeclinedMsg('Your proposal was declined by the other user.');
+                setTimeout(() => setProposalDeclinedMsg(null), 5000);
+            });
 
-        socketService.onQuickChatWarning((data) => {
-            setWarning(data);
-            // Auto-dismiss after 8 seconds
-            setTimeout(() => setWarning(null), 8000);
-        });
+            return true;
+        }
 
-        socketService.onQuickChatBlocked((message) => {
-            setBlockedMessage(message);
-            setTimeout(() => setBlockedMessage(null), 5000);
-        });
-
-        socketService.onQuickChatRated(() => {
-            setActiveChat(prev => prev ? { ...prev, rated: true } : prev);
-        });
-
-        socketService.onAiIdeas((ideas) => {
-            setAiIdeas(ideas);
-            setLoadingIdeas(false);
-            if (ideas.length > 0) setSelectedIdea(ideas[0]);
-        });
-
-        // Listen for incoming proposals while on QuickConnect
-        socketService.onProposalReceived((proposal: any) => {
-            if (!proposal.isSent) {
-                setIncomingProposals(prev => [proposal, ...prev]);
-            }
-        });
-
-        // Listen for proposal acceptance → navigate to collaborate
-        const socket = socketService.getSocket();
-        socket?.on('challenge:matched', (data: any) => {
-            // Save session to localStorage (same as DashboardPage does)
-            localStorage.setItem('challenge_session', JSON.stringify({
-                sessionId: data.sessionId,
-                matchId: data.matchId,
-                partnerId: data.partnerId,
-                partnerName: data.partnerName,
-                partnerReputation: data.partnerReputation || 0,
-                mode: data.mode,
-                projectIdea: data.projectIdea,
-                endsAt: data.endsAt,
-                startedAt: data.startedAt,
-                messages: data.messages || [],
-                tasks: data.tasks || [],
-            }));
-            navigate('/collaborate');
-        });
-
-        // Listen for proposal declined → show notification to proposer
-        socketService.onProposalDeclined((_proposalId: string) => {
-            setProposalSent(false);
-            setProposalDeclinedMsg('Your proposal was declined by the other user.');
-            setTimeout(() => setProposalDeclinedMsg(null), 5000);
-        });
+        if (!attachListeners()) {
+            pollTimer = setInterval(() => {
+                if (attachListeners() && pollTimer) {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                }
+            }, 300);
+        }
 
         return () => {
+            cleanedUp = true;
+            if (pollTimer) clearInterval(pollTimer);
             const sock = socketService.getSocket();
             if (sock) {
                 sock.removeAllListeners('quickchat:matched');
@@ -204,9 +218,9 @@ export function QuickConnectPage() {
                 sock.removeAllListeners('challenge:matched');
             }
         };
-    }, []);
+    }, [navigate]);
 
-    // Warn before leaving page if chat is active
+    // Warn before leaving while in an active chat
     useEffect(() => {
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             if (chatStatus === 'chatting') {
@@ -292,10 +306,6 @@ export function QuickConnectPage() {
 
     const handleSendProposal = useCallback(() => {
         if (!activeChat || !selectedIdea) return;
-        if (isMobileOrTablet()) {
-            alert('⚠️ Collaboration projects require a desktop/laptop. Please switch to a PC to start a project.');
-            return;
-        }
         socketService.proposeCollab({
             recipientId: activeChat.partnerId,
             mode: proposalMode,
@@ -343,7 +353,7 @@ export function QuickConnectPage() {
 
                         {chatStatus === 'chatting' && (
                             <div className="flex gap-2">
-                                {!proposalSent && (
+                                {!proposalSent && !isPartnerMobile && (
                                     <Button
                                         variant="outline"
                                         size="sm"

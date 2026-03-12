@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AuthProvider, ThemeProvider } from '@/context';
+import { AuthProvider, ThemeProvider, MatchingProvider } from '@/context';
 import {
   LandingPage,
   LoginPage,
@@ -81,9 +81,11 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <MatchingProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </MatchingProvider>
       </AuthProvider>
     </ThemeProvider>
   );

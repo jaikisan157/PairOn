@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { isMobileOrTablet } from './deviceDetect';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
@@ -10,8 +11,8 @@ class SocketService {
             return this.socket;
         }
 
-        this.socket = io(SOCKET_URL, {
-            auth: { token },
+            this.socket = io(SOCKET_URL, {
+            auth: { token, isMobile: isMobileOrTablet() },
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,

@@ -151,11 +151,15 @@ export function CollaborationPage() {
 
   // ===== SOCKET LISTENERS (like QuickConnectPage) =====
   useEffect(() => {
-    const socket = socketService.getSocket();
-    if (!socket) return;
+    let cleanedUp = false;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-    // Matched!
-    socket.on('challenge:matched', (data: any) => {
+    function attachListeners() {
+      const socket = socketService.getSocket();
+      if (!socket || cleanedUp) return false;
+
+      // Matched!
+      socket.on('challenge:matched', (data: any) => {
       console.log('[Challenge] Matched!', data);
       // Guard: if we already have a session, ignore matches for different sessions
       const currentSession = sessionRef.current;
@@ -362,7 +366,22 @@ export function CollaborationPage() {
       setSession(prev => prev ? { ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) } : prev);
     });
 
+    return true;
+  }
+
+  // Try to attach immediately; if socket isn't ready yet, poll until it is
+    if (!attachListeners()) {
+      pollTimer = setInterval(() => {
+        if (attachListeners() && pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }, 300);
+    }
+
     return () => {
+      cleanedUp = true;
+      if (pollTimer) clearInterval(pollTimer);
       const s = socketService.getSocket();
       if (s) {
         s.removeAllListeners('challenge:matched');

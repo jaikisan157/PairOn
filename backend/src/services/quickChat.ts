@@ -396,6 +396,7 @@ async function findQuickChatPartner(
         partnerReputation: partner.reputation || 0,
         mode: chatMode,
         topic: chatTopic,
+        isPartnerMobile: !!(io.sockets.sockets.get(best.socketId)?.data?.isMobile),
     };
 
     const matchData2 = {
@@ -405,8 +406,10 @@ async function findQuickChatPartner(
         partnerReputation: user.reputation || 0,
         mode: chatMode,
         topic: chatTopic,
+        isPartnerMobile: !!(socket.data?.isMobile),
     };
 
+    // Emit to user rooms (not raw socket IDs) to handle reconnects
     socket.emit('quickchat:matched', matchData1);
-    io.to(best.socketId).emit('quickchat:matched', matchData2);
+    io.to(`user:${best.userId}`).emit('quickchat:matched', matchData2);
 }

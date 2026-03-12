@@ -47,6 +47,7 @@ export function setupSocketHandlers(io: Server) {
       socket.data.userId = decoded.userId;
       socket.data.email = decoded.email;
       socket.data.role = decoded.role;
+      socket.data.isMobile = socket.handshake.auth?.isMobile === true;
       next();
     } catch (error) {
       if (error instanceof Error && error.message === 'SESSION_EXPIRED') {

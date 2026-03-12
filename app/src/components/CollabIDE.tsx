@@ -8,17 +8,22 @@ import {
     FolderOpen, Folder, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
     Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer, Info,
-    MoreVertical,
+    MoreVertical, Search, Package, Settings2, AlertTriangle,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
-import { useToasts, ToastContainer, Breadcrumb, usePanelResize, ResizeDivider } from './CollabIDEHelpers';
+import {
+    useToasts, ToastContainer, Breadcrumb, usePanelResize, ResizeDivider,
+    SearchPanel, PackageManagerPanel, ProjectTemplatesModal, EnvVarsPanel,
+    type ProjectTemplate,
+} from './CollabIDEHelpers';
 
 // ===== Types =====
 interface FileNode { name: string; type: 'file' | 'directory'; children?: FileNode[]; }
 interface ChatMessage { id: string; senderId: string; content: string; timestamp: Date; type: 'text' | 'system' | 'ai'; }
 interface FileLock { path: string; userId: string; userName: string; }
 interface ContextMenu { x: number; y: number; path: string; type: 'file' | 'directory'; }
+interface InstallProgress { active: boolean; percent: number; phase: string; startTime: number; termId: string; }
 
 interface CollabIDEProps {
     sessionId: string;
@@ -125,6 +130,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [newFileParent, setNewFileParent] = useState<string>(''); // which dir the new-file input is inside
     const [newItemType, setNewItemType] = useState<'file' | 'folder'>('file');
     const [folders, setFolders] = useState<Set<string>>(() => {
+        const savedFolders = localStorage.getItem(`pairon_ide_folders_${sessionId}`);
+        if (savedFolders) { try { return new Set(JSON.parse(savedFolders) as string[]); } catch { /* */ } }
         // Derive initial folders from file paths
         const saved = localStorage.getItem(AUTOSAVE_KEY(sessionId));
         const f = new Set<string>();
@@ -165,6 +172,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [quickOpenQuery, setQuickOpenQuery] = useState('');
     const [showIdeInfo, setShowIdeInfo] = useState(false);
     const quickOpenInputRef = useRef<HTMLInputElement>(null);
+
+    // New panel states
+    const [showSearch, setShowSearch] = useState(false);
+    const [showPackageManager, setShowPackageManager] = useState(false);
+    const [showTemplates, setShowTemplates] = useState(false);
+    const [showEnvPanel, setShowEnvPanel] = useState(false);
+
+    // formatFile ref for keyboard shortcut (avoids stale closure)
+    const formatFileRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
     const { toasts, addToast } = useToasts();
 
@@ -208,9 +224,25 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const suppressSyncRef = useRef(false);
 
     // Terminal tabs
-    const [activeTermTab, setActiveTermTab] = useState<'shell' | 'output'>('shell');
+    const [activeTermTab, setActiveTermTab] = useState<'shell' | 'output' | 'partner'>('shell');
     const outputRef = useRef<HTMLDivElement>(null);
     const [outputLines, setOutputLines] = useState<string[]>([]);
+
+    // Partner terminal state (read-only view of partner's shell)
+    const [partnerTermTabs, setPartnerTermTabs] = useState<{ id: string; label: string }[]>([]);
+    const partnerTerminalsRef = useRef<Map<string, { term: XTermTerminal; fitAddon: FitAddon; container: HTMLDivElement | null }>>(new Map());
+    const partnerTermContainerRef = useRef<HTMLDivElement>(null);
+    const [activePartnerTermId, setActivePartnerTermId] = useState<string>('');
+    // Terminal activity locks: terminalId -> { userId, userName } of the person currently typing
+    const [terminalLocks, setTerminalLocks] = useState<Map<string, { userId: string; userName: string }>>(new Map());
+    const terminalUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // npm install progress
+    const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
+    const installProgressRef = useRef<InstallProgress | null>(null);
+    // Refs for accessing latest state in socket callbacks without stale closures
+    const foldersRef = useRef<Set<string>>(new Set());
+    const previewUrlRef = useRef<string>('');
+    const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Inline comments
     const [comments, setComments] = useState<Record<string, { id: string; line: number; text: string; userId: string; userName: string; timestamp: number }[]>>({});
@@ -218,6 +250,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [commentText, setCommentText] = useState('');
 
     useEffect(() => { filesRef.current = files; }, [files]);
+    useEffect(() => { foldersRef.current = folders; }, [folders]);
+    useEffect(() => { previewUrlRef.current = previewUrl; }, [previewUrl]);
 
     // Unread count
     const unreadCount = showMiniChat ? 0 : Math.max(0, messages.length - lastSeenMessageCount);
@@ -228,9 +262,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'p' && !e.shiftKey) {
                 e.preventDefault(); setShowQuickOpen(true); setQuickOpenQuery('');
                 setTimeout(() => quickOpenInputRef.current?.focus(), 50);
+            }
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+                e.preventDefault(); setShowSearch(s => !s);
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 's' && !e.shiftKey) {
+                e.preventDefault(); formatFileRef.current();
             }
             if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 28)); }
             if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); }
@@ -249,8 +289,21 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = setTimeout(() => {
             localStorage.setItem(AUTOSAVE_KEY(sessionId), JSON.stringify(updated));
+            // Sync state to backend so rejoining partner gets the latest file snapshot
+            const socket = socketService.getSocket();
+            socket?.emit('ide:state-update', {
+                sessionId,
+                files: updated,
+                folders: [...foldersRef.current],
+                previewUrl: previewUrlRef.current,
+            });
         }, AUTOSAVE_DEBOUNCE);
     }, [sessionId]);
+
+    // Persist explicit folders whenever they change
+    useEffect(() => {
+        localStorage.setItem(`pairon_ide_folders_${sessionId}`, JSON.stringify([...folders]));
+    }, [folders, sessionId]);
 
     // ===== Monaco model management =====
     const getOrCreateModel = useCallback((path: string, content: string) => {
@@ -306,11 +359,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             allowSyntheticDefaultImports: true,
             esModuleInterop: true,
         });
-        // Suppress diagnostic severity for missing modules (not useful in browser IDE)
+        // Suppress false positives — JSX errors (2792, 17004) and missing module errors
+        const diagnosticCodesToIgnore = [2307, 2304, 2552, 7016, 1259, 2691, 1005, 2792, 17004];
         monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
             noSemanticValidation: false,
             noSyntaxValidation: false,
-            diagnosticCodesToIgnore: [2307, 2304, 2552, 7016, 1259, 2691, 1005],
+            diagnosticCodesToIgnore,
+        });
+        monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+            noSemanticValidation: false,
+            noSyntaxValidation: false,
+            diagnosticCodesToIgnore,
         });
 
         // Create model for initial file
@@ -359,7 +418,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         });
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
-        term.open(terminalRef.current);
+        // Create a dedicated child container so multiple terminals can coexist
+        const container = document.createElement('div');
+        container.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;';
+        terminalRef.current.appendChild(container);
+        term.open(container);
         setTimeout(() => { try { fitAddon.fit(); } catch { /* */ } }, 100);
         xtermRef.current = term; fitAddonRef.current = fitAddon;
         term.writeln('\x1b[1;35m╔══════════════════════════════════════════════════╗\x1b[0m');
@@ -372,30 +435,82 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.writeln('\x1b[1;32m  ✅ WILL WORK:\x1b[0m JS, TS, React, Vue, Svelte, Next.js, Express');
         term.writeln('\x1b[1;31m  ❌ WON\'T WORK:\x1b[0m Python, Java, Go, MongoDB, PostgreSQL (need TCP)');
         term.writeln('');
-        term.writeln('\x1b[1;36m  💡 TIP:\x1b[0m Use Firebase/Supabase instead of MongoDB!');
+        term.writeln('\x1b[1;36m  ⌨  Shortcuts:\x1b[0m Ctrl+S = Format  │  Ctrl+Shift+F = Search  │  Ctrl+P = Quick Open');
+        term.writeln('\x1b[1;36m  📦 Packages:\x1b[0m  Click the package icon in the toolbar to manage npm dependencies');
         term.writeln('\x1b[33m  Click ▶ Run or type commands below.\x1b[0m');
         term.writeln('');
 
-        // Pipe keyboard input to the active shell process
+        // Pipe keyboard input to the active shell process, and emit lock to partner
         term.onData((data: string) => {
             if (shellWriterRef.current) {
                 shellWriterRef.current.write(data);
             }
+            const socket = socketService.getSocket();
+            socket?.emit('terminal:lock', sessionId, { terminalId: firstId, userName });
+            if (terminalUnlockTimerRef.current) clearTimeout(terminalUnlockTimerRef.current);
+            terminalUnlockTimerRef.current = setTimeout(() => {
+                socket?.emit('terminal:unlock', sessionId, { terminalId: firstId });
+            }, 4000);
         });
+
+        // Notify partner a new terminal is open
+        socketService.getSocket()?.emit('terminal:create', sessionId, { terminalId: firstId, label: 'bash' });
 
         // Store as first terminal instance
         const firstId = 'term-1';
         terminalsRef.current.set(firstId, {
             id: firstId, label: 'bash', term, fitAddon,
-            shellProcess: null, shellWriter: null, container: terminalRef.current,
+            shellProcess: null, shellWriter: null, container,
         });
         setTerminalTabs([{ id: firstId, label: 'bash' }]);
         setActiveTerminalId(firstId);
 
         const ro = new ResizeObserver(() => { try { fitAddon.fit(); } catch { /* */ } });
-        if (terminalRef.current) ro.observe(terminalRef.current);
+        ro.observe(container);
         return () => { ro.disconnect(); term.dispose(); xtermRef.current = null; terminalsRef.current.clear(); };
     }, []);
+
+    // ===== Switch active terminal (show/hide containers) =====
+    useEffect(() => {
+        if (activeTermTab !== 'shell' || !activeTerminalId) return;
+        terminalsRef.current.forEach((inst, id) => {
+            if (inst.container) inst.container.style.display = id === activeTerminalId ? 'block' : 'none';
+        });
+        const active = terminalsRef.current.get(activeTerminalId);
+        if (active) {
+            xtermRef.current = active.term;
+            fitAddonRef.current = active.fitAddon;
+            shellWriterRef.current = active.shellWriter;
+            setTimeout(() => { try { active.fitAddon.fit(); } catch { /* */ } }, 50);
+        }
+    }, [activeTerminalId, activeTermTab]);
+
+    // ===== Close a terminal tab =====
+    const closeTerminal = useCallback((id: string) => {
+        const inst = terminalsRef.current.get(id);
+        if (!inst) return;
+        try { inst.shellProcess?.kill(); } catch { /* */ }
+        inst.shellWriter?.close().catch(() => { });
+        inst.term.dispose();
+        inst.container?.remove();
+        terminalsRef.current.delete(id);
+        socketService.getSocket()?.emit('terminal:close', sessionId, { terminalId: id });
+        setTerminalTabs(prev => {
+            const remaining = prev.filter(t => t.id !== id);
+            if (remaining.length > 0) setActiveTerminalId(remaining[remaining.length - 1].id);
+            return remaining;
+        });
+    }, [sessionId]);
+
+    // ===== Switch active partner terminal (show/hide containers) =====
+    useEffect(() => {
+        if (!activePartnerTermId) return;
+        partnerTerminalsRef.current.forEach((inst, id) => {
+            if (inst.container) inst.container.style.display = id === activePartnerTermId ? 'block' : 'none';
+        });
+        const active = partnerTerminalsRef.current.get(activePartnerTermId);
+        if (active) setTimeout(() => { try { active.fitAddon.fit(); } catch { /* */ } }, 50);
+    }, [activePartnerTermId]);
 
     // ===== Socket: File sync + Locks =====
     useEffect(() => {
@@ -470,6 +585,102 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         socket.on('code:file-lock', handleFileLock);
         socket.on('code:file-unlock', handleFileUnlock);
         socket.on('code:comment', handleComment);
+
+        // ===== IDE state sync handlers =====
+        const handleStateSnapshot = (data: { files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
+            setFiles(data.files);
+            filesRef.current = data.files;
+            // Refresh Monaco models for changed files
+            Object.entries(data.files).forEach(([path, content]) => {
+                const model = modelsRef.current.get(path);
+                if (model && !model.isDisposed() && model.getValue() !== content) {
+                    suppressSyncRef.current = true;
+                    model.setValue(content);
+                    suppressSyncRef.current = false;
+                }
+            });
+            if (data.folders?.length) setFolders(new Set(data.folders));
+            if (data.previewUrl) setPreviewUrl(data.previewUrl);
+            if (webcontainerRef.current) {
+                Object.entries(data.files).forEach(([path, content]) => {
+                    webcontainerRef.current!.fs.writeFile(path, content).catch(() => {});
+                });
+            }
+            localStorage.setItem(AUTOSAVE_KEY(sessionId), JSON.stringify(data.files));
+        };
+
+        const handlePartnerRejoined = () => {
+            socket.emit('ide:push-state', {
+                sessionId,
+                files: filesRef.current,
+                folders: [...foldersRef.current],
+                previewUrl: previewUrlRef.current,
+            });
+        };
+
+        const handlePartnerPreviewUrl = (url: string) => { setPreviewUrl(url); };
+
+        // ===== Partner terminal handlers =====
+        const handlePartnerTermCreate = (data: { terminalId: string; label: string }) => {
+            if (partnerTerminalsRef.current.has(data.terminalId)) return;
+            if (!partnerTermContainerRef.current) return;
+            const container = document.createElement('div');
+            container.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;display:none';
+            partnerTermContainerRef.current.appendChild(container);
+            const term = new XTermTerminal({
+                theme: { background: '#0d1117', foreground: '#a8d8a8', cursor: '#58a6ff', selectionBackground: '#264f78' },
+                fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 13, cursorBlink: false, convertEol: true,
+                disableStdin: true,
+            });
+            const fitAddon = new FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(container);
+            setTimeout(() => { try { fitAddon.fit(); } catch { /* */ } }, 50);
+            partnerTerminalsRef.current.set(data.terminalId, { term, fitAddon, container });
+            const ro = new ResizeObserver(() => { try { fitAddon.fit(); } catch { /* */ } });
+            ro.observe(container);
+            setPartnerTermTabs(prev => {
+                if (prev.find(t => t.id === data.terminalId)) return prev;
+                return [...prev, { id: data.terminalId, label: data.label }];
+            });
+            setActivePartnerTermId(prev => prev || data.terminalId);
+        };
+
+        const handlePartnerTermClose = (data: { terminalId: string }) => {
+            const inst = partnerTerminalsRef.current.get(data.terminalId);
+            if (inst) { inst.term.dispose(); inst.container?.remove(); partnerTerminalsRef.current.delete(data.terminalId); }
+            setPartnerTermTabs(prev => prev.filter(t => t.id !== data.terminalId));
+            setActivePartnerTermId(prev => prev === data.terminalId ? (partnerTerminalsRef.current.keys().next().value ?? '') : prev);
+        };
+
+        const handlePartnerOutput = (data: { terminalId: string; chunk: string; label: string }) => {
+            const inst = partnerTerminalsRef.current.get(data.terminalId);
+            if (inst) {
+                inst.term.write(data.chunk);
+            } else {
+                // Auto-create if we missed the terminal:partner-create event
+                handlePartnerTermCreate({ terminalId: data.terminalId, label: data.label || 'bash' });
+                const newInst = partnerTerminalsRef.current.get(data.terminalId);
+                if (newInst) newInst.term.write(data.chunk);
+            }
+        };
+
+        const handlePartnerLock = (data: { terminalId: string; userId: string; userName: string }) => {
+            setTerminalLocks(prev => { const n = new Map(prev); n.set(data.terminalId, { userId: data.userId, userName: data.userName }); return n; });
+        };
+        const handlePartnerUnlock = (data: { terminalId: string }) => {
+            setTerminalLocks(prev => { const n = new Map(prev); n.delete(data.terminalId); return n; });
+        };
+
+        socket.on('ide:state-snapshot', handleStateSnapshot);
+        socket.on('ide:partner-rejoined', handlePartnerRejoined);
+        socket.on('ide:partner-preview-url', handlePartnerPreviewUrl);
+        socket.on('terminal:partner-create', handlePartnerTermCreate);
+        socket.on('terminal:partner-close', handlePartnerTermClose);
+        socket.on('terminal:partner-output', handlePartnerOutput);
+        socket.on('terminal:partner-lock', handlePartnerLock);
+        socket.on('terminal:partner-unlock', handlePartnerUnlock);
+
         return () => {
             socket.off('code:file-change', handleFileChange);
             socket.off('code:file-create', handleFileCreate);
@@ -478,8 +689,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             socket.off('code:file-lock', handleFileLock);
             socket.off('code:file-unlock', handleFileUnlock);
             socket.off('code:comment', handleComment);
+            socket.off('ide:state-snapshot', handleStateSnapshot);
+            socket.off('ide:partner-rejoined', handlePartnerRejoined);
+            socket.off('ide:partner-preview-url', handlePartnerPreviewUrl);
+            socket.off('terminal:partner-create', handlePartnerTermCreate);
+            socket.off('terminal:partner-close', handlePartnerTermClose);
+            socket.off('terminal:partner-output', handlePartnerOutput);
+            socket.off('terminal:partner-lock', handlePartnerLock);
+            socket.off('terminal:partner-unlock', handlePartnerUnlock);
         };
-    }, [autosave]);
+    }, [autosave, sessionId]);
 
     // ===== File locking =====
     const lockFile = useCallback((path: string) => {
@@ -491,6 +710,37 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
     const isLockedByPartner = useCallback((path: string) => { const l = fileLocks.get(path); return l && l.userId !== userId; }, [fileLocks, userId]);
     const getLockerName = useCallback((path: string) => fileLocks.get(path)?.userName || 'Partner', [fileLocks]);
+
+    // ===== npm install progress parser =====
+    const parseNpmOutput = useCallback((data: string, termId: string) => {
+        const plain = data.replace(/\x1b\[[0-9;]*[mGKH]/g, '');
+        const cur = installProgressRef.current;
+        if (!cur?.active && /npm +(install|i)\b/.test(plain)) {
+            const next: InstallProgress = { active: true, percent: 2, phase: 'Initializing…', startTime: Date.now(), termId };
+            installProgressRef.current = next;
+            setInstallProgress(next);
+            return;
+        }
+        if (!cur?.active) return;
+        let next = { ...cur };
+        if (/idealTree|resolve/.test(plain)) {
+            next = { ...cur, percent: Math.max(cur.percent, 15), phase: 'Resolving dependencies…' };
+        } else if (/reify|extract/.test(plain)) {
+            next = { ...cur, percent: Math.max(cur.percent, 42), phase: 'Extracting packages…' };
+        } else if (/http fetch/.test(plain)) {
+            next = { ...cur, percent: Math.min(82, cur.percent + 1), phase: 'Downloading packages…' };
+        } else if (/added \d+ package/.test(plain)) {
+            const done: InstallProgress = { ...cur, percent: 100, phase: 'Done!' };
+            installProgressRef.current = done;
+            setInstallProgress(done);
+            setTimeout(() => { installProgressRef.current = null; setInstallProgress(null); }, 2500);
+            return;
+        } else {
+            return;
+        }
+        installProgressRef.current = next;
+        setInstallProgress(next);
+    }, []);
 
     // ===== Boot WebContainer (auto-boots on mount for immediate terminal) =====
     const bootWebContainer = useCallback(async () => {
@@ -507,19 +757,36 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             await wc.mount(toWebContainerFS(filesRef.current));
             setBootProgress(60);
             if (term) term.writeln('\x1b[32m✓ Files mounted\x1b[0m');
-            wc.on('server-ready', (_port: number, url: string) => { setPreviewUrl(url); if (term) term.writeln(`\x1b[32m✓ Preview ready at ${url}\x1b[0m`); });
+            wc.on('server-ready', (_port: number, url: string) => {
+                setPreviewUrl(url);
+                if (term) term.writeln(`\x1b[32m✓ Preview ready at ${url}\x1b[0m`);
+                const socket = socketService.getSocket();
+                socket?.emit('ide:preview-url', sessionId, url);
+            });
 
             setBootProgress(75);
             // Spawn an interactive shell (like VS Code terminal)
             const shellProcess = await wc.spawn('jsh', { terminal: { cols: term?.cols || 80, rows: term?.rows || 24 } });
             shellProcessRef.current = shellProcess;
 
-            // Pipe shell output to xterm
-            shellProcess.output.pipeTo(new WritableStream({ write(data) { if (term) term.write(data); } }));
+            // Pipe shell output to xterm and relay to partner
+            const firstId = 'term-1';
+            shellProcess.output.pipeTo(new WritableStream({
+                write(data) {
+                    if (term) term.write(data);
+                    parseNpmOutput(data, firstId);
+                    const socket = socketService.getSocket();
+                    socket?.emit('terminal:output', sessionId, { terminalId: firstId, chunk: data, label: 'bash' });
+                },
+            }));
 
             // Get shell input writer for keyboard
             const input = shellProcess.input.getWriter();
             shellWriterRef.current = input;
+
+            // Update first terminal instance with the live shell
+            const firstInst = terminalsRef.current.get('term-1');
+            if (firstInst) { firstInst.shellProcess = shellProcess; firstInst.shellWriter = input; }
 
             setBootProgress(100);
             setIsBooting(false);
@@ -538,17 +805,35 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         return () => clearTimeout(timer);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Run project (npm install && npm run dev)
-    const runProject = useCallback(async () => {
-        if (!shellWriterRef.current) {
-            // If WC hasn't booted yet, boot it first
-            await bootWebContainer();
-        }
-        if (shellWriterRef.current) {
-            setIsRunning(true);
-            shellWriterRef.current.write('npm install && npm run dev\n');
-        }
-    }, [bootWebContainer]);
+    // Cleanup WebContainer and Monaco models on unmount
+    useEffect(() => {
+        return () => {
+            // Kill shell processes
+            try { shellProcessRef.current?.kill(); } catch { /* */ }
+            terminalsRef.current.forEach(inst => {
+                try { inst.shellProcess?.kill(); } catch { /* */ }
+                inst.shellWriter?.close().catch(() => { });
+                inst.term.dispose();
+            });
+            terminalsRef.current.clear();
+            // Dispose all Monaco models
+            modelsRef.current.forEach(model => { if (!model.isDisposed()) model.dispose(); });
+            modelsRef.current.clear();
+            // Teardown WebContainer
+            if (webcontainerRef.current) {
+                try { (webcontainerRef.current as any).teardown?.(); } catch { /* */ }
+                webcontainerRef.current = null;
+            }
+            // Clear autosave timer
+            if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+            if (lockTimeoutRef.current) clearTimeout(lockTimeoutRef.current);
+            if (terminalUnlockTimerRef.current) clearTimeout(terminalUnlockTimerRef.current);
+            if (stateUpdateTimerRef.current) clearTimeout(stateUpdateTimerRef.current);
+            // Dispose partner terminals
+            partnerTerminalsRef.current.forEach(inst => { inst.term.dispose(); inst.container?.remove(); });
+            partnerTerminalsRef.current.clear();
+        };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const stopServer = useCallback(() => {
         if (shellProcessRef.current) {
@@ -669,20 +954,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         setContextMenu(null);
     }, [files, sessionId, autosave, switchToFile]);
 
-    // Create folder — just register in folders Set, no .gitkeep files
+    // Create folder — open inline input (no prompt)
     const createFolder = useCallback((parentPath?: string) => {
-        const folderName = prompt('Folder name:', 'new-folder');
-        if (!folderName?.trim()) return;
-        const fullPath = parentPath ? `${parentPath}/${folderName}` : folderName;
-        // Register this folder and all parent folders
-        setFolders(prev => {
-            const n = new Set(prev);
-            const segments = fullPath.split('/');
-            for (let i = 1; i <= segments.length; i++) n.add(segments.slice(0, i).join('/'));
-            return n;
-        });
-        setExpandedDirs(prev => { const n = new Set(prev); n.add(fullPath); return n; });
-        if (webcontainerRef.current) webcontainerRef.current.fs.mkdir(fullPath, { recursive: true }).catch(() => { });
+        setShowNewFile(true);
+        setNewFileParent(parentPath || '');
+        setNewItemType('folder');
+        setNewFileName('');
+        if (parentPath) {
+            setExpandedDirs(prev => { const n = new Set(prev); n.add(parentPath); return n; });
+        }
         setContextMenu(null);
     }, []);
 
@@ -765,7 +1045,85 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         } catch (e: any) { addToast(`Format error: ${e.message}`, 'error'); }
     }, [files, activeFile, autosave, addToast]);
 
-    // Move file (drag & drop)
+    // Keep formatFileRef in sync (lets keyboard shortcut call the latest version)
+    useEffect(() => { formatFileRef.current = formatFile; }, [formatFile]);
+
+    // ===== Replace in file (for global search replace) =====
+    const replaceInFile = useCallback((path: string, oldText: string, newText: string) => {
+        const content = filesRef.current[path] || '';
+        const updated = content.split(oldText).join(newText);
+        setFiles(prev => { const next = { ...prev, [path]: updated }; autosave(next); return next; });
+        const model = modelsRef.current.get(path);
+        if (model && !model.isDisposed()) {
+            suppressSyncRef.current = true;
+            model.setValue(updated);
+            suppressSyncRef.current = false;
+        }
+        if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(path, updated).catch(() => { });
+        addToast(`Replaced in ${path}`, 'success');
+    }, [autosave, addToast]);
+
+    // ===== Package install/uninstall =====
+    const installPackage = useCallback((pkg: string, isDev = false) => {
+        if (!shellWriterRef.current) { addToast('Boot the dev environment first (click ▶ Run)', 'error'); return; }
+        const cmd = `npm install ${isDev ? '--save-dev ' : ''}${pkg}\n`;
+        shellWriterRef.current.write(cmd);
+        setActiveTermTab('shell');
+        addToast(`Installing ${pkg}…`, 'info');
+        setShowPackageManager(false);
+    }, [addToast]);
+
+    const uninstallPackage = useCallback((pkg: string) => {
+        if (!shellWriterRef.current) { addToast('Boot the dev environment first', 'error'); return; }
+        shellWriterRef.current.write(`npm uninstall ${pkg}\n`);
+        setActiveTermTab('shell');
+        addToast(`Uninstalling ${pkg}…`, 'info');
+    }, [addToast]);
+
+    // ===== Apply project template =====
+    const applyTemplate = useCallback((template: ProjectTemplate) => {
+        // Dispose all existing models
+        for (const [, model] of modelsRef.current) { if (!model.isDisposed()) model.dispose(); }
+        modelsRef.current.clear();
+        // Replace file state
+        const newFiles = { ...template.files };
+        setFiles(newFiles);
+        autosave(newFiles);
+        // Derive folders
+        const newFolders = new Set<string>();
+        for (const p of Object.keys(newFiles)) {
+            const parts = p.split('/');
+            for (let i = 1; i < parts.length; i++) newFolders.add(parts.slice(0, i).join('/'));
+        }
+        setFolders(newFolders);
+        setExpandedDirs(new Set(newFolders));
+        // Open first meaningful file
+        const entryFile = Object.keys(newFiles).find(f => f.endsWith('.tsx') || f.endsWith('.ts') || f.endsWith('.js')) || Object.keys(newFiles)[0];
+        setOpenTabs([entryFile]);
+        setActiveFile(entryFile);
+        // Re-mount files in WebContainer
+        if (webcontainerRef.current) {
+            webcontainerRef.current.mount(toWebContainerFS(newFiles));
+        }
+        addToast(`Applied template: ${template.name}`, 'success');
+    }, [autosave, addToast]);
+
+    // ===== Auto-detect node_modules before running =====
+    const runProjectWithAutoInstall = useCallback(async () => {
+        if (!shellWriterRef.current) {
+            await bootWebContainer();
+        }
+        if (shellWriterRef.current) {
+            setIsRunning(true);
+            // Check if package.json exists and auto-install before dev
+            const hasPkgJson = Boolean(filesRef.current['package.json']);
+            const cmd = hasPkgJson
+                ? 'npm install && npm run dev\n'
+                : 'npm run dev\n';
+            shellWriterRef.current.write(cmd);
+            setActiveTermTab('shell');
+        }
+    }, [bootWebContainer]);
     const moveFile = useCallback((fromPath: string, toDir: string) => {
         const fileName = fromPath.split('/').pop()!;
         const newPath = toDir ? `${toDir}/${fileName}` : fileName;
@@ -888,7 +1246,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Enter' && newFileName.trim()) {
                                                     if (newItemType === 'folder') {
-                                                        createFolder(fullPath);
+                                                        const fullFolderPath = `${fullPath}/${newFileName.trim()}`;
+                                                        setFolders(prev => { const n = new Set(prev); n.add(fullFolderPath); return n; });
+                                                        setExpandedDirs(prev => { const n = new Set(prev); n.add(fullFolderPath); return n; });
+                                                        webcontainerRef.current?.fs.mkdir(fullFolderPath, { recursive: true }).catch(() => {});
+                                                        setShowNewFile(false); setNewFileName(''); setNewFileParent('');
                                                     } else {
                                                         createFile(`${fullPath}/${newFileName}`);
                                                     }
@@ -947,7 +1309,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 </div>
                 <div className="flex items-center gap-1">
                     {!isRunning ? (
-                        <button onClick={runProject} disabled={isBooting}
+                        <button onClick={runProjectWithAutoInstall} disabled={isBooting}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-md transition-colors">
                             {isBooting ? (
                                 <>
@@ -966,6 +1328,25 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <button onClick={buildProject} className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors" title="Build (npm run build)">
                         <Hammer className="w-3 h-3" /> Build
                     </button>
+                    {/* Separator */}
+                    <div className="w-px h-4 bg-gray-700 mx-0.5" />
+                    {/* Package Manager */}
+                    <button onClick={() => setShowPackageManager(true)}
+                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded transition-colors" title="Package Manager (npm)">
+                        <Package className="w-3.5 h-3.5" />
+                    </button>
+                    {/* Project Templates */}
+                    <button onClick={() => setShowTemplates(true)}
+                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-purple-400 hover:bg-purple-400/10 rounded transition-colors" title="Project Templates">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                    </button>
+                    {/* Env Variables */}
+                    <button onClick={() => setShowEnvPanel(true)}
+                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Environment Variables (.env)">
+                        <Settings2 className="w-3.5 h-3.5" />
+                    </button>
+                    {/* Separator */}
+                    <div className="w-px h-4 bg-gray-700 mx-0.5" />
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
                     <div className="relative">
                         <button onClick={() => setShowIdeInfo(!showIdeInfo)} className={`p-1.5 rounded transition-colors ${showIdeInfo ? 'text-blue-400 bg-blue-400/10' : 'text-gray-400 hover:text-blue-400'}`} title="IDE Info">
@@ -977,7 +1358,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         {editorTheme === 'vs' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
                     </button>
                     <span className="text-[10px] text-gray-500 px-1">{fontSize}px</span>
-                    <button onClick={formatFile} className="p-1.5 text-gray-400 hover:text-white rounded" title="Format with Prettier">✨</button>
+                    <button onClick={formatFile} className="p-1.5 text-gray-400 hover:text-white rounded" title="Format with Prettier (Ctrl+S)">✨</button>
                     <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 text-gray-400 hover:text-white rounded">
                         {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                     </button>
@@ -1037,21 +1418,44 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 {/* File explorer */}
                 <div className="bg-[#0d1117] border-r border-gray-800 flex flex-col min-w-0 relative" >
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 flex-shrink-0">
-                        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Explorer</span>
+                        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                            {showSearch ? 'Search' : 'Explorer'}
+                        </span>
                         <div className="flex items-center gap-0.5">
-                            <button onClick={() => createFolder()} className="p-0.5 text-gray-500 hover:text-white rounded" title="New folder"><FolderPlus className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => { setShowNewFile(true); setNewFileParent(''); setNewItemType('file'); setNewFileName(''); }} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => setShowSearch(s => !s)}
+                                className={`p-0.5 rounded transition-colors ${showSearch ? 'text-blue-400 bg-blue-400/10' : 'text-gray-500 hover:text-white'}`}
+                                title="Global Search (Ctrl+Shift+F)">
+                                <Search className="w-3.5 h-3.5" />
+                            </button>
+                            {!showSearch && <>
+                                <button onClick={() => { setShowNewFile(true); setNewFileParent(''); setNewItemType('folder'); setNewFileName(''); }} className="p-0.5 text-gray-500 hover:text-white rounded" title="New folder"><FolderPlus className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => { setShowNewFile(true); setNewFileParent(''); setNewItemType('file'); setNewFileName(''); }} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
+                            </>}
                         </div>
                     </div>
+                    {/* Global search panel */}
+                    {showSearch && (
+                        <div className="flex-1 overflow-hidden">
+                            <SearchPanel
+                                files={files}
+                                onOpenFile={(path) => { switchToFile(path); }}
+                                onClose={() => setShowSearch(false)}
+                                onReplace={replaceInFile}
+                            />
+                        </div>
+                    )}
                     {/* Root-level new file input (when no parent dir selected) */}
-                    {showNewFile && newFileParent === '' && (
+                    {!showSearch && showNewFile && newFileParent === '' && (
                         <div className="px-2 py-1 border-b border-gray-800 flex-shrink-0">
                             <input autoFocus value={newFileName} onChange={(e) => setNewFileName(e.target.value)}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter' && newFileName.trim()) {
                                         if (newItemType === 'folder') {
-                                            const name = prompt('Folder name:', newFileName);
-                                            if (name) { setFolders(prev => { const n = new Set(prev); n.add(name); return n; }); setExpandedDirs(prev => { const n = new Set(prev); n.add(name); return n; }); }
+                                            const folderPath = newFileName.trim();
+                                            setFolders(prev => { const n = new Set(prev); n.add(folderPath); return n; });
+                                            setExpandedDirs(prev => { const n = new Set(prev); n.add(folderPath); return n; });
+                                            webcontainerRef.current?.fs.mkdir(folderPath, { recursive: true }).catch(() => {});
+                                            setShowNewFile(false); setNewFileName('');
                                         } else {
                                             createFile(newFileName);
                                         }
@@ -1063,7 +1467,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 className="w-full bg-[#1e2030] border border-blue-500 rounded px-2 py-1 text-xs text-white placeholder-gray-600 outline-none" />
                         </div>
                     )}
-                    <div className="p-1 overflow-y-auto flex-1" style={{ minHeight: 0 }}>{renderTree(tree)}</div>
+                    {!showSearch && <div className="p-1 overflow-y-auto flex-1" style={{ minHeight: 0 }}>{renderTree(tree)}</div>}
                 </div>
                 {/* Sidebar resize divider */}
                 <ResizeDivider dividerRef={sidebar.dividerRef} />
@@ -1117,37 +1521,89 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
                         <div className="flex items-center justify-between px-2 py-1 bg-[#161b22] border-b border-gray-800">
                             <div className="flex items-center gap-0 overflow-x-auto">
-                                {terminalTabs.map((tab) => (
-                                    <button key={tab.id} onClick={() => { setActiveTermTab('shell'); setActiveTerminalId(tab.id); }}
-                                        className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors whitespace-nowrap ${activeTermTab === 'shell' && activeTerminalId === tab.id ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
-                                        <Terminal className="w-3 h-3" /> {tab.label}
-                                    </button>
-                                ))}
+                                {terminalTabs.map((tab) => {
+                                    const locked = terminalLocks.has(tab.id);
+                                    return (
+                                        <button key={tab.id} onClick={() => { setActiveTermTab('shell'); setActiveTerminalId(tab.id); }}
+                                            className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors whitespace-nowrap ${activeTermTab === 'shell' && activeTerminalId === tab.id ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
+                                            <Terminal className="w-3 h-3" />
+                                            {locked && <Lock className="w-2.5 h-2.5 text-yellow-400" title={`${terminalLocks.get(tab.id)?.userName} is using this terminal`} />}
+                                            {tab.label}
+                                            {terminalTabs.length > 1 && (
+                                                <span
+                                                    onClick={(e) => { e.stopPropagation(); closeTerminal(tab.id); }}
+                                                    className="p-0.5 rounded hover:bg-red-500/20 ml-0.5"
+                                                >
+                                                    <X className="w-2.5 h-2.5" />
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
                                 {terminalTabs.length < 4 && (
                                     <button onClick={() => {
-                                        // Add new terminal tab (shell instance created on WC boot)
-                                        const newId = `term-${terminalTabs.length + 1}`;
-                                        setTerminalTabs(prev => [...prev, { id: newId, label: `bash ${prev.length + 1}` }]);
-                                        setActiveTerminalId(newId);
-                                        setActiveTermTab('shell');
-                                        // Spawn a new shell if WC is booted
-                                        if (webcontainerRef.current && xtermRef.current) {
+                                        if (!terminalRef.current) return;
+                                        const newId = `term-${Date.now()}`;
+                                        const tabNum = terminalTabs.length + 1;
+                                        // Create DOM container for the new terminal
+                                        const container = document.createElement('div');
+                                        container.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;display:none';
+                                        terminalRef.current.appendChild(container);
+                                        const newTerm = new XTermTerminal({
+                                            theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', selectionBackground: '#264f78' },
+                                            fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 13, cursorBlink: true, convertEol: true,
+                                            allowProposedApi: true,
+                                        });
+                                        const newFitAddon = new FitAddon();
+                                        newTerm.loadAddon(newFitAddon);
+                                        newTerm.open(container);
+                                        setTimeout(() => { try { newFitAddon.fit(); } catch { /* */ } }, 50);
+                                        const inst: TerminalInstance = {
+                                            id: newId, label: `bash ${tabNum}`,
+                                            term: newTerm, fitAddon: newFitAddon,
+                                            shellProcess: null, shellWriter: null, container,
+                                        };
+                                        newTerm.onData((data: string) => {
+                                            const active = terminalsRef.current.get(newId);
+                                            if (active?.shellWriter) active.shellWriter.write(data);
+                                            const socket = socketService.getSocket();
+                                            socket?.emit('terminal:lock', sessionId, { terminalId: newId, userName });
+                                            if (terminalUnlockTimerRef.current) clearTimeout(terminalUnlockTimerRef.current);
+                                            terminalUnlockTimerRef.current = setTimeout(() => {
+                                                socket?.emit('terminal:unlock', sessionId, { terminalId: newId });
+                                            }, 4000);
+                                        });
+                                        terminalsRef.current.set(newId, inst);
+                                        const tabLabel = `bash ${tabNum}`;
+                                        // Notify partner of new terminal
+                                        socketService.getSocket()?.emit('terminal:create', sessionId, { terminalId: newId, label: tabLabel });
+                                        // Spawn shell if WC is booted
+                                        if (webcontainerRef.current) {
                                             (async () => {
                                                 try {
-                                                    const term = xtermRef.current!;
-                                                    const shell = await webcontainerRef.current!.spawn('jsh', { terminal: { cols: term.cols || 80, rows: term.rows || 24 } });
+                                                    const shell = await webcontainerRef.current!.spawn('jsh', { terminal: { cols: newTerm.cols || 80, rows: newTerm.rows || 24 } });
+                                                    inst.shellProcess = shell;
                                                     const writer = shell.input.getWriter();
-                                                    shell.output.pipeTo(new WritableStream({ write(data) { term.write(data); } }));
-                                                    terminalsRef.current.set(newId, {
-                                                        id: newId, label: `bash ${terminalTabs.length + 1}`,
-                                                        term, fitAddon: fitAddonRef.current!, shellProcess: shell, shellWriter: writer, container: terminalRef.current,
-                                                    });
-                                                    // Switch active writer
-                                                    shellWriterRef.current = writer;
-                                                    shellProcessRef.current = shell;
+                                                    inst.shellWriter = writer;
+                                                    shell.output.pipeTo(new WritableStream({
+                                                        write(data) {
+                                                            newTerm.write(data);
+                                                            parseNpmOutput(data, newId);
+                                                            socketService.getSocket()?.emit('terminal:output', sessionId, { terminalId: newId, chunk: data, label: tabLabel });
+                                                        },
+                                                    }));
+                                                    // If this is still the active terminal, update global refs
+                                                    if (activeTerminalId === newId) shellWriterRef.current = writer;
                                                 } catch { /* WC not ready */ }
                                             })();
                                         }
+                                        setTerminalTabs(prev => [...prev, { id: newId, label: tabLabel }]);
+                                        setActiveTerminalId(newId);
+                                        setActiveTermTab('shell');
+                                        // Show new, hide others
+                                        terminalsRef.current.forEach((t, tid) => {
+                                            if (t.container) t.container.style.display = tid === newId ? 'block' : 'none';
+                                        });
                                     }} className="p-0.5 ml-1 text-gray-500 hover:text-white hover:bg-gray-700 rounded" title="New terminal">
                                         <Plus className="w-3 h-3" />
                                     </button>
@@ -1157,6 +1613,19 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                     className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${activeTermTab === 'output' ? 'text-white border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
                                     Output {outputLines.length > 0 && <span className="bg-gray-700 text-[9px] px-1 rounded">{outputLines.length}</span>}
                                 </button>
+                                {partnerTermTabs.length > 0 && (
+                                    <>
+                                        <div className="w-px h-3 bg-gray-700 mx-1" />
+                                        {partnerTermTabs.map(tab => (
+                                            <button key={tab.id} onClick={() => { setActiveTermTab('partner'); setActivePartnerTermId(tab.id); }}
+                                                className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors whitespace-nowrap ${activeTermTab === 'partner' && activePartnerTermId === tab.id ? 'text-green-300 border-b-2 border-green-500' : 'text-gray-500 hover:text-green-300'}`}
+                                                title="Partner's terminal (read-only)">
+                                                <Terminal className="w-3 h-3 text-green-500" />
+                                                👤 {tab.label}
+                                            </button>
+                                        ))}
+                                    </>
+                                )}
                             </div>
                             <div className="flex items-center gap-1">
                                 {activeTermTab === 'output' && outputLines.length > 0 && (
@@ -1167,7 +1636,42 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 </button>
                             </div>
                         </div>
-                        <div ref={terminalRef} className="h-[calc(100%-28px)]" style={{ display: activeTermTab === 'shell' ? 'block' : 'none' }} />
+                        <div ref={terminalRef} className="h-[calc(100%-28px)] relative" style={{ display: activeTermTab === 'shell' ? 'block' : 'none' }}>
+                            {/* npm install progress bar */}
+                            {installProgress?.active && (
+                                <div className="absolute top-0 left-0 right-0 z-10 bg-[#0d1117]/95 backdrop-blur-sm border-b border-blue-500/30 px-3 py-1.5">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-[10px] text-blue-300 font-medium">📦 {installProgress.phase}</span>
+                                        <span className="text-[10px] text-gray-400">
+                                            {installProgress.percent}%
+                                            {installProgress.percent < 100 && (() => {
+                                                const elapsed = (Date.now() - installProgress.startTime) / 1000;
+                                                const estimated = installProgress.percent > 5 ? Math.max(0, Math.round((elapsed / installProgress.percent) * (100 - installProgress.percent))) : '—';
+                                                return ` · ~${estimated}s left`;
+                                            })()}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-800 rounded-full h-1.5">
+                                        <div
+                                            className={`h-1.5 rounded-full transition-all duration-300 ${installProgress.percent === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                                            style={{ width: `${installProgress.percent}%` }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        {/* Partner terminal (read-only view) */}
+                        <div
+                            ref={partnerTermContainerRef}
+                            className="h-[calc(100%-28px)] relative"
+                            style={{ display: activeTermTab === 'partner' ? 'block' : 'none' }}
+                        >
+                            {partnerTermTabs.length === 0 && activeTermTab === 'partner' && (
+                                <div className="flex items-center justify-center h-full text-gray-600 text-xs">
+                                    Partner hasn't opened a terminal yet
+                                </div>
+                            )}
+                        </div>
                         {activeTermTab === 'output' && (
                             <div ref={outputRef} className="h-[calc(100%-28px)] overflow-y-auto p-2 font-mono text-xs text-gray-400">
                                 {outputLines.length === 0 ? (
@@ -1368,9 +1872,39 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 )
             }
 
-
             {/* Toast notifications */}
             <ToastContainer toasts={toasts} />
+
+            {/* ===== Package Manager Modal ===== */}
+            {showPackageManager && (
+                <PackageManagerPanel
+                    packageJson={files['package.json'] || '{}'}
+                    onInstall={installPackage}
+                    onUninstall={uninstallPackage}
+                    onClose={() => setShowPackageManager(false)}
+                />
+            )}
+
+            {/* ===== Project Templates Modal ===== */}
+            {showTemplates && (
+                <ProjectTemplatesModal
+                    onApply={applyTemplate}
+                    onClose={() => setShowTemplates(false)}
+                />
+            )}
+
+            {/* ===== Environment Variables Panel ===== */}
+            {showEnvPanel && (
+                <EnvVarsPanel
+                    envContent={files['.env'] || ''}
+                    onSave={(content) => {
+                        setFiles(prev => { const next = { ...prev, '.env': content }; autosave(next); return next; });
+                        if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', content).catch(() => { });
+                        addToast('.env saved', 'success');
+                    }}
+                    onClose={() => setShowEnvPanel(false)}
+                />
+            )}
         </div>
     );
 }
