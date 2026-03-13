@@ -306,16 +306,9 @@ async function findQuickChatPartner(
 
     for (const [id, data] of quickChatQueue.entries()) {
         if (id === userId) continue;
-
-        if (mode === 'doubt') {
-            // Doubt askers match with tech-talk people (they can help)
-            if (data.mode === 'tech-talk') {
-                candidates.push({ ...data, mode: data.mode });
-            }
-        } else {
-            // Tech-talk people match with ANYONE available (doubt or tech-talk)
-            candidates.push({ ...data, mode: data.mode });
-        }
+        // ALL users in queue can match with each other — no mode restrictions
+        // This ensures no one gets stuck waiting forever
+        candidates.push({ ...data, mode: data.mode });
     }
 
     if (candidates.length === 0) {

@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { User } from '../models';
 import { Friendship } from '../models/Friend';
 import { authMiddleware } from '../middleware/auth';
+import { getIo } from '../lib/ioInstance';
 
 const router = Router();
 
@@ -39,6 +40,7 @@ router.post(
                 ],
             });
 
+            let friendship: any;
             if (existing) {
                 if (existing.status === 'accepted') {
                     return res.status(400).json({ message: 'Already friends' });
@@ -51,11 +53,24 @@ router.post(
                 existing.recipientId = recipientId;
                 existing.status = 'pending';
                 await existing.save();
-                return res.json({ message: 'Friend request sent', friendship: existing });
+                friendship = existing;
+            } else {
+                friendship = new Friendship({ requesterId: userId, recipientId });
+                await friendship.save();
             }
 
-            const friendship = new Friendship({ requesterId: userId, recipientId });
-            await friendship.save();
+            // 🔔 Real-time popup to recipient
+            const requester = await User.findById(userId).select('name reputation avatar');
+            const io = getIo();
+            if (io && requester) {
+                io.to(`user:${recipientId}`).emit('friend:request-received', {
+                    friendshipId: friendship._id.toString(),
+                    requesterId: userId,
+                    requesterName: (requester as any).name,
+                    requesterReputation: (requester as any).reputation || 0,
+                    requesterAvatar: (requester as any).avatar,
+                });
+            }
 
             res.status(201).json({ message: 'Friend request sent', friendship });
         } catch (error) {

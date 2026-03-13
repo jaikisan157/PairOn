@@ -620,6 +620,107 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
+    // =========================================================
+    // ===== IDE REAL-TIME RELAY (THE CRITICAL MISSING PART) ===
+    // =========================================================
+    // All events below are emitted from the frontend CollabIDE.
+    // The backend's job here is simply to relay them to the
+    // OTHER user in the same session room.
+    // =========================================================
+
+    // File content change — relay immediately to session room (excluding sender)
+    socket.on('code:file-change', (data: { sessionId: string; path: string; content: string; senderId: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:file-change', data);
+    });
+
+    // File create
+    socket.on('code:file-create', (data: { sessionId: string; path: string; content: string; senderId: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:file-create', data);
+    });
+
+    // File delete
+    socket.on('code:file-delete', (data: { sessionId: string; path: string; senderId: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:file-delete', data);
+    });
+
+    // File rename
+    socket.on('code:file-rename', (data: { sessionId: string; oldPath: string; newPath: string; senderId: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:file-rename', data);
+    });
+
+    // File lock (someone started editing a file)
+    socket.on('code:file-lock', (data: { sessionId: string; path: string; userId: string; userName: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:file-lock', { path: data.path, userId: data.userId, userName: data.userName });
+    });
+
+    // File unlock
+    socket.on('code:file-unlock', (data: { sessionId: string; path: string; userId: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:file-unlock', { path: data.path });
+    });
+
+    // Inline code comment
+    socket.on('code:comment', (data: { sessionId: string; filePath: string; comment: any; senderId: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:comment', data);
+    });
+
+    // ===== Terminal relay =====
+    // Terminal output — streams shell stdout chunks to partner
+    socket.on('terminal:output', (sessionId: string, data: { terminalId: string; chunk: string; label: string }) => {
+      socket.to(`session:${sessionId}`).emit('terminal:partner-output', data);
+    });
+
+    // New terminal created — partner gets a read-only mirror
+    socket.on('terminal:create', (sessionId: string, data: { terminalId: string; label: string }) => {
+      socket.to(`session:${sessionId}`).emit('terminal:partner-create', data);
+    });
+
+    // Terminal closed — remove partner mirror
+    socket.on('terminal:close', (sessionId: string, data: { terminalId: string }) => {
+      socket.to(`session:${sessionId}`).emit('terminal:partner-close', data);
+    });
+
+    // Terminal lock/unlock (who is currently typing in the terminal)
+    socket.on('terminal:lock', (sessionId: string, data: { terminalId: string; userName: string }) => {
+      socket.to(`session:${sessionId}`).emit('terminal:partner-lock', { terminalId: data.terminalId, userId, userName: data.userName });
+    });
+    socket.on('terminal:unlock', (sessionId: string, data: { terminalId: string }) => {
+      socket.to(`session:${sessionId}`).emit('terminal:partner-unlock', { terminalId: data.terminalId });
+    });
+
+    // ===== IDE State sync =====
+    // Full state snapshot (files + folders + previewUrl) — stored server-side per session
+    // so a rejoining partner can request it
+    const ideStateMap = new Map<string, { files: Record<string, string>; folders: string[]; previewUrl?: string; ownerId: string }>();
+
+    socket.on('ide:state-update', (data: { sessionId: string; files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
+      // Store state server-side
+      ideStateMap.set(data.sessionId, { files: data.files, folders: data.folders, previewUrl: data.previewUrl, ownerId: userId });
+      // Relay diff (just trigger partner to request fresh state)
+      socket.to(`session:${data.sessionId}`).emit('ide:partner-rejoined');
+    });
+
+    // Partner requests a full state push (e.g. they just loaded the page)
+    socket.on('ide:request-state', (sessionId: string) => {
+      // Tell the other user to push their state
+      socket.to(`session:${sessionId}`).emit('ide:partner-rejoined');
+    });
+
+    // Full state push — one user sends to the other who requested it
+    socket.on('ide:push-state', (data: { sessionId: string; files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('ide:state-snapshot', {
+        files: data.files,
+        folders: data.folders,
+        previewUrl: data.previewUrl,
+      });
+    });
+
+    // Preview URL broadcast
+    socket.on('ide:preview-url', (sessionId: string, url: string) => {
+      socket.to(`session:${sessionId}`).emit('ide:partner-preview-url', url);
+    });
+
+    // =========================================================
+
     // Disconnect
     socket.on('disconnect', async () => {
       console.log('User disconnected:', socket.id, '| userId:', userId);

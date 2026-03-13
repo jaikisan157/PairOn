@@ -1900,7 +1900,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     onSave={(content) => {
                         setFiles(prev => { const next = { ...prev, '.env': content }; autosave(next); return next; });
                         if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', content).catch(() => { });
-                        addToast('.env saved', 'success');
+                        // Sync .env to partner
+                        const socket = socketService.getSocket();
+                        socket?.emit('code:file-create', { sessionId, path: '.env', content, senderId: socket.id });
+                        addToast('.env saved ✓', 'success');
                     }}
                     onClose={() => setShowEnvPanel(false)}
                 />

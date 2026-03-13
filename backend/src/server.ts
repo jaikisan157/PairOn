@@ -37,6 +37,7 @@ import friendRoutes from './routes/friends';
 
 // Import socket handler
 import { setupSocketHandlers } from './services/socket';
+import { setIo } from './lib/ioInstance';
 
 const app = express();
 const httpServer = createServer(app);
@@ -101,6 +102,7 @@ app.get('/health', (req, res) => {
 
 // Setup Socket.io
 setupSocketHandlers(io);
+setIo(io); // Make io available to HTTP routes for real-time notifications
 
 // MongoDB connection
 const connectDB = async () => {

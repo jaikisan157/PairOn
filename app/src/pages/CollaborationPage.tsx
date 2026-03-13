@@ -183,6 +183,9 @@ export function CollaborationPage() {
         startedAt: data.startedAt,
       });
 
+      // CRITICAL: join the session room used by IDE relay handlers
+      socketService.getSocket()?.emit('user:join-session', data.sessionId);
+
       // Save to localStorage for refresh recovery
       localStorage.setItem('challenge_session', JSON.stringify({
         sessionId: data.sessionId,
@@ -445,8 +448,11 @@ export function CollaborationPage() {
           startCountdown(new Date(data.endsAt));
         }
 
-        // Rejoin socket room
+        // Rejoin socket rooms (both challenge room + session room used by IDE)
         socketService.getSocket()?.emit('challenge:rejoin', data.sessionId);
+        socketService.getSocket()?.emit('user:join-session', data.sessionId);
+        // Request fresh IDE state from partner
+        socketService.getSocket()?.emit('ide:request-state', data.sessionId);
 
         // Restore active view from session storage
         const savedView = sessionStorage.getItem('collab_active_view');
