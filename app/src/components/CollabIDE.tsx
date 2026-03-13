@@ -243,6 +243,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const foldersRef = useRef<Set<string>>(new Set());
     const previewUrlRef = useRef<string>('');
     const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Track who owns .env (socket.id of the person who last saved it)
+    const envOwnerRef = useRef<string>('');
 
     // Inline comments
     const [comments, setComments] = useState<Record<string, { id: string; line: number; text: string; userId: string; userName: string; timestamp: number }[]>>({});
@@ -531,6 +533,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         };
         const handleFileCreate = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
+            // Track env owner: whoever sent this file create owns it
+            if (data.path === '.env' || data.path.startsWith('.env.')) {
+                envOwnerRef.current = data.senderId;
+            }
             setFiles(prev => { const next = { ...prev, [data.path]: data.content }; autosave(next); return next; });
             if (webcontainerRef.current) {
                 const dir = data.path.split('/').slice(0, -1).join('/');
@@ -986,12 +992,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const downloadZip = useCallback(async () => {
         const { default: JSZip } = await import('jszip');
         const zip = new JSZip();
-        Object.entries(files).forEach(([p, c]) => zip.file(p, c));
+        // Never include .env in the download — security
+        Object.entries(files).forEach(([p, c]) => {
+            if (p === '.env' || p.startsWith('.env.')) return;
+            zip.file(p, c);
+        });
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${projectTitle.replace(/\s+/g, '-').toLowerCase()}.zip`; a.click();
         URL.revokeObjectURL(url);
-        addToast('Project downloaded as ZIP', 'success');
+        addToast('Project downloaded as ZIP (⚠️ .env excluded for security)', 'success');
     }, [files, projectTitle, addToast]);
 
     // Build project
@@ -1203,6 +1213,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const sorted = [...nodes].sort((a, b) => { if (a.type !== b.type) return a.type === 'directory' ? -1 : 1; return a.name.localeCompare(b.name); });
         return sorted.map(node => {
             const fullPath = prefix ? `${prefix}/${node.name}` : node.name;
+            // Detect .env files and whether this file belongs to the partner
+            const isEnvFile = fullPath === '.env' || fullPath.startsWith('.env.');
+            // isPartnerEnv = true when the env was saved by the partner (not by us)
+            const isPartnerEnv = isEnvFile && envOwnerRef.current !== '' && envOwnerRef.current !== socketService.getSocket()?.id;
 
             // Renaming mode
             if (renamingPath === fullPath) {
@@ -1270,6 +1284,22 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
 
             const locked = isLockedByPartner(fullPath);
+
+            // 🔒 Partner's .env — show blurred, prevent viewing
+            if (isPartnerEnv) {
+                return (
+                    <div key={fullPath}
+                        className="flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer text-yellow-600 hover:bg-yellow-400/10 transition-colors"
+                        onClick={() => addToast("🔒 You can't view your partner's environment variables — API keys are private.", 'error')}
+                        title="Partner's private .env file"
+                    >
+                        <Lock className="w-3.5 h-3.5 text-yellow-500" />
+                        <span className="select-none blur-[3px] truncate flex-1">{node.name}</span>
+                        <span className="text-[9px] text-yellow-600 no-blur bg-yellow-400/10 px-1 rounded">private</span>
+                    </div>
+                );
+            }
+
             return (
                 <div key={fullPath}
                     className={`flex items-center gap-1.5 px-2 py-1 text-xs transition-colors rounded group cursor-pointer ${activeFile === fullPath ? 'bg-[#2d2f3f] text-white' : 'text-gray-500 hover:bg-[#1e2030] hover:text-gray-300'}`}

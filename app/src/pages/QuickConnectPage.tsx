@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     MessageCircle,
@@ -24,6 +24,7 @@ import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
 import { isMobileOrTablet } from '@/lib/deviceDetect';
 import { UserProfileModal } from '@/components/UserProfileModal';
+import { playMessageSound, playSendSound } from '@/lib/audio';
 
 type QuickChatMode = 'doubt' | 'tech-talk';
 type ChatStatus = 'idle' | 'searching' | 'chatting' | 'ended';
@@ -50,7 +51,13 @@ interface ActiveChat {
 
 export function QuickConnectPage() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const { user } = useAuth();
+
+    // Friend DM invite popup (shown when partner invites us to a DM)
+    const [friendDMRequest, setFriendDMRequest] = useState<{
+        chatId: string; fromId: string; fromName: string; fromReputation: number;
+    } | null>(null);
 
     // State
     const [mode, setMode] = useState<QuickChatMode | null>(null);
@@ -79,6 +86,11 @@ export function QuickConnectPage() {
 
     const [isPartnerMobile, setIsPartnerMobile] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Typing indicator
+    const [partnerTyping, setPartnerTyping] = useState(false);
+    const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const typingEmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto-scroll messages
     useEffect(() => {
@@ -127,6 +139,24 @@ export function QuickConnectPage() {
                     }
                     return { ...prev, messages: [...prev.messages, message] };
                 });
+                // Play sound for partner messages
+                if (message.senderId !== user?.id && message.type !== 'system') {
+                    playMessageSound();
+                    // Clear typing when they send
+                    setPartnerTyping(false);
+                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                }
+            });
+
+            // Typing indicators
+            sock.on('quickchat:partner-typing', () => {
+                setPartnerTyping(true);
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 3000);
+            });
+            sock.on('quickchat:partner-stop-typing', () => {
+                setPartnerTyping(false);
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
             });
 
             sock.on('quickchat:ended', (chatId: string) => {
@@ -188,6 +218,13 @@ export function QuickConnectPage() {
                 setTimeout(() => setProposalDeclinedMsg(null), 5000);
             });
 
+            // Friend DM invite popup (received when a friend starts a DM with us)
+            sock.on('quickchat:friend-dm-request', (data: { chatId: string; fromId: string; fromName: string; fromReputation: number }) => {
+                setFriendDMRequest(data);
+                // Auto-dismiss after 20s
+                setTimeout(() => setFriendDMRequest(null), 20000);
+            });
+
             return true;
         }
 
@@ -212,15 +249,36 @@ export function QuickConnectPage() {
                 sock.removeAllListeners('quickchat:warning');
                 sock.removeAllListeners('quickchat:blocked');
                 sock.removeAllListeners('quickchat:rated');
+                sock.removeAllListeners('quickchat:partner-typing');
+                sock.removeAllListeners('quickchat:partner-stop-typing');
+                sock.removeAllListeners('quickchat:friend-dm-request');
                 sock.removeAllListeners('collab:ai-ideas');
                 sock.removeAllListeners('collab:proposal-received');
                 sock.removeAllListeners('collab:proposal-declined');
                 sock.removeAllListeners('challenge:matched');
             }
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+            if (typingEmitTimeoutRef.current) clearTimeout(typingEmitTimeoutRef.current);
         };
     }, [navigate]);
 
-    // Warn before leaving while in an active chat
+    // If opened via Friends page chat button, auto start friend DM
+    useEffect(() => {
+        const friendId = searchParams.get('friendId');
+        if (!friendId) return;
+        // Poll until socket ready
+        let tries = 0;
+        const poll = setInterval(() => {
+            const sock = socketService.getSocket();
+            if (sock) {
+                clearInterval(poll);
+                sock.emit('quickchat:find-friend', friendId);
+                setChatStatus('searching');
+            }
+            if (++tries > 30) clearInterval(poll);
+        }, 200);
+        return () => clearInterval(poll);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
     useEffect(() => {
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             if (chatStatus === 'chatting') {
@@ -246,11 +304,31 @@ export function QuickConnectPage() {
         setChatStatus('idle');
     }, []);
 
+    // Emit typing indicator when user types
+    const handleTypingInput = useCallback((value: string) => {
+        setNewMessage(value);
+        if (!activeChat) return;
+        const sock = socketService.getSocket();
+        if (!sock) return;
+        // Emit typing
+        sock.emit('quickchat:typing', activeChat.chatId);
+        // Debounce stop-typing
+        if (typingEmitTimeoutRef.current) clearTimeout(typingEmitTimeoutRef.current);
+        typingEmitTimeoutRef.current = setTimeout(() => {
+            sock.emit('quickchat:stop-typing', activeChat.chatId);
+        }, 1500);
+    }, [activeChat]);
+
     const handleSendMessage = useCallback((e: React.FormEvent) => {
         e.preventDefault();
         if (!newMessage.trim() || !activeChat) return;
 
         const msg = newMessage.trim();
+
+        // Stop typing indicator
+        const sock = socketService.getSocket();
+        sock?.emit('quickchat:stop-typing', activeChat.chatId);
+        if (typingEmitTimeoutRef.current) clearTimeout(typingEmitTimeoutRef.current);
 
         // Optimistic update — show message instantly
         const optimisticMsg: QuickMessage = {
@@ -266,6 +344,7 @@ export function QuickConnectPage() {
         });
 
         socketService.sendQuickMessage(activeChat.chatId, msg);
+        playSendSound();
         setNewMessage('');
     }, [newMessage, activeChat, user?.id]);
 
@@ -327,11 +406,14 @@ export function QuickConnectPage() {
                         <div className="flex items-center gap-4">
                             <button
                                 onClick={() => {
-                                    // End active quick chat for both users
+                                    // End active quick chat gracefully before navigating
                                     if (activeChat && chatStatus === 'chatting') {
                                         socketService.endQuickChat(activeChat.chatId);
+                                        // Give socket time to emit before navigation
+                                        setTimeout(() => navigate('/dashboard'), 150);
+                                    } else {
+                                        navigate('/dashboard');
                                     }
-                                    navigate('/dashboard');
                                 }}
                                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                             >
@@ -809,12 +891,34 @@ export function QuickConnectPage() {
                         {chatStatus === 'chatting' && activeChat.status === 'active' && (
                             <form
                                 onSubmit={handleSendMessage}
-                                className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+                                className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                             >
-                                <div className="flex gap-2">
+                                {/* Typing indicator */}
+                                <AnimatePresence>
+                                    {partnerTyping && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            className="px-4 pt-2"
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-2xl rounded-bl-sm">
+                                                    <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">{activeChat.partnerName}</span>
+                                                    <span className="flex gap-0.5">
+                                                        {[0, 1, 2].map(i => (
+                                                            <span key={i} className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />
+                                                        ))}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                                <div className="p-4 flex gap-2">
                                     <Input
                                         value={newMessage}
-                                        onChange={(e) => setNewMessage(e.target.value)}
+                                        onChange={(e) => handleTypingInput(e.target.value)}
                                         placeholder="Type a message..."
                                         className="flex-1 rounded-full"
                                     />
@@ -1004,6 +1108,60 @@ export function QuickConnectPage() {
                     onClose={() => setShowPartnerProfile(false)}
                 />
             )}
+
+            {/* Friend DM Invite Popup */}
+            <AnimatePresence>
+                {friendDMRequest && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 60 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 60 }}
+                        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] w-full max-w-sm px-4"
+                    >
+                        <div className="bg-[#1e2030] border border-indigo-500/30 rounded-2xl shadow-2xl p-4 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                                {friendDMRequest.fromName.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-white truncate">{friendDMRequest.fromName}</p>
+                                <p className="text-xs text-gray-400">wants to chat · ⭐ {friendDMRequest.fromReputation}</p>
+                            </div>
+                            <div className="flex gap-2 flex-shrink-0">
+                                <button
+                                    onClick={() => {
+                                        // Join the existing chat room
+                                        const sock = socketService.getSocket();
+                                        if (sock) {
+                                            // The room is already created, just set up state  
+                                            setChatStatus('chatting');
+                                            setActiveChat({
+                                                chatId: friendDMRequest.chatId,
+                                                partnerId: friendDMRequest.fromId,
+                                                partnerName: friendDMRequest.fromName,
+                                                partnerReputation: friendDMRequest.fromReputation,
+                                                mode: 'tech-talk',
+                                                messages: [],
+                                                status: 'active',
+                                                rated: false,
+                                            });
+                                        }
+                                        setFriendDMRequest(null);
+                                    }}
+                                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-lg font-medium transition-colors"
+                                >
+                                    Join
+                                </button>
+                                <button
+                                    onClick={() => setFriendDMRequest(null)}
+                                    className="px-2 py-1.5 text-gray-500 hover:text-white text-xs rounded-lg transition-colors"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

@@ -82,6 +82,52 @@ export function setupQuickChatHandlers(io: Server, socket: Socket) {
         quickChatQueue.delete(userId);
     });
 
+    // ===== Direct friend chat (opens instant DM with a specific friend) =====
+    socket.on('quickchat:find-friend', async (friendId: string) => {
+        try {
+            const [requester, friend] = await Promise.all([
+                User.findById(userId).select('name reputation'),
+                User.findById(friendId).select('name reputation isOnline'),
+            ]);
+            if (!requester || !friend) {
+                socket.emit('quickchat:blocked', 'Friend not found.');
+                return;
+            }
+
+            // Create a quick chat room instantly - no matchmaking needed
+            const chat = new QuickChat({
+                participants: [userId, friendId],
+                mode: 'tech-talk',
+                status: 'active',
+                messages: [],
+                startedAt: new Date(),
+            });
+            await chat.save();
+            const chatId = chat._id.toString();
+            activeChatsMap.get(socket.id)?.add(chatId);
+
+            // Notify requester they're in
+            socket.emit('quickchat:matched', {
+                chatId,
+                partnerId: friendId,
+                partnerName: (friend as any).name,
+                partnerReputation: (friend as any).reputation || 0,
+                mode: 'tech-talk',
+            });
+
+            // Notify friend with popup to join the chat
+            io.to(`user:${friendId}`).emit('quickchat:friend-dm-request', {
+                chatId,
+                fromId: userId,
+                fromName: (requester as any).name,
+                fromReputation: (requester as any).reputation || 0,
+            });
+        } catch (err) {
+            console.error('quickchat:find-friend error:', err);
+            socket.emit('quickchat:blocked', 'Could not start chat. Please try again.');
+        }
+    });
+
     // ===== Typing indicator =====
     socket.on('quickchat:typing', async (chatId: string) => {
         const chat = await QuickChat.findById(chatId).catch(() => null);
