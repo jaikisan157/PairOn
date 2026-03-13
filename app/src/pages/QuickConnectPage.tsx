@@ -24,7 +24,7 @@ import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
 import { isMobileOrTablet } from '@/lib/deviceDetect';
 import { UserProfileModal } from '@/components/UserProfileModal';
-import { playMessageSound, playSendSound } from '@/lib/audio';
+import { playMessageSound, playSendSound, playMatchSound, playDisconnectSound } from '@/lib/audio';
 
 type QuickChatMode = 'doubt' | 'tech-talk';
 type ChatStatus = 'idle' | 'searching' | 'chatting' | 'ended';
@@ -120,6 +120,7 @@ export function QuickConnectPage() {
                 status: 'active',
                 rated: false,
                 });
+                playMatchSound(); // 🔔 Play match chime
             });
 
             sock.on('quickchat:message', (message: QuickMessage) => {
@@ -165,6 +166,7 @@ export function QuickConnectPage() {
                     return { ...prev, status: 'ended' };
                 });
                 setChatStatus('ended');
+                playDisconnectSound(); // 🔔 Play disconnect tone
             });
 
             sock.on('quickchat:waiting', () => { setChatStatus('searching'); });

@@ -454,10 +454,13 @@ export function CollaborationPage() {
         // Request fresh IDE state from partner
         socketService.getSocket()?.emit('ide:request-state', data.sessionId);
 
-        // Restore active view from session storage
-        const savedView = sessionStorage.getItem('collab_active_view');
-        if (savedView === 'code' || savedView === 'chat') {
-          setActiveView(savedView);
+        // Restore active view from session storage — only if the session was already visited (resume)
+        // Fresh matches must always start on 'chat'
+        const savedView = sessionStorage.getItem(`collab_active_view_${data.sessionId}`);
+        if (savedView === 'code') {
+          setActiveView('code');
+        } else {
+          setActiveView('chat'); // Always start on chat
         }
       } else {
         navigate('/dashboard');
@@ -467,10 +470,12 @@ export function CollaborationPage() {
     }
   }, [status, navigate]);
 
-  // Persist active view
+  // Persist active view per session
   useEffect(() => {
-    sessionStorage.setItem('collab_active_view', activeView);
-  }, [activeView]);
+    if (session?.sessionId) {
+      sessionStorage.setItem(`collab_active_view_${session.sessionId}`, activeView);
+    }
+  }, [activeView, session?.sessionId]);
 
   // Heartbeat: send every 20s while matched
   useEffect(() => {

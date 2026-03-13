@@ -34,6 +34,7 @@ import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import creditRoutes from './routes/credits';
 import friendRoutes from './routes/friends';
+import dmRoutes from './routes/dm';
 
 // Import socket handler
 import { setupSocketHandlers } from './services/socket';
@@ -93,6 +94,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/users', apiLimiter, userRoutes);
 app.use('/api/friends', apiLimiter, friendRoutes);
+app.use('/api/dm', apiLimiter, dmRoutes);
 app.use('/api', apiLimiter, creditRoutes);
 
 // Health check

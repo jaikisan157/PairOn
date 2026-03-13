@@ -13,6 +13,7 @@ import {
   OnboardingPage,
   CreditsPage,
   FriendsPage,
+  MessagesPage,
 } from '@/pages';
 import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
@@ -143,6 +144,7 @@ function AppRoutes() {
         <Route path="/quick-connect" element={<ProtectedRoute><QuickConnectPage /></ProtectedRoute>} />
         <Route path="/credits" element={<ProtectedRoute><CreditsPage /></ProtectedRoute>} />
         <Route path="/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
+        <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><AdminDashboardPage /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

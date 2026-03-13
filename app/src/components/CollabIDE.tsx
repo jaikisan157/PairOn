@@ -361,8 +361,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             allowSyntheticDefaultImports: true,
             esModuleInterop: true,
         });
-        // Suppress false positives — JSX errors (2792, 17004) and missing module errors
-        const diagnosticCodesToIgnore = [2307, 2304, 2552, 7016, 1259, 2691, 1005, 2792, 17004];
+        // Suppress false positives — JSX errors (2792, 17004) and missing module path errors (2307)
+        const diagnosticCodesToIgnore = [2307, 2304, 2552, 7016, 1259, 2691, 1005, 2792, 17004, 6133, 6196];
         monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
             noSemanticValidation: false,
             noSyntaxValidation: false,
@@ -373,6 +373,40 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             noSyntaxValidation: false,
             diagnosticCodesToIgnore,
         });
+        // Inject minimal react & react/jsx-runtime type stubs so Monaco doesn't complain about missing modules
+        const reactStub = `declare module 'react' {
+  export = React;
+  export as namespace React;
+  namespace React {
+    type ReactNode = any;
+    type ReactElement = any;
+    type FC<P = {}> = (props: P) => ReactElement | null;
+    type CSSProperties = Record<string, any>;
+    function useState<T>(v: T | (() => T)): [T, (v: T | ((prev: T) => T)) => void];
+    function useEffect(f: () => void | (() => void), deps?: any[]): void;
+    function useCallback<T extends (...args: any[]) => any>(f: T, deps: any[]): T;
+    function useRef<T>(v: T): { current: T };
+    function useMemo<T>(f: () => T, deps: any[]): T;
+    function useContext<T>(ctx: React.Context<T>): T;
+    function createContext<T>(v: T): React.Context<T>;
+    interface Context<T> { Provider: any; Consumer: any; }
+    const StrictMode: any;
+    const Fragment: any;
+    const Suspense: any;
+    function forwardRef<T, P = {}>(render: (props: P, ref: any) => ReactElement | null): any;
+    function memo<T>(c: T): T;
+    function lazy<T>(f: () => Promise<{ default: T }>): T;
+  }
+}`;
+        const jsxRuntimeStub = `declare module 'react/jsx-runtime' {
+  export function jsx(type: any, props: any, key?: any): any;
+  export function jsxs(type: any, props: any, key?: any): any;
+  export const Fragment: any;
+}`;
+        monaco.languages.typescript.typescriptDefaults.addExtraLib(reactStub, 'file:///node_modules/@types/react/index.d.ts');
+        monaco.languages.typescript.typescriptDefaults.addExtraLib(jsxRuntimeStub, 'file:///node_modules/react/jsx-runtime.d.ts');
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(reactStub, 'file:///node_modules/@types/react/index.d.ts');
+        monaco.languages.typescript.javascriptDefaults.addExtraLib(jsxRuntimeStub, 'file:///node_modules/react/jsx-runtime.d.ts');
 
         // Create model for initial file
         const model = getOrCreateModel(activeFile, filesRef.current[activeFile] ?? '');
@@ -1285,17 +1319,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             const locked = isLockedByPartner(fullPath);
 
-            // 🔒 Partner's .env — show blurred, prevent viewing
+            // 🔒 Partner's .env — show masked panel instead of blocking
             if (isPartnerEnv) {
                 return (
                     <div key={fullPath}
                         className="flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer text-yellow-600 hover:bg-yellow-400/10 transition-colors"
-                        onClick={() => addToast("🔒 You can't view your partner's environment variables — API keys are private.", 'error')}
-                        title="Partner's private .env file"
+                        onClick={() => setShowEnvPanel(true)}
+                        title="Partner's .env (values hidden)"
                     >
                         <Lock className="w-3.5 h-3.5 text-yellow-500" />
-                        <span className="select-none blur-[3px] truncate flex-1">{node.name}</span>
-                        <span className="text-[9px] text-yellow-600 no-blur bg-yellow-400/10 px-1 rounded">private</span>
+                        <span className="select-none blur-[2px] truncate flex-1">{node.name}</span>
+                        <span className="text-[9px] text-yellow-600 no-blur bg-yellow-400/10 px-1 rounded">partner</span>
                     </div>
                 );
             }
@@ -1497,7 +1531,27 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 className="w-full bg-[#1e2030] border border-blue-500 rounded px-2 py-1 text-xs text-white placeholder-gray-600 outline-none" />
                         </div>
                     )}
-                    {!showSearch && <div className="p-1 overflow-y-auto flex-1" style={{ minHeight: 0 }}>{renderTree(tree)}</div>}
+                    {!showSearch && (
+                        <div className="p-1 overflow-y-auto flex-1" style={{ minHeight: 0 }}>
+                            {/* VS Code-style: project name as root folder, always expanded */}
+                            <div>
+                                <div className="flex items-center gap-1 px-2 py-1 text-xs text-gray-300 font-semibold hover:bg-[#1e2030] rounded cursor-default group"
+                                    onClick={() => setExpandedDirs(prev => { const n = new Set(prev); n.has('__ROOT__') ? n.delete('__ROOT__') : n.add('__ROOT__'); return n; })}
+                                >
+                                    {expandedDirs.has('__ROOT__') || !expandedDirs.has('__ROOT__COLLAPSED__')
+                                        ? <ChevronDown className="w-3 h-3 text-gray-500" />
+                                        : <ChevronRight className="w-3 h-3 text-gray-500" />}
+                                    <FolderOpen className="w-3.5 h-3.5 text-yellow-400" />
+                                    <span className="uppercase tracking-wide text-[10px] text-gray-400 font-bold">
+                                        {projectTitle || 'project'}
+                                    </span>
+                                </div>
+                                <div className="ml-2">
+                                    {renderTree(tree)}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
                 {/* Sidebar resize divider */}
                 <ResizeDivider dividerRef={sidebar.dividerRef} />
@@ -1927,6 +1981,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             {showEnvPanel && (
                 <EnvVarsPanel
                     envContent={files['.env'] || ''}
+                    partnerOwned={envOwnerRef.current !== '' && envOwnerRef.current !== socketService.getSocket()?.id}
                     onSave={(content) => {
                         setFiles(prev => { const next = { ...prev, '.env': content }; autosave(next); return next; });
                         if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', content).catch(() => { });

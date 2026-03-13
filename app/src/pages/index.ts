@@ -9,3 +9,4 @@ export { QuickConnectPage } from './QuickConnectPage';
 export { OnboardingPage } from './OnboardingPage';
 export { CreditsPage } from './CreditsPage';
 export { FriendsPage } from './FriendsPage';
+export { MessagesPage } from './MessagesPage';

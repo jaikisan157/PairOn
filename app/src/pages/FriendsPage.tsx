@@ -218,9 +218,9 @@ export function FriendsPage() {
                                         <Button
                                             size="sm"
                                             variant="outline"
-                                            onClick={() => navigate(`/quick-connect?friendId=${friend.id}&friendName=${encodeURIComponent(friend.name)}`)}
+                                            onClick={() => navigate(`/messages?friendId=${friend.id}`)}
                                             className="h-8 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                                            title="Start Quick Chat"
+                                            title="Send Message"
                                         >
                                             <MessageCircle className="w-3.5 h-3.5" />
                                         </Button>

@@ -78,6 +78,14 @@ export function setupSocketHandlers(io: Server) {
     // Setup Collab Proposal handlers
     setupProposalHandlers(io, socket);
 
+    // ===== Direct Message typing relay =====
+    socket.on('dm:typing', ({ toId }: { toId: string }) => {
+      io.to(`user:${toId}`).emit('dm:partner-typing', { fromId: userId });
+    });
+    socket.on('dm:stop-typing', ({ toId }: { toId: string }) => {
+      io.to(`user:${toId}`).emit('dm:partner-stop-typing', { fromId: userId });
+    });
+
     // ===== Dashboard Cleanup =====
     // Close expired/stale sessions, but KEEP active long-running ones (24hr/7day)
     socket.on('dashboard:cleanup', async () => {

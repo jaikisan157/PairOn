@@ -5,3 +5,5 @@ export { QuickChat } from './QuickChat';
 export { CollabProposal } from './CollabProposal';
 export { Certificate } from './Certificate';
 export { Friendship } from './Friend';
+
+export { DirectMessage } from './DirectMessage';
