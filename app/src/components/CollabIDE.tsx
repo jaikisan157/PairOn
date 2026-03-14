@@ -1063,7 +1063,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             // 1. Get authenticated user info
             const meRes = await fetch('https://api.github.com/user', { headers });
-            if (!meRes.ok) throw new Error('Invalid GitHub token. Please check and try again.');
+            if (!meRes.ok) {
+                const meErr = await meRes.json().catch(() => ({}));
+                throw new Error(`Token error: ${meErr.message || meRes.statusText}. Make sure the token has 'repo' scope.`);
+            }
             const me = await meRes.json();
             const owner = me.login as string;
 
@@ -1080,8 +1083,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 }),
             });
             if (!createRes.ok) {
-                const err = await createRes.json();
-                throw new Error(err.message || 'Failed to create repository');
+                const err = await createRes.json().catch(() => ({}));
+                // Handle name already taken
+                const msg = err.message || '';
+                const errDetails = (err.errors || []).map((e: any) => e.message).join(', ');
+                if (msg.toLowerCase().includes('already exists') || errDetails.toLowerCase().includes('already exists')) {
+                    throw new Error(`Repo "${repoName}" already exists on your GitHub. Change the repo name and try again.`);
+                }
+                throw new Error(`GitHub API error (${createRes.status}): ${errDetails || msg || 'Failed to create repository'}`);
             }
 
             // 3. Push all files via GitHub API (blob + tree + commit)
