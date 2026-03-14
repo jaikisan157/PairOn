@@ -179,6 +179,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [showTemplates, setShowTemplates] = useState(false);
     const [showEnvPanel, setShowEnvPanel] = useState(false);
 
+    // GitHub push modal
+    const [showGithubModal, setShowGithubModal] = useState(false);
+    const [githubToken, setGithubToken] = useState('');
+    const [githubRepoName, setGithubRepoName] = useState('');
+    const [githubPartnerUsername, setGithubPartnerUsername] = useState('');
+    const [githubPushing, setGithubPushing] = useState(false);
+    const [githubResult, setGithubResult] = useState<{ url: string; owner: string } | null>(null);
+
     // formatFile ref for keyboard shortcut (avoids stale closure)
     const formatFileRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
@@ -1038,6 +1046,119 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         addToast('Project downloaded as ZIP (⚠️ .env excluded for security)', 'success');
     }, [files, projectTitle, addToast]);
 
+    // Push to GitHub
+    const pushToGitHub = useCallback(async () => {
+        if (!githubToken.trim() || !githubRepoName.trim()) {
+            addToast('Please fill in all required fields', 'error');
+            return;
+        }
+        setGithubPushing(true);
+        setGithubResult(null);
+        try {
+            const headers = {
+                Authorization: `token ${githubToken.trim()}`,
+                Accept: 'application/vnd.github+json',
+                'Content-Type': 'application/json',
+            };
+
+            // 1. Get authenticated user info
+            const meRes = await fetch('https://api.github.com/user', { headers });
+            if (!meRes.ok) throw new Error('Invalid GitHub token. Please check and try again.');
+            const me = await meRes.json();
+            const owner = me.login as string;
+
+            // 2. Create the repository
+            const repoName = githubRepoName.trim().replace(/\s+/g, '-').toLowerCase();
+            const createRes = await fetch('https://api.github.com/user/repos', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    name: repoName,
+                    description: `${projectTitle} — built collaboratively on PairOn`,
+                    private: false,
+                    auto_init: false,
+                }),
+            });
+            if (!createRes.ok) {
+                const err = await createRes.json();
+                throw new Error(err.message || 'Failed to create repository');
+            }
+
+            // 3. Push all files via GitHub API (blob + tree + commit)
+            // Create blobs for every file (skip .env)
+            const filesToPush = Object.entries(files).filter(([p]) => !p.startsWith('.env'));
+
+            const blobs = await Promise.all(
+                filesToPush.map(async ([, content]) => {
+                    const blobRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ content, encoding: 'utf-8' }),
+                    });
+                    const blob = await blobRes.json();
+                    return blob.sha as string;
+                })
+            );
+
+            // Create tree
+            const tree = filesToPush.map(([path], i) => ({
+                path,
+                mode: '100644' as const,
+                type: 'blob' as const,
+                sha: blobs[i],
+            }));
+
+            const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ tree }),
+            });
+            const treeData = await treeRes.json();
+
+            // Create commit
+            const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    message: `Initial commit — built on PairOn`,
+                    tree: treeData.sha,
+                    parents: [],
+                }),
+            });
+            const commitData = await commitRes.json();
+
+            // Create main branch ref
+            await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ ref: 'refs/heads/main', sha: commitData.sha }),
+            });
+
+            // Set default branch to main
+            await fetch(`https://api.github.com/repos/${owner}/${repoName}`, {
+                method: 'PATCH',
+                headers,
+                body: JSON.stringify({ default_branch: 'main' }),
+            });
+
+            // 4. Add partner as collaborator (if provided)
+            if (githubPartnerUsername.trim()) {
+                await fetch(
+                    `https://api.github.com/repos/${owner}/${repoName}/collaborators/${githubPartnerUsername.trim()}`,
+                    { method: 'PUT', headers, body: JSON.stringify({ permission: 'push' }) }
+                );
+            }
+
+            const repoUrl = `https://github.com/${owner}/${repoName}`;
+            setGithubResult({ url: repoUrl, owner });
+            addToast('🎉 Project pushed to GitHub!', 'success');
+        } catch (err: any) {
+            addToast(err.message || 'Failed to push to GitHub', 'error');
+        } finally {
+            setGithubPushing(false);
+        }
+    }, [githubToken, githubRepoName, githubPartnerUsername, files, projectTitle, addToast]);
+
     // Build project
     const buildProject = useCallback(async () => {
         if (!webcontainerRef.current) { addToast('Boot the dev environment first', 'error'); return; }
@@ -1412,6 +1533,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     {/* Separator */}
                     <div className="w-px h-4 bg-gray-700 mx-0.5" />
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
+                    <button
+                        onClick={() => { setShowGithubModal(true); setGithubResult(null); setGithubRepoName(projectTitle.replace(/\s+/g, '-').toLowerCase()); }}
+                        className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-purple-500 rounded transition-colors"
+                        title="Push to GitHub"
+                    >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                        Push to GitHub
+                    </button>
                     <div className="relative">
                         <button onClick={() => setShowIdeInfo(!showIdeInfo)} className={`p-1.5 rounded transition-colors ${showIdeInfo ? 'text-blue-400 bg-blue-400/10' : 'text-gray-400 hover:text-blue-400'}`} title="IDE Info">
                             <Info className="w-3.5 h-3.5" />
@@ -1985,13 +2114,125 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     onSave={(content) => {
                         setFiles(prev => { const next = { ...prev, '.env': content }; autosave(next); return next; });
                         if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', content).catch(() => { });
-                        // Sync .env to partner
                         const socket = socketService.getSocket();
                         socket?.emit('code:file-create', { sessionId, path: '.env', content, senderId: socket.id });
                         addToast('.env saved ✓', 'success');
                     }}
                     onClose={() => setShowEnvPanel(false)}
                 />
+            )}
+
+            {/* ===== Push to GitHub Modal ===== */}
+            {showGithubModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => !githubPushing && setShowGithubModal(false)}>
+                    <div className="w-full max-w-md bg-[#161b22] border border-gray-700 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+                        {/* Header */}
+                        <div className="flex items-center justify-between mb-5">
+                            <div className="flex items-center gap-2">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                                <span className="text-white font-semibold text-sm">Push to GitHub</span>
+                            </div>
+                            {!githubPushing && <button onClick={() => setShowGithubModal(false)} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>}
+                        </div>
+
+                        {/* Success state */}
+                        {githubResult ? (
+                            <div className="text-center py-4">
+                                <div className="text-4xl mb-3">🎉</div>
+                                <p className="text-green-400 font-semibold text-sm mb-1">Project pushed successfully!</p>
+                                <p className="text-gray-400 text-xs mb-4">Your repo is live on GitHub</p>
+                                <a
+                                    href={githubResult.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block w-full py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white text-xs rounded-xl text-center transition-colors mb-2 font-mono truncate"
+                                >
+                                    {githubResult.url}
+                                </a>
+                                <p className="text-gray-500 text-xs">Your partner will receive a collaborator invite on GitHub</p>
+                                <button
+                                    onClick={() => { setShowGithubModal(false); setGithubResult(null); }}
+                                    className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-xl transition-colors"
+                                >
+                                    Done
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {/* Token */}
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                                        GitHub Personal Access Token <span className="text-red-400">*</span>
+                                    </label>
+                                    <input
+                                        type="password"
+                                        value={githubToken}
+                                        onChange={e => setGithubToken(e.target.value)}
+                                        placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                                        className="w-full bg-[#0d1117] border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 outline-none transition-colors"
+                                    />
+                                    <p className="text-[10px] text-gray-500 mt-1">
+                                        Generate at <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">github.com/settings/tokens</a> → Select <code className="bg-gray-800 px-1 rounded">repo</code> scope
+                                    </p>
+                                </div>
+
+                                {/* Repo name */}
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                                        Repository Name <span className="text-red-400">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={githubRepoName}
+                                        onChange={e => setGithubRepoName(e.target.value.replace(/\s+/g, '-').toLowerCase())}
+                                        placeholder="my-project"
+                                        className="w-full bg-[#0d1117] border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 outline-none transition-colors"
+                                    />
+                                </div>
+
+                                {/* Partner username */}
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                                        Partner's GitHub Username <span className="text-gray-600">(optional — adds them as collaborator)</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={githubPartnerUsername}
+                                        onChange={e => setGithubPartnerUsername(e.target.value)}
+                                        placeholder="their-github-username"
+                                        className="w-full bg-[#0d1117] border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 outline-none transition-colors"
+                                    />
+                                </div>
+
+                                {/* Info */}
+                                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
+                                    <p className="text-[10px] text-blue-300">
+                                        ℹ️ A new <strong>public</strong> repo will be created on your GitHub. All project files (except .env) will be pushed as the first commit. Your partner will receive a collaborator invite.
+                                    </p>
+                                </div>
+
+                                {/* Submit */}
+                                <button
+                                    onClick={pushToGitHub}
+                                    disabled={githubPushing || !githubToken.trim() || !githubRepoName.trim()}
+                                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {githubPushing ? (
+                                        <>
+                                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                            Pushing to GitHub...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                                            Push to GitHub
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     );
