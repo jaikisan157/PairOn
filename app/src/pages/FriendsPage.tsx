@@ -218,7 +218,7 @@ export function FriendsPage() {
                                         <Button
                                             size="sm"
                                             variant="outline"
-                                            onClick={() => navigate(`/messages?friendId=${friend.id}`)}
+                                            onClick={() => navigate(`/messages?friendId=${friend.id}&friendName=${encodeURIComponent(friend.name)}`)}
                                             className="h-8 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                                             title="Send Message"
                                         >

@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PairOn — Project Q&A Document</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --accent: #6366f1;
+      --accent-light: #eef2ff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --bg: #ffffff;
+      --section-bg: #f9fafb;
+      --code-bg: #f3f4f6;
+      --tag-bg: #ede9fe;
+      --tag-text: #5b21b6;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f1f5f9;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    /* ── Download Button (hidden on print) ── */
+    .download-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #1e1b4b;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 32px;
+      z-index: 999;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .download-bar h2 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .download-bar span {
+      font-size: 12px;
+      color: #a5b4fc;
+    }
+
+    .btn-pdf {
+      background: #6366f1;
+      color: white;
+      border: none;
+      padding: 9px 22px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.2s;
+    }
+
+    .btn-pdf:hover {
+      background: #4f46e5;
+    }
+
+    .btn-pdf svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    /* ── Main Container ── */
+    .container {
+      max-width: 900px;
+      margin: 80px auto 60px;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 40px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+    }
+
+    /* ── Cover Header ── */
+    .cover {
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4338ca 100%);
+      padding: 56px 48px 44px;
+      color: white;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cover::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    }
+
+    .cover-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #c7d2fe;
+      margin-bottom: 20px;
+    }
+
+    .cover h1 {
+      font-size: 42px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .cover h1 span {
+      color: #818cf8;
+    }
+
+    .cover-subtitle {
+      font-size: 15px;
+      color: #c7d2fe;
+      font-weight: 400;
+      margin-bottom: 28px;
+    }
+
+    .cover-meta {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .cover-meta-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #a5b4fc;
+    }
+
+    .cover-meta-item strong {
+      color: white;
+    }
+
+    /* ── TOC ── */
+    .toc {
+      background: var(--section-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 28px 48px;
+    }
+
+    .toc h3 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    .toc-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px 24px;
+    }
+
+    .toc-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .toc-item::before {
+      content: '→';
+      color: #a5b4fc;
+    }
+
+    /* ── Content ── */
+    .content {
+      padding: 0 48px 48px;
+    }
+
+    /* ── Section Header ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 44px 0 24px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--accent-light);
+    }
+
+    .section-icon {
+      width: 36px;
+      height: 36px;
+      background: var(--accent-light);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      flex-shrink: 0;
+    }
+
+    .section-header h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1e1b4b;
+      letter-spacing: -0.01em;
+    }
+
+    /* ── Q&A Card ── */
+    .qa-card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      break-inside: avoid;
+    }
+
+    .qa-question {
+      background: linear-gradient(to right, #f5f3ff, #faf5ff);
+      border-bottom: 1px solid #ede9fe;
+      padding: 14px 20px;
+      font-weight: 600;
+      font-size: 13.5px;
+      color: #3730a3;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .qa-question .q-badge {
+      background: var(--accent);
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .qa-answer {
+      padding: 16px 20px;
+      color: #374151;
+      font-size: 13.5px;
+      line-height: 1.7;
+    }
+
+    /* ── Typography inside answers ── */
+    .qa-answer strong {
+      color: #111827;
+      font-weight: 600;
+    }
+
+    .qa-answer em {
+      color: var(--accent);
+      font-style: italic;
+    }
+
+    .qa-answer p {
+      margin-bottom: 10px;
+    }
+
+    .qa-answer p:last-child {
+      margin-bottom: 0;
+    }
+
+    .qa-answer ul,
+    .qa-answer ol {
+      margin: 8px 0 8px 20px;
+    }
+
+    .qa-answer li {
+      margin-bottom: 4px;
+    }
+
+    /* ── Blockquote ── */
+    .qa-answer blockquote {
+      border-left: 3px solid var(--accent);
+      background: var(--accent-light);
+      padding: 10px 16px;
+      border-radius: 0 8px 8px 0;
+      margin: 12px 0;
+      font-style: italic;
+      color: #3730a3;
+      font-size: 13px;
+    }
+
+    /* ── Tables ── */
+    .qa-answer table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 12.5px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #e5e7eb;
+    }
+
+    .qa-answer th {
+      background: #f3f4f6;
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 11.5px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #6b7280;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .qa-answer td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+    }
+
+    .qa-answer tr:last-child td {
+      border-bottom: none;
+    }
+
+    .qa-answer tr:nth-child(even) td {
+      background: #fafafa;
+    }
+
+    /* ── Code blocks ── */
+    .qa-answer pre {
+      background: #1e2030;
+      color: #c3cfe2;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      margin: 12px 0;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+
+    .qa-answer code {
+      background: var(--code-bg);
+      color: #7c3aed;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    .qa-answer pre code {
+      background: none;
+      color: inherit;
+      padding: 0;
+      font-size: inherit;
+    }
+
+    /* ── Highlight box ── */
+    .highlight-box {
+      background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+      border: 1px solid #c4b5fd;
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin: 14px 0;
+      font-size: 13px;
+      color: #3730a3;
+      font-weight: 500;
+    }
+
+    /* ── Footer ── */
+    .doc-footer {
+      background: var(--section-bg);
+      border-top: 1px solid var(--border);
+      padding: 20px 48px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .doc-footer strong {
+      color: var(--text);
+    }
+
+    /* ── PRINT STYLES ── */
+    @media print {
+      body {
+        background: white;
+        font-size: 12px;
+      }
+
+      .download-bar {
+        display: none !important;
+      }
+
+      .container {
+        margin: 0;
+        border-radius: 0;
+        box-shadow: none;
+        max-width: 100%;
+      }
+
+      .cover {
+        padding: 36px 40px 32px;
+      }
+
+      .cover h1 {
+        font-size: 32px;
+      }
+
+      .content {
+        padding: 0 40px 40px;
+      }
+
+      .toc {
+        padding: 20px 40px;
+      }
+
+      .qa-card {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      .section-header {
+        break-after: avoid;
+      }
+
+      @page {
+        margin: 12mm 10mm;
+        size: A4;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Download Bar -->
+  <div class="download-bar" id="dlbar">
+    <div>
+      <h2>📄 PairOn — Project Q&A Document</h2>
+      <span>Open in Chrome → Click the button → Save as PDF</span>
+    </div>
+    <button class="btn-pdf" onclick="downloadPDF()">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      </svg>
+      Save as PDF
+    </button>
+  </div>
+
+  <div class="container">
+
+    <!-- Cover -->
+    <div class="cover">
+      <div class="cover-badge">📘 Project Documentation</div>
+      <h1>Pair<span>On</span></h1>
+      <div class="cover-subtitle">Complete Viva & Presentation Q&A — Final Year / Semester Project</div>
+      <div class="cover-meta">
+        <div class="cover-meta-item">📅 <strong>March 2026</strong></div>
+        <div class="cover-meta-item">🏷️ <strong>Full Stack Web Application</strong></div>
+        <div class="cover-meta-item">💻 <strong>React + Node.js + WebContainers + Socket.IO</strong></div>
+        <div class="cover-meta-item">📑 <strong>60+ Questions Answered</strong></div>
+      </div>
+    </div>
+
+    <!-- TOC -->
+    <div class="toc">
+      <h3>Table of Contents</h3>
+      <div class="toc-grid">
+        <div class="toc-item">Basic Project Questions</div>
+        <div class="toc-item">Existing vs Proposed System</div>
+        <div class="toc-item">Technical Questions</div>
+        <div class="toc-item">Development Questions</div>
+        <div class="toc-item">Performance & Security</div>
+        <div class="toc-item">Testing & Reliability</div>
+        <div class="toc-item">Scalability</div>
+        <div class="toc-item">Business & Startup</div>
+        <div class="toc-item">Limitations</div>
+        <div class="toc-item">Future Scope</div>
+        <div class="toc-item">Final Inspection</div>
+        <div class="toc-item">Innovation & Impact</div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+
+      <!-- ── Section 1 ── -->
+      <div class="section-header">
+        <div class="section-icon">🔷</div>
+        <h2>Basic Project Questions</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What is PairOn?</div>
+        <div class="qa-answer">
+          <p>PairOn is a <strong>real-time collaborative developer platform</strong> built for students and developers
+            who want to code together, learn from each other, and build projects — all directly in the browser.</p>
+          <p>It combines a <strong>smart matchmaking system</strong> (like Tinder for coders), a <strong>full
+              browser-based IDE</strong> (Monaco Editor + WebContainers), <strong>live pair programming</strong>, a
+            <strong>Quick Chat</strong> system for spontaneous conversations, a <strong>Friends &amp; DM system</strong>
+            (like Instagram DMs), and an <strong>AI assistant</strong> — all in one unified platform. No downloads, no
+            local setup required.
+          </p>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What inspired you to build this project?</div>
+        <div class="qa-answer">
+          <p>The inspiration came from the real frustration of <strong>solo learning</strong>. When you're stuck on a
+            bug at 2 AM, there's no one to pair with. Platforms like LeetCode or HackerRank let you code alone, while
+            Discord or Zoom require awkward screen sharing without a shared editor.</p>
+          <p>PairOn was inspired by the idea: <em>"What if you could instantly find another developer, jump into a
+              shared code environment, and build something together — as easily as starting a video call?"</em></p>
+          <p>The concept of <strong>pair programming</strong> has been proven to produce better code and faster
+            learning. PairOn makes it accessible to everyone.</p>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What problem does PairOn solve?</div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Problem</th>
+              <th>How PairOn Solves It</th>
+            </tr>
+            <tr>
+              <td>Developers learn and code alone</td>
+              <td>Instant partner matching for collaborative coding</td>
+            </tr>
+            <tr>
+              <td>No shared coding environment without extra tools</td>
+              <td>Built-in browser IDE — no setup needed</td>
+            </tr>
+            <tr>
+              <td>Struggling with doubts, no one to ask</td>
+              <td>Quick Chat for real-time doubt resolution</td>
+            </tr>
+            <tr>
+              <td>Hard to find peers at the same skill level</td>
+              <td>Skill-based and language-based matching algorithm</td>
+            </tr>
+            <tr>
+              <td>Collaboration tools are fragmented</td>
+              <td>Chat, IDE, terminal, AI, and file system in one place</td>
+            </tr>
+            <tr>
+              <td>No accountability in collaborative sessions</td>
+              <td>Project tasks, kanban board, and submission system</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>Why did you choose this project topic?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>Relevance</strong> — Pair programming is a recognized industry practice used at Google, Amazon,
+              etc., but has no accessible dedicated platform for students.</li>
+            <li><strong>Technical Depth</strong> — Integrates WebSockets, Monaco Editor, WebContainers, JWT auth,
+              MongoDB, AI APIs — a full-stack challenge worth building.</li>
+            <li><strong>Real-world Impact</strong> — Addresses a genuine gap in the developer education ecosystem.</li>
+            <li><strong>Innovation</strong> — Combining matchmaking + collaborative IDE + live terminal + AI in a
+              browser is novel and unmatched.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What are the main objectives of your project?</div>
+        <div class="qa-answer">
+          <ol>
+            <li>Build a <strong>real-time collaborative coding environment</strong> accessible from any browser.</li>
+            <li>Create a <strong>smart matchmaking system</strong> that pairs developers by skill, language, and
+              interest.</li>
+            <li>Provide <strong>instant communication</strong> through Quick Chat, DMs, and Collaboration Chat.</li>
+            <li>Enable <strong>simultaneous live terminal usage</strong> so both users can run commands and see each
+              other's output.</li>
+            <li>Integrate an <strong>AI assistant</strong> for code review, suggestions, and bug fixing.</li>
+            <li>Implement a <strong>reputation and credits system</strong> to incentivize good collaboration.</li>
+            <li>Ensure <strong>environment variable security</strong> — API keys stay private even while pair
+              programming.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>Who are the target users of PairOn?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>Computer Science Students</strong> — learning to code and wanting peer support</li>
+            <li><strong>Bootcamp Learners</strong> — who need a coding buddy to work through projects</li>
+            <li><strong>Junior Developers</strong> — looking to practice collaborative workflows</li>
+            <li><strong>Hackathon Teams</strong> — wanting a shared IDE without account setup friction</li>
+            <li><strong>Open Source Contributors</strong> — pairing on issues in real-time</li>
+            <li><strong>Interview Prep Partners</strong> — practicing LeetCode-style problems together</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What are the key features of PairOn?</div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Feature</th>
+              <th>Description</th>
+            </tr>
+            <tr>
+              <td>🔀 Smart Matchmaking</td>
+              <td>Pairs users by programming language, skill level, and session duration (3hr, 24hr, 7-day)</td>
+            </tr>
+            <tr>
+              <td>💻 Browser IDE</td>
+              <td>Monaco Editor (same as VS Code) with syntax highlighting, IntelliSense, multi-tab, VS Code-style file
+                tree</td>
+            </tr>
+            <tr>
+              <td>🖥️ Live Terminal</td>
+              <td>Xterm.js terminal with multiple tabs and output sync between partners</td>
+            </tr>
+            <tr>
+              <td>🤖 AI Assistant</td>
+              <td>Code review, suggestions, and bug help via Groq API</td>
+            </tr>
+            <tr>
+              <td>💬 Collaboration Chat</td>
+              <td>Real-time chat with typing indicators and audio cues</td>
+            </tr>
+            <tr>
+              <td>⚡ Quick Chat</td>
+              <td>Instant random pairing for doubts or tech-talk</td>
+            </tr>
+            <tr>
+              <td>👥 Friends & DM</td>
+              <td>Instagram-style persistent direct messaging</td>
+            </tr>
+            <tr>
+              <td>🔒 Env File Security</td>
+              <td>.env values masked for partners; excluded from ZIP downloads</td>
+            </tr>
+            <tr>
+              <td>📦 Package Manager</td>
+              <td>Install npm packages directly inside the browser IDE</td>
+            </tr>
+            <tr>
+              <td>🌐 Live Preview</td>
+              <td>In-browser app preview (WebContainers) shared with partner</td>
+            </tr>
+            <tr>
+              <td>📋 Kanban Board</td>
+              <td>Task management for collaborative projects</td>
+            </tr>
+            <tr>
+              <td>🏆 Reputation System</td>
+              <td>Credits and scores based on collaboration quality and ratings</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Section 2 ── -->
+      <div class="section-header">
+        <div class="section-icon">⚖️</div>
+        <h2>Existing System vs Proposed System</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What are the existing systems available for this problem?
+        </div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Platform</th>
+              <th>What It Does</th>
+            </tr>
+            <tr>
+              <td><strong>Replit</strong></td>
+              <td>Browser-based coding with multiplayer (paid feature)</td>
+            </tr>
+            <tr>
+              <td><strong>CodeSandbox</strong></td>
+              <td>Browser IDE for frontend projects, no real collaboration</td>
+            </tr>
+            <tr>
+              <td><strong>GitHub Codespaces</strong></td>
+              <td>Cloud VS Code — requires GitHub account and subscription</td>
+            </tr>
+            <tr>
+              <td><strong>VS Code Live Share</strong></td>
+              <td>Real-time code sharing via VS Code extension</td>
+            </tr>
+            <tr>
+              <td><strong>StackBlitz</strong></td>
+              <td>Browser IDE with WebContainers — no matchmaking</td>
+            </tr>
+            <tr>
+              <td><strong>LeetCode / HackerRank</strong></td>
+              <td>Coding practice platforms — no real collaboration</td>
+            </tr>
+            <tr>
+              <td><strong>Discord</strong></td>
+              <td>Chat and screen share — no code execution</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What are the limitations of the existing systems?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>No matchmaking</strong> — All existing platforms require you to already know someone to
+              collaborate with.</li>
+            <li><strong>No built-in communication</strong> — Tools like GitHub Codespaces don't include chat; you'd need
+              Discord separately.</li>
+            <li><strong>Paid or restricted</strong> — Replit multiplayer is paywalled; Codespaces charges per compute
+              hour.</li>
+            <li><strong>No reputation/incentive system</strong> — No platform rewards good collaboration behavior.</li>
+            <li><strong>No doubt resolution mode</strong> — None offer a "I need help right now" quick-match flow.</li>
+            <li><strong>No privacy model</strong> — Existing platforms don't separate what your collaborator can see
+              (e.g., your .env API keys).</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How is PairOn different from existing platforms?</div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Feature</th>
+              <th>PairOn</th>
+              <th>Replit (free)</th>
+              <th>VS Code Live Share</th>
+            </tr>
+            <tr>
+              <td>Smart matchmaking</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>Built-in chat & DM</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>Browser IDE</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>.env privacy for partner</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>Reputation system</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>Shared live terminal</td>
+              <td>✅</td>
+              <td>Partial</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>Quick random pairing</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>AI assistant</td>
+              <td>✅</td>
+              <td>Paid</td>
+              <td>❌</td>
+            </tr>
+            <tr>
+              <td>Free tier</td>
+              <td>✅</td>
+              <td>Limited</td>
+              <td>✅</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>Why would users choose PairOn instead of other platforms?
+        </div>
+        <div class="qa-answer">
+          <div class="highlight-box">
+            "PairOn is the only platform where a developer can go from 'I want to code with someone' to actively pair
+            programming with a matched partner in a live IDE in under 60 seconds — directly in the browser, for free."
+          </div>
+          <p>No other platform offers this complete loop: <strong>Find → Match → Code → Chat → Ship → Rate</strong> —
+            all without leaving the browser tab.</p>
+        </div>
+      </div>
+
+      <!-- ── Section 3 ── -->
+      <div class="section-header">
+        <div class="section-icon">⚙️</div>
+        <h2>Technical Questions</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What technologies did you use to build PairOn?</div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Layer</th>
+              <th>Technologies</th>
+            </tr>
+            <tr>
+              <td><strong>Frontend</strong></td>
+              <td>React 18, TypeScript, Vite, Monaco Editor, Xterm.js, Framer Motion, Socket.IO Client, Tailwind CSS,
+                Lucide Icons</td>
+            </tr>
+            <tr>
+              <td><strong>Backend</strong></td>
+              <td>Node.js, Express.js, Socket.IO Server, Mongoose, JSON Web Tokens (JWT), bcryptjs, express-rate-limit,
+                express-validator</td>
+            </tr>
+            <tr>
+              <td><strong>Database</strong></td>
+              <td>MongoDB Atlas</td>
+            </tr>
+            <tr>
+              <td><strong>Browser Runtime</strong></td>
+              <td>WebContainers API (@webcontainer/api) — Node.js in the browser</td>
+            </tr>
+            <tr>
+              <td><strong>AI</strong></td>
+              <td>Groq API (LLaMA 3 70B model)</td>
+            </tr>
+            <tr>
+              <td><strong>Deployment</strong></td>
+              <td>Vercel (frontend), Render (backend)</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What is the architecture of your system?</div>
+        <div class="qa-answer">
+          <pre>┌─────────────────────────────────────────┐
+│            BROWSER (Client)             │
+│  React App + Monaco Editor + Xterm.js   │
+│  WebContainers (Node.js in browser)     │
+└──────────────┬──────────────────────────┘
+               │  HTTPS REST + WebSocket (Socket.IO)
+┌──────────────▼──────────────────────────┐
+│          BACKEND (Render)               │
+│  Express.js REST API                    │
+│  Socket.IO Server                       │
+│  Matchmaking Engine                     │
+│  Quick Chat Engine                      │
+│  Groq AI Integration                    │
+└──────────────┬──────────────────────────┘
+               │  Mongoose ODM
+┌──────────────▼──────────────────────────┐
+│          MongoDB Atlas                  │
+│  Users, Sessions, Chats, Friends        │
+│  DirectMessages, Certificates, etc.     │
+└─────────────────────────────────────────┘</pre>
+          <p>It's a classic <strong>3-tier architecture</strong> (Client → Application Server → Database), enhanced with
+            a <strong>real-time bidirectional WebSocket layer</strong> for all collaboration features.</p>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How does the frontend communicate with the backend?</div>
+        <div class="qa-answer">
+          <p>Two communication channels run simultaneously:</p>
+          <ul>
+            <li><strong>REST API (HTTPS)</strong> — Standard CRUD operations: login, register, fetch profile, send
+              friend request, load message history. Uses fetch with JWT Bearer token in the Authorization header.</li>
+            <li><strong>Socket.IO (WebSocket)</strong> — All real-time features: matchmaking events, collaboration chat,
+              code sync, terminal output, typing indicators, file changes, IDE state push/pull. The socket authenticates
+              using the same JWT passed in the handshake's <code>auth</code> field.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How does the code editor work in your platform?</div>
+        <div class="qa-answer">
+          <p>The editor is <strong>Monaco Editor</strong> — the exact same engine that powers VS Code. Key
+            implementation details:</p>
+          <ul>
+            <li>Each file is stored as a Monaco <code>ITextModel</code> with a URI (<code>file:///filename.tsx</code>)
+            </li>
+            <li>Switching tabs = <code>editor.setModel(model)</code> — no re-render, preserving cursor position and
+              undo/redo history</li>
+            <li>TypeScript language server configured with <code>jsx: react-jsx</code> for full .tsx IntelliSense</li>
+            <li>React type stubs and <code>react/jsx-runtime</code> stubs injected as extra libs — eliminates false red
+              underlines</li>
+            <li>File changes are debounced (1 second) and synced to the partner via <code>code:file-change</code> socket
+              events</li>
+            <li>A <strong>file locking system</strong> prevents simultaneous edits on the same file — a lock icon
+              appears if your partner is editing it</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How does the system execute code?</div>
+        <div class="qa-answer">
+          <p>Code execution happens through <strong>WebContainers</strong> — a WASM-based Node.js runtime that runs
+            <em>inside the browser tab itself</em>.
+          </p>
+          <ol>
+            <li>User's files are mounted into the WebContainer virtual filesystem</li>
+            <li><code>npm install</code> is run inside the WebContainer to install dependencies</li>
+            <li><code>npm run dev</code> starts a Vite dev server inside the browser</li>
+            <li>The WebContainer exposes a local URL accessible via an <code>&lt;iframe&gt;</code> preview panel</li>
+            <li>This preview URL is broadcast to the partner via socket so both can see the running app</li>
+          </ol>
+          <p><strong>Importantly, no server-side code execution happens</strong> — the browser is the server. This means
+            zero server CPU cost for code running and complete isolation between users.</p>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How does your AI integration work?</div>
+        <div class="qa-answer">
+          <ol>
+            <li>User opens the AI panel and asks a question (e.g., "review my code", "fix this bug")</li>
+            <li>The frontend sends the current file content + user's query to the backend <code>/api/ai/assist</code>
+            </li>
+            <li>Backend calls the <strong>Groq API</strong> (LLaMA 3 70B) with a system prompt framing the AI as a
+              senior developer</li>
+            <li>Response is streamed back and displayed in the AI panel</li>
+            <li>The AI can suggest code edits, which the user can apply with one click — inserting directly into Monaco
+              editor</li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- ── Section 4 ── -->
+      <div class="section-header">
+        <div class="section-icon">🛠️</div>
+        <h2>Development Questions</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What challenges did you face while building the project?
+        </div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>WebContainer cold start</strong> — Takes ~30 seconds on first boot. Solved with a progress bar
+              and loading feedback.</li>
+            <li><strong>Real-time sync race conditions</strong> — File changes arriving out of order. Solved with
+              sequence IDs and last-write-wins for non-conflicting edits.</li>
+            <li><strong>Monaco model management</strong> — Multiple open files each need their own model. Moving between
+              tabs without re-rendering was complex.</li>
+            <li><strong>Terminal sync</strong> — Xterm.js terminals are not serializable state; syncing required
+              relaying raw output strings character by character via sockets.</li>
+            <li><strong>Socket room isolation</strong> — Ensuring two collaborators only see each other's events. Solved
+              using <code>session:${"{sessionId}"}</code> Socket.IO rooms.</li>
+            <li><strong>JWT + Socket.IO auth</strong> — Socket doesn't support cookies; JWT passed in handshake
+              <code>auth</code> field and verified in middleware.
+            </li>
+            <li><strong>Single-device login</strong> — Tracked a <code>loginSessionId</code> in the database and
+              validated it on every socket connection.</li>
+            <li><strong>Environment file privacy</strong> — Ensuring .env file syncs functionally but values are masked
+              for the partner — required tracking the envOwner socket ID.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How long did the development take?</div>
+        <div class="qa-answer">
+          <p>The full platform was built over approximately <strong>6–8 weeks</strong> of active development:</p>
+          <table>
+            <tr>
+              <th>Phase</th>
+              <th>Work Done</th>
+            </tr>
+            <tr>
+              <td>Week 1–2</td>
+              <td>Authentication, matchmaking engine, basic collaboration page</td>
+            </tr>
+            <tr>
+              <td>Week 3–4</td>
+              <td>IDE integration (Monaco + WebContainers), file tree, terminal</td>
+            </tr>
+            <tr>
+              <td>Week 5–6</td>
+              <td>Quick Chat, Friends system, DM, AI assistant</td>
+            </tr>
+            <tr>
+              <td>Week 7–8</td>
+              <td>Reputation system, performance tuning, security hardening, real-time sync fixes</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Section 5 ── -->
+      <div class="section-header">
+        <div class="section-icon">🔐</div>
+        <h2>Performance & Security</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How do you ensure system performance?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>WebContainers</strong> — Code runs client-side, zero server CPU for code execution</li>
+            <li><strong>Debounced sync</strong> — File changes batched every 1 second, not on every keystroke</li>
+            <li><strong>Monaco model caching</strong> — File models cached; switching tabs is instant</li>
+            <li><strong>React state minimization</strong> — Terminal output uses <code>useRef</code> to avoid re-renders
+              on each character</li>
+            <li><strong>Rate limiting</strong> — All API endpoints rate-limited via <code>express-rate-limit</code></li>
+            <li><strong>Indexed MongoDB queries</strong> — Key lookup fields (userId, participants, sessionId) are
+              indexed</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What security mechanisms are implemented?</div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Mechanism</th>
+              <th>Implementation</th>
+            </tr>
+            <tr>
+              <td>Authentication</td>
+              <td>JWT (HS256) with expiry time</td>
+            </tr>
+            <tr>
+              <td>Single-device login</td>
+              <td><code>loginSessionId</code> in DB, validated on every socket connection</td>
+            </tr>
+            <tr>
+              <td>CORS</td>
+              <td>Whitelisted origins only (Vercel URL + localhost)</td>
+            </tr>
+            <tr>
+              <td>Rate limiting</td>
+              <td><code>express-rate-limit</code> on all routes</td>
+            </tr>
+            <tr>
+              <td>Input validation</td>
+              <td><code>express-validator</code> for all POST endpoints</td>
+            </tr>
+            <tr>
+              <td>Content moderation</td>
+              <td>Chat messages scanned for harmful content before relay</td>
+            </tr>
+            <tr>
+              <td>Password hashing</td>
+              <td>bcryptjs with salt rounds</td>
+            </tr>
+            <tr>
+              <td>Env file privacy</td>
+              <td>Values masked for partner; excluded from ZIP downloads</td>
+            </tr>
+            <tr>
+              <td>File locking</td>
+              <td>Prevents two users from editing the same file simultaneously</td>
+            </tr>
+            <tr>
+              <td>Code sandboxing</td>
+              <td>WebContainers run in WASM browser sandbox — no server-side execution</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How do you prevent malicious code execution?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>WebContainers are sandboxed</strong> — Code runs in a browser WASM sandbox, completely isolated
+              from the server and other users' environments</li>
+            <li><strong>Each user has their own WebContainer</strong> — A malicious script cannot reach another user's
+              session</li>
+            <li><strong>No server-side execution</strong> — The backend (Render) never executes user code</li>
+            <li><strong>Content moderation</strong> — Chat messages filtered for harmful content before delivery</li>
+            <li><strong>File extension policies</strong> — Dangerous file types can be blocked at the IDE level</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── Section 6 ── -->
+      <div class="section-header">
+        <div class="section-icon">📈</div>
+        <h2>Scalability Questions</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>Can this system support thousands of users?</div>
+        <div class="qa-answer">
+          <p><strong>Currently</strong>, the single Render instance handles hundreds of simultaneous WebSocket
+            connections comfortably. For thousands of users, the architecture would evolve as follows:</p>
+          <ul>
+            <li>The Node.js + Socket.IO backend would be <strong>clustered</strong> using PM2 or Docker containers</li>
+            <li>MongoDB Atlas already scales horizontally with replica sets</li>
+            <li><strong>WebContainers run on the client</strong> — code execution adds zero server load regardless of
+              user count — this is PairOn's key scaling advantage</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How would you scale the platform in the future?</div>
+        <div class="qa-answer">
+          <pre>Users → Cloudflare CDN
+     → Load Balancer (AWS ALB)
+     → Multiple Node.js instances (ECS/EC2)
+     → Redis (Socket.IO Adapter + caching)
+     → MongoDB Atlas (M10+ cluster)
+     → S3 (for future file/project storage)
+     → Groq/OpenAI API (AI layer)</pre>
+          <p>Key step: replacing in-memory Socket.IO rooms with a <strong>Redis Adapter</strong> allows multiple backend
+            instances to share socket state and event routing.</p>
+        </div>
+      </div>
+
+      <!-- ── Section 7 ── -->
+      <div class="section-header">
+        <div class="section-icon">💼</div>
+        <h2>Business & Startup Questions</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>Can this project become a real startup?</div>
+        <div class="qa-answer">
+          <p><strong>Yes</strong> — there is a clear market gap. No existing platform combines matchmaking + browser IDE
+            + communication tools for developers. The closest competitor (Replit) charges for multiplayer and doesn't
+            offer matchmaking or community features.</p>
+          <p>The online coding education market was valued at <strong>$7.5 billion in 2024</strong> and is growing at
+            16% CAGR. Even capturing 0.1% at $10/month = <strong>$7.5 million ARR</strong>.</p>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What is the business model for PairOn?</div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Revenue Stream</th>
+              <th>Description</th>
+            </tr>
+            <tr>
+              <td>Freemium</td>
+              <td>Free tier with basic matching + 3hr sessions; paid for 24hr/7-day sessions</td>
+            </tr>
+            <tr>
+              <td>Credit Packs</td>
+              <td>Users purchase credits for premium features (longer sessions, AI usage)</td>
+            </tr>
+            <tr>
+              <td>PairOn Pro</td>
+              <td>Monthly subscription for unlimited sessions, priority matching, advanced AI</td>
+            </tr>
+            <tr>
+              <td>Institutional Licensing</td>
+              <td>Sell to coding bootcamps and universities for class collaboration</td>
+            </tr>
+            <tr>
+              <td>API Access</td>
+              <td>Expose the matchmaking and IDE API for third-party integrations</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>Who are your competitors?</div>
+        <div class="qa-answer">
+          <table>
+            <tr>
+              <th>Competitor</th>
+              <th>Overlap</th>
+              <th>PairOn Advantage</th>
+            </tr>
+            <tr>
+              <td>Replit</td>
+              <td>Browser IDE</td>
+              <td>Matchmaking, free collaboration, DMs</td>
+            </tr>
+            <tr>
+              <td>CodeSandbox</td>
+              <td>Browser IDE</td>
+              <td>Community, matchmaking, communication</td>
+            </tr>
+            <tr>
+              <td>VS Code Live Share</td>
+              <td>Code sync</td>
+              <td>Requires VS Code, no matchmaking</td>
+            </tr>
+            <tr>
+              <td>LeetCode</td>
+              <td>Developer community</td>
+              <td>No real collaboration or chat</td>
+            </tr>
+            <tr>
+              <td>Discord</td>
+              <td>Communication</td>
+              <td>No coding environment</td>
+            </tr>
+          </table>
+          <p><strong>Key insight:</strong> No single competitor does what PairOn does — the matchmaking + IDE +
+            communication combination is unique in the market.</p>
+        </div>
+      </div>
+
+      <!-- ── Section 8 ── -->
+      <div class="section-header">
+        <div class="section-icon">⚠️</div>
+        <h2>Limitations</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What are the limitations of your project?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>Browser support</strong> — WebContainers only work fully on Chromium-based browsers (Chrome,
+              Edge). Firefox and Safari have limited compatibility.</li>
+            <li><strong>Node.js ecosystem only</strong> — Languages like Python, Java, Go, and C++ cannot run in the
+              browser WebContainer (only JavaScript/Node.js ecosystem).</li>
+            <li><strong>Isolated WebContainers</strong> — Each user has their own WebContainer; <code>npm install</code>
+              in one user's environment doesn't automatically install in the partner's. They must each run it
+              independently.</li>
+            <li><strong>Performance on low-end devices</strong> — Running Monaco + WebContainers + WebSockets
+              simultaneously requires ~1–2GB RAM. May be slow on budget devices.</li>
+            <li><strong>Cold start delay</strong> — WebContainers take 20–30 seconds to initialize on first load.</li>
+            <li><strong>No video/voice calls</strong> — Collaboration is text and code only; no built-in video or audio
+              calling.</li>
+            <li><strong>localStorage persistence</strong> — Project files stored in browser localStorage, not in a cloud
+              file system, so they don't transfer between devices.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What problems still remain unsolved?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>True shared filesystem</strong> — Sharing one filesystem between two browser WebContainer
+              instances is architecturally impossible with the current WASM design. This is a fundamental limitation of
+              the WebContainers API itself, not just our implementation (same constraint StackBlitz faces).</li>
+            <li><strong>Code conflict resolution</strong> — If two users edit the same file line simultaneously, last
+              write wins. No CRDT/OT-based merging (like Google Docs uses) is implemented yet.</li>
+            <li><strong>Mobile support</strong> — Monaco Editor and WebContainers don't function well on mobile
+              browsers.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── Section 9 ── -->
+      <div class="section-header">
+        <div class="section-icon">🚀</div>
+        <h2>Future Scope</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What features can be added in the future?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>Video & Voice Calls</strong> — Integrate WebRTC for face-to-face pair programming</li>
+            <li><strong>Git Integration</strong> — Connect GitHub repositories; commit, push, pull from inside the IDE
+            </li>
+            <li><strong>AI Pair Programmer</strong> — An AI that actively writes code alongside you, not just answers
+              questions</li>
+            <li><strong>Code Review Mode</strong> — Partner leaves inline comments on your code with diff view</li>
+            <li><strong>Shared Cloud Filesystem</strong> — Files stored in S3/R2 so sessions resume on any device</li>
+            <li><strong>Mobile App</strong> — React Native companion app for Quick Chat and notifications</li>
+            <li><strong>Leaderboards</strong> — Weekly rankings by collaboration hours, reputation, and projects
+              completed</li>
+            <li><strong>Interview Mode</strong> — Structured pair programming rounds with problem statements</li>
+            <li><strong>Team Sessions</strong> — Expand from 2 users to 4–6 user collaborative sessions</li>
+            <li><strong>Multi-language support</strong> — Python, Java, C++ via server-side sandboxed execution (Judge0
+              API or Docker)</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── Section 10 ── -->
+      <div class="section-header">
+        <div class="section-icon">🎓</div>
+        <h2>Final Inspection Questions</h2>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What did you learn from building this project?</div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>Real-time systems are hard</strong> — Designing for race conditions, reconnections, and stale
+              state in multiplayer apps requires very careful architecture.</li>
+            <li><strong>Browser capabilities are expanding</strong> — WebContainers proved that running a full Node.js
+              server inside a browser tab is now possible, opening new product categories.</li>
+            <li><strong>Security at every layer</strong> — Even small features (like syncing .env files) have serious
+              security implications that must be thought through carefully.</li>
+            <li><strong>Optimistic UI matters</strong> — Immediate feedback (showing a message before server confirms)
+              dramatically improves perceived performance and user satisfaction.</li>
+            <li><strong>Monaco is complex</strong> — Properly managing multi-file models, language servers, type stubs,
+              and diagnostic suppression took significant effort.</li>
+            <li><strong>Design before code</strong> — Several features needed to be rearchitected because the initial
+              design didn't account for edge cases in real-time collaboration.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>What would you do differently if you rebuilt the project?
+        </div>
+        <div class="qa-answer">
+          <ul>
+            <li>Use <strong>CRDT (Yjs or Automerge)</strong> from day one for code sync instead of last-write-wins</li>
+            <li><strong>Separate the Socket.IO server</strong> from the REST API from the start — cleaner architecture
+              and independent scaling</li>
+            <li><strong>Design the file system as a tree</strong> from day one, not a flat key-value map</li>
+            <li>Use a <strong>shared cloud filesystem (S3/R2)</strong> instead of localStorage for project persistence
+            </li>
+            <li><strong>Add end-to-end tests</strong> from the beginning using Playwright or Cypress</li>
+            <li>Use <strong>TypeScript strict mode everywhere</strong> from day one to catch bugs earlier in development
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>Why should this project be considered innovative?</div>
+        <div class="qa-answer">
+          <p>PairOn stands out because it <strong>invents a new category</strong>: the <em>developer social +
+              collaboration platform</em>.</p>
+          <ul>
+            <li><strong>First to combine matchmaking with a browser IDE</strong> — no other platform does this</li>
+            <li><strong>WebContainers-powered pair programming</strong> — running Node.js in the browser for pair
+              sessions is cutting-edge</li>
+            <li><strong>Privacy-aware collaboration</strong> — .env file masking during live sessions is a novel UX
+              concept not seen anywhere else</li>
+            <li><strong>Gamified collaboration</strong> — reputation scores, credit system, and ratings for productive
+              sessions incentivize good collaboration</li>
+            <li><strong>Complete ecosystem</strong> — matches the breadth of VS Code (editor + terminal + extensions)
+              plus adds a social layer</li>
+          </ul>
+          <div class="highlight-box">
+            "PairOn is the only platform where a developer can go from 'I want to code with someone' to actively pair
+            programming with a matched partner in a live IDE in under 60 seconds — directly in the browser, for free."
+          </div>
+        </div>
+      </div>
+
+      <div class="qa-card">
+        <div class="qa-question"><span class="q-badge">Q</span>How is this project useful in real-world applications?
+        </div>
+        <div class="qa-answer">
+          <ul>
+            <li><strong>Education</strong> — Coding bootcamps can use PairOn for structured pair programming assignments
+            </li>
+            <li><strong>Hiring</strong> — Companies can use PairOn's interview mode to conduct live technical interviews
+            </li>
+            <li><strong>Open Source</strong> — Maintainers can pair with contributors to debug issues in real-time</li>
+            <li><strong>Remote Teams</strong> — Distributed dev teams can use it for quick code collaboration without
+              screen share setup</li>
+            <li><strong>Freelancing</strong> — Freelancers can collaborate with clients to demo and build features live
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+
+    <!-- Footer -->
+    <div class="doc-footer">
+      <span>📘 <strong>PairOn</strong> — Project Q&amp;A Documentation</span>
+      <span>Prepared for Academic Viva &amp; Presentation — March 2026</span>
+      <span>React + Node.js + WebContainers + Socket.IO + MongoDB</span>
+    </div>
+
+  </div><!-- /container -->
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+</body>
+<script>
+  function downloadPDF() {
+
+    const element = document.querySelector(".container");
+
+    const opt = {
+      margin: 0,
+      filename: "PairOn_Project_QA.pdf",
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(element).save();
+  }
+</script>
+
+</html>

@@ -53,17 +53,23 @@ export function MessagesPage() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const initialFriendId = searchParams.get('friendId');
+    const initialFriendName = searchParams.get('friendName') || 'Friend';
 
     const [threads, setThreads] = useState<Thread[]>([]);
-    const [activeThread, setActiveThread] = useState<{ threadId: string; partner: Thread['partner']; messages: DMMessage[] } | null>(null);
+    // Pre-open chat immediately if friendId is in URL
+    const [activeThread, setActiveThread] = useState<{ threadId: string; partner: Thread['partner']; messages: DMMessage[] } | null>(
+        initialFriendId
+            ? { threadId: '', partner: { id: initialFriendId, name: initialFriendName, reputation: 0 }, messages: [] }
+            : null
+    );
     const [newMessage, setNewMessage] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(!!initialFriendId); // show spinner inside chat if loading
     const [partnerTyping, setPartnerTyping] = useState(false);
     const [sendingMessage, setSendingMessage] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const activeFriendIdRef = useRef<string | null>(null);
+    const activeFriendIdRef = useRef<string | null>(initialFriendId);
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -80,10 +86,16 @@ export function MessagesPage() {
         } catch { /* */ }
     }, []);
 
-    // Open a specific thread
-    const openThread = useCallback(async (friendId: string) => {
+    // Open a specific thread (populates full data: threadId, messages, partner info)
+    const openThread = useCallback(async (friendId: string, partnerNameHint?: string) => {
         setLoading(true);
         activeFriendIdRef.current = friendId;
+        // Immediately show a placeholder so the chat panel is visible
+        setActiveThread(prev => prev?.partner.id === friendId ? prev : {
+            threadId: '',
+            partner: { id: friendId, name: partnerNameHint || 'Loading...', reputation: 0 },
+            messages: [],
+        });
         try {
             const res = await fetch(`${API}/api/dm/thread/${friendId}`, { headers: { Authorization: `Bearer ${getToken()}` } });
             if (res.ok) {
@@ -98,7 +110,8 @@ export function MessagesPage() {
 
     useEffect(() => {
         loadThreads();
-        if (initialFriendId) openThread(initialFriendId);
+        // Auto-open thread from URL param: data loads in background, chat is already visible
+        if (initialFriendId) openThread(initialFriendId, initialFriendName);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
@@ -243,17 +256,27 @@ export function MessagesPage() {
 
                     {/* Thread list */}
                     <div className="flex-1 overflow-y-auto">
-                        {filteredThreads.length === 0 && (
+                        {/* Show the currently active friend in sidebar if they're not in threads yet */}
+                        {activeThread && !filteredThreads.find(t => t.partner.id === activeThread.partner.id) && (
+                            <div className="w-full flex items-center gap-3 px-3 py-3 bg-indigo-500/10 border-r-2 border-indigo-500 cursor-default">
+                                <Avatar name={activeThread.partner.name} size="md" />
+                                <div className="flex-1 min-w-0">
+                                    <span className="text-sm font-medium text-white truncate block">{activeThread.partner.name}</span>
+                                    <p className="text-xs text-indigo-400 mt-0.5">New conversation</p>
+                                </div>
+                            </div>
+                        )}
+                        {filteredThreads.length === 0 && !activeThread && (
                             <div className="flex flex-col items-center justify-center h-48 text-center px-6">
                                 <MessageCircle className="w-8 h-8 text-gray-700 mb-2" />
-                                <p className="text-sm text-gray-600">No conversations yet.</p>
-                                <p className="text-xs text-gray-700 mt-1">Open a DM from your Friends list.</p>
+                                <p className="text-sm text-gray-500">No conversations yet.</p>
+                                <p className="text-xs text-gray-600 mt-1">Go to Friends and tap the chat icon.</p>
                             </div>
                         )}
                         {filteredThreads.map(thread => (
                             <button
                                 key={thread.threadId}
-                                onClick={() => { openThread(thread.partner.id); activeFriendIdRef.current = thread.partner.id; }}
+                                onClick={() => openThread(thread.partner.id, thread.partner.name)}
                                 className={`w-full flex items-center gap-3 px-3 py-3 hover:bg-white/5 transition-colors text-left ${activeThread?.partner.id === thread.partner.id ? 'bg-indigo-500/10 border-r-2 border-indigo-500' : ''}`}
                             >
                                 <div className="relative">
@@ -277,6 +300,7 @@ export function MessagesPage() {
                         ))}
                     </div>
                 </div>
+
 
                 {/* Main Chat Area */}
                 <div className="flex-1 flex flex-col min-w-0">
