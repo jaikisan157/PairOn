@@ -188,6 +188,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
     // Deletion undo history — each entry = snapshot of deleted files
     const deletionHistoryRef = useRef<Array<Record<string, string>>>([]);
+    const undoDeletionRef = useRef<() => void>(() => {});
     const [showClearConfirm, setShowClearConfirm] = useState(false);
 
     // formatFile ref for keyboard shortcut (avoids stale closure)
@@ -294,13 +295,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
                 if (!isEditor && !isInput) {
                     e.preventDefault();
-                    undoDeletion();
+                    undoDeletionRef.current();
                 }
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [undoDeletion]);
+    }, []);
 
     // Quick open filtered files
     const quickOpenFiles = Object.keys(files).filter(p =>
@@ -1047,6 +1048,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         }
         addToast(`↩ Restored ${Object.keys(last).length} file(s)`, 'success');
     }, [autosave, addToast]);
+    undoDeletionRef.current = undoDeletion;
 
     // Clear entire workspace
     const clearWorkspace = useCallback(() => {
