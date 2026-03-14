@@ -896,13 +896,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     if (prev['.env'] !== undefined) next['.env'] = prev['.env'];
                     return next;
                 });
-                // Update folders set
+                // Update folders set — REPLACE (not merge) so deleted folders disappear
                 const newFolders = new Set<string>();
                 for (const p of Object.keys(fsFiles)) {
                     const parts = p.split('/');
                     for (let i = 1; i < parts.length; i++) newFolders.add(parts.slice(0, i).join('/'));
                 }
-                setFolders(prev => { const n = new Set(prev); newFolders.forEach(f => n.add(f)); return n; });
+                setFolders(newFolders);
             };
 
             // Watch with debounce to avoid rapid re-renders on npm install etc.
@@ -1026,6 +1026,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             return next;
         });
         if (webcontainerRef.current) webcontainerRef.current.fs.rm(path, { recursive: true }).catch(() => { });
+        // Prune folders state — remove the deleted path and any sub-folders
+        setFolders(prev => {
+            const n = new Set(prev);
+            n.forEach(f => { if (f === path || f.startsWith(path + '/')) n.delete(f); });
+            return n;
+        });
         const socket = socketService.getSocket();
         socket?.emit('code:file-delete', { sessionId, path, senderId: socket?.id });
         setContextMenu(null);
@@ -1059,6 +1065,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         });
         setOpenTabs([]);
         setActiveFile('');
+        setFolders(new Set());
         modelsRef.current.forEach(m => { if (!m.isDisposed()) m.dispose(); });
         modelsRef.current.clear();
         // Wipe WebContainers FS (delete everything except node_modules)
@@ -1726,7 +1733,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
             }>
                 {/* File explorer */}
-                <div className="bg-[#0d1117] border-r border-gray-800 flex flex-col min-w-0 relative" >
+                <div className="bg-[#0d1117] border-r border-gray-800 flex flex-col min-w-0 overflow-hidden relative">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                             {showSearch ? 'Search' : 'Explorer'}
