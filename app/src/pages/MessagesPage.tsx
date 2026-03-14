@@ -141,7 +141,7 @@ export function MessagesPage() {
                 background: '#0d0e1a', flexShrink: 0,
             }}>
                 <button
-                    onClick={() => navigate('/friends')}
+                    onClick={() => navigate(-1)}
                     style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', display: 'flex', padding: 6, borderRadius: 8 }}
                 >
                     <ArrowLeft size={20} />

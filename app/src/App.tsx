@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { AuthProvider, ThemeProvider, MatchingProvider } from '@/context';
 import {
@@ -77,9 +77,9 @@ interface Toast {
 
 function GlobalNotifier() {
   const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [responding, setResponding] = useState<string | null>(null); // friendshipId being responded to
-  const [dmBadge, setDmBadge] = useState(0);
+  const [responding, setResponding] = useState<string | null>(null);
 
   const addToast = (t: Omit<Toast, 'id'>) => {
     const id = `toast-${Date.now()}`;
@@ -110,10 +110,9 @@ function GlobalNotifier() {
     });
 
     // New DM message (when not on messages page)
-    socket.on('dm:new-message', (data: { fromName: string; message: { content: string } }) => {
+    socket.on('dm:new-message', (data: { fromId: string; fromName: string; message: { content: string } }) => {
       const onMessagesPage = window.location.pathname === '/messages';
       if (!onMessagesPage) {
-        setDmBadge(prev => prev + 1);
         addToast({
           type: 'dm',
           title: `💬 ${data.fromName}`,
@@ -131,10 +130,6 @@ function GlobalNotifier() {
     };
   }, [isAuthenticated]);
 
-  // Clear DM badge when navigating to /messages
-  useEffect(() => {
-    if (window.location.pathname === '/messages') setDmBadge(0);
-  });
 
   const respond = async (friendshipId: string, action: 'accept' | 'decline', toastId: string) => {
     setResponding(friendshipId);
@@ -152,24 +147,6 @@ function GlobalNotifier() {
 
   return (
     <>
-      {/* DM badge — shown as a floating indicator */}
-      {dmBadge > 0 && (
-        <a
-          href="/messages"
-          onClick={() => setDmBadge(0)}
-          style={{
-            position: 'fixed', bottom: 24, right: 24, zIndex: 9998,
-            background: '#6366f1', color: 'white', borderRadius: 9999,
-            padding: '10px 16px', fontFamily: 'Inter, sans-serif',
-            fontSize: 13, fontWeight: 600, boxShadow: '0 4px 24px rgba(99,102,241,0.5)',
-            textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 8,
-            animation: 'pulse 2s ease infinite',
-          }}
-        >
-          💬 {dmBadge} new message{dmBadge > 1 ? 's' : ''}
-        </a>
-      )}
-
       {/* Toast stack */}
       <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', width: '100%', maxWidth: 360, pointerEvents: 'none' }}>
         {toasts.map(toast => (
@@ -181,6 +158,13 @@ function GlobalNotifier() {
               padding: '14px 16px', width: '100%', pointerEvents: 'all',
               animation: 'slideUp 0.3s ease',
               fontFamily: 'Inter, system-ui, sans-serif',
+              cursor: toast.type === 'dm' ? 'pointer' : 'default',
+            }}
+            onClick={() => {
+              if (toast.type === 'dm' && toast.data?.fromId) {
+                navigate(`/messages?friendId=${toast.data.fromId}&friendName=${encodeURIComponent(toast.data.fromName || '')}`);
+                removeToast(toast.id);
+              }
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>

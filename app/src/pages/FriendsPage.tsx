@@ -42,6 +42,39 @@ export function FriendsPage() {
     const [friendProposalMessage, setFriendProposalMessage] = useState('');
     const [friendProposalSent, setFriendProposalSent] = useState<string | null>(null);
 
+    // Per-friend unread DM counts: { [friendId]: count }
+    const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+
+    // Fetch unread counts from DM threads
+    useEffect(() => {
+        const token = localStorage.getItem('pairon_token') || '';
+        const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        fetch(`${API}/api/dm/threads`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.json())
+            .then(data => {
+                if (Array.isArray(data)) {
+                    const counts: Record<string, number> = {};
+                    data.forEach((t: any) => {
+                        if (t.partner?.id && t.unreadCount > 0) {
+                            counts[t.partner.id] = t.unreadCount;
+                        }
+                    });
+                    setUnreadCounts(counts);
+                }
+            })
+            .catch(() => {});
+
+        // Real-time: increment badge when new message arrives
+        const sock = socketService.getSocket();
+        if (sock) {
+            const handler = (data: { fromId: string }) => {
+                setUnreadCounts(prev => ({ ...prev, [data.fromId]: (prev[data.fromId] || 0) + 1 }));
+            };
+            sock.on('dm:new-message', handler);
+            return () => { sock.off('dm:new-message', handler); };
+        }
+    }, []);
+
     const loadData = useCallback(async () => {
         try {
             const [friendsRes, pendingRes] = await Promise.all([
@@ -215,15 +248,25 @@ export function FriendsPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => navigate(`/messages?friendId=${friend.id}&friendName=${encodeURIComponent(friend.name)}`)}
-                                            className="h-8 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                                            title="Send Message"
-                                        >
-                                            <MessageCircle className="w-3.5 h-3.5" />
-                                        </Button>
+                                        <div className="relative">
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => {
+                                                    setUnreadCounts(prev => ({ ...prev, [friend.id]: 0 }));
+                                                    navigate(`/messages?friendId=${friend.id}&friendName=${encodeURIComponent(friend.name)}`);
+                                                }}
+                                                className="h-8 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                                title="Send Message"
+                                            >
+                                                <MessageCircle className="w-3.5 h-3.5" />
+                                            </Button>
+                                            {(unreadCounts[friend.id] || 0) > 0 && (
+                                                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5 pointer-events-none">
+                                                    {unreadCounts[friend.id] > 99 ? '99+' : unreadCounts[friend.id]}
+                                                </span>
+                                            )}
+                                        </div>
                                         {!isMobileOrTablet() && friendProposalSent !== friend.id && (
                                             <Button
                                                 size="sm"

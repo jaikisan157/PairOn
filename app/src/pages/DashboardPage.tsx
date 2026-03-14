@@ -28,10 +28,10 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
+import { socketService } from '@/lib/socket';
 import { useTheme } from '@/context/ThemeContext';
 import { MATCH_MODES, CHALLENGE_RULES } from '@/data/constants';
 import { formatDuration } from '@/lib/utils';
-import { socketService } from '@/lib/socket';
 import { api } from '@/lib/api';
 import { isMobileOrTablet } from '@/lib/deviceDetect';
 import { playMatchSound } from '@/lib/audio';
@@ -69,6 +69,30 @@ export function DashboardPage() {
 
   // Session history
   const [sessionHistory, setSessionHistory] = useState<any[]>([]);
+
+  // Unread DM count for Friends icon badge
+  const [totalDmUnread, setTotalDmUnread] = useState(0);
+
+  useEffect(() => {
+    const token = localStorage.getItem('pairon_token') || '';
+    const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    fetch(`${API}/api/dm/threads`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          const total = data.reduce((sum: number, t: any) => sum + (t.unreadCount || 0), 0);
+          setTotalDmUnread(total);
+        }
+      })
+      .catch(() => {});
+
+    const sock = socketService.getSocket();
+    if (sock) {
+      const handler = () => setTotalDmUnread(prev => prev + 1);
+      sock.on('dm:new-message', handler);
+      return () => { sock.off('dm:new-message', handler); };
+    }
+  }, []);
 
   // Fetch online collaborator count
   useEffect(() => {
@@ -274,13 +298,22 @@ export function DashboardPage() {
               >
                 <MessageCircle className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
-              <button
-                onClick={() => navigate('/friends')}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title="Friends"
-              >
-                <Users className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => navigate('/friends')}
+                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  title="Friends"
+                >
+                  <Users className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                </button>
+                {totalDmUnread > 0 && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 pointer-events-none"
+                  >
+                    {totalDmUnread > 99 ? '99+' : totalDmUnread}
+                  </span>
+                )}
+              </div>
               <button
                 onClick={toggleTheme}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
