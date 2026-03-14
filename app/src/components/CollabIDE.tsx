@@ -1093,80 +1093,53 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 throw new Error(`GitHub API error (${createRes.status}): ${errDetails || msg || 'Failed to create repository'}`);
             }
 
-            // 3. Push all files via GitHub API (blob + tree + commit)
-            // Create blobs for every file (skip .env)
-            const filesToPush = Object.entries(files).filter(([p]) => !p.startsWith('.env'));
-
-            const blobs = await Promise.all(
-                filesToPush.map(async ([, content]) => {
-                    const blobRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs`, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({ content, encoding: 'utf-8' }),
-                    });
-                    const blob = await blobRes.json();
-                    return blob.sha as string;
-                })
-            );
-
-            // Create tree
-            const tree = filesToPush.map(([path], i) => ({
-                path,
-                mode: '100644' as const,
-                type: 'blob' as const,
-                sha: blobs[i],
-            }));
-
-            const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ tree }),
-            });
-            const treeData = await treeRes.json();
-
-            // Create commit
-            const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    message: `Initial commit — built on PairOn`,
-                    tree: treeData.sha,
-                    parents: [],
-                }),
-            });
-            const commitData = await commitRes.json();
-
-            // Create main branch ref
-            await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ ref: 'refs/heads/main', sha: commitData.sha }),
-            });
-
-            // Set default branch to main
-            await fetch(`https://api.github.com/repos/${owner}/${repoName}`, {
-                method: 'PATCH',
-                headers,
-                body: JSON.stringify({ default_branch: 'main' }),
-            });
-
-            // 4. Add partner as collaborator (if provided)
+            // 3. Add partner as collaborator (if provided)
             if (githubPartnerUsername.trim()) {
                 await fetch(
                     `https://api.github.com/repos/${owner}/${repoName}/collaborators/${githubPartnerUsername.trim()}`,
                     { method: 'PUT', headers, body: JSON.stringify({ permission: 'push' }) }
-                );
+                ).catch(() => { /* non-fatal */ });
             }
 
             const repoUrl = `https://github.com/${owner}/${repoName}`;
+            const remoteWithToken = `https://${githubToken.trim()}@github.com/${owner}/${repoName}.git`;
+
+            // 4. Run git commands in the terminal
             setGithubResult({ url: repoUrl, owner });
-            addToast('🎉 Project pushed to GitHub!', 'success');
+            setShowGithubModal(false);
+            addToast('🎉 Repo created! Running git push in terminal...', 'success');
+
+            // Switch to terminal tab
+            setActiveTermTab('shell');
+
+            // Write git commands to the active shell after small delay
+            await new Promise(r => setTimeout(r, 600));
+            const writer = shellWriterRef.current;
+            if (writer) {
+                const cmds = [
+                    'git init\n',
+                    'git add .\n',
+                    `git commit -m "Initial commit — built on PairOn"\n`,
+                    `git remote add origin ${remoteWithToken}\n`,
+                    'git branch -M main\n',
+                    'git push -u origin main\n',
+                ];
+                for (const cmd of cmds) {
+                    await writer.write(cmd);
+                    await new Promise(r => setTimeout(r, 400));
+                }
+            } else {
+                // Fallback: show commands in toast for user to copy-paste
+                addToast('Boot the terminal first, then run: git init && git add . && git commit -m "init" && git push', 'info');
+            }
+
+
         } catch (err: any) {
             addToast(err.message || 'Failed to push to GitHub', 'error');
         } finally {
             setGithubPushing(false);
         }
-    }, [githubToken, githubRepoName, githubPartnerUsername, files, projectTitle, addToast]);
+    }, [githubToken, githubRepoName, githubPartnerUsername, projectTitle, addToast, setActiveTermTab, setShowGithubModal]);
 
     // Build project
     const buildProject = useCallback(async () => {
