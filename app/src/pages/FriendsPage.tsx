@@ -216,13 +216,21 @@ export function FriendsPage() {
                                 </p>
                             </motion.div>
                         ) : (
-                            friends.map((friend, i) => (
+                            [...friends]
+                                .sort((a, b) => (unreadCounts[b.id] || 0) - (unreadCounts[a.id] || 0))
+                                .map((friend, i) => {
+                                const hasUnread = (unreadCounts[friend.id] || 0) > 0;
+                                return (
                                 <motion.div
                                     key={friend.id}
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: i * 0.05 }}
-                                    className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-pairon-accent/30 transition-colors"
+                                    className={`flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border transition-colors ${
+                                        hasUnread
+                                            ? 'border-indigo-400/60 dark:border-indigo-500/50 shadow-[0_0_0_1px_rgba(99,102,241,0.15)] border-l-4 border-l-indigo-500'
+                                            : 'border-gray-200 dark:border-gray-700 hover:border-pairon-accent/30'
+                                    }`}
                                 >
                                     <div className="flex items-center gap-3">
                                         <div className="relative">
@@ -237,7 +245,15 @@ export function FriendsPage() {
                                                 }`} />
                                         </div>
                                         <div>
-                                            <p className="font-semibold text-gray-900 dark:text-white text-sm">{friend.name}</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="font-semibold text-gray-900 dark:text-white text-sm">{friend.name}</p>
+                                                {hasUnread && (
+                                                    <span className="flex items-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block" />
+                                                        New
+                                                    </span>
+                                                )}
+                                            </div>
                                             <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                                                 <span>⭐ {friend.reputation}</span>
                                                 <span>·</span>
@@ -291,7 +307,8 @@ export function FriendsPage() {
                                         </Button>
                                     </div>
                                 </motion.div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 )}
