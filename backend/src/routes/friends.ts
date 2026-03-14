@@ -83,13 +83,12 @@ router.post(
 
 // ===== Accept friend request =====
 router.post(
-    '/accept',
+    '/:friendshipId/accept',
     authMiddleware,
-    [body('friendshipId').isString().notEmpty()],
     async (req: any, res: any) => {
         try {
             const userId = req.user?.userId;
-            const { friendshipId } = req.body;
+            const friendshipId = req.params.friendshipId || req.body.friendshipId;
 
             const friendship = await Friendship.findById(friendshipId);
             if (!friendship || friendship.recipientId !== userId || friendship.status !== 'pending') {
@@ -99,6 +98,16 @@ router.post(
             friendship.status = 'accepted';
             await friendship.save();
 
+            // 🔔 Notify the original requester that their request was accepted
+            const accepter = await User.findById(userId).select('name reputation').lean();
+            const io = getIo();
+            if (io && accepter) {
+                io.to(`user:${friendship.requesterId}`).emit('friend:request-accepted', {
+                    accepterName: (accepter as any).name,
+                    accepterId: userId,
+                });
+            }
+
             res.json({ message: 'Friend request accepted', friendship });
         } catch (error) {
             console.error('Accept friend error:', error);
@@ -107,15 +116,45 @@ router.post(
     }
 );
 
+// Also support legacy body-based accept
+router.post(
+    '/accept',
+    authMiddleware,
+    async (req: any, res: any) => {
+        req.params.friendshipId = req.body.friendshipId;
+        // redirect to path param handler by calling it inline
+        try {
+            const userId = req.user?.userId;
+            const friendshipId = req.body.friendshipId;
+            const friendship = await Friendship.findById(friendshipId);
+            if (!friendship || friendship.recipientId !== userId || friendship.status !== 'pending') {
+                return res.status(400).json({ message: 'Invalid friend request' });
+            }
+            friendship.status = 'accepted';
+            await friendship.save();
+            const accepter = await User.findById(userId).select('name reputation').lean();
+            const io = getIo();
+            if (io && accepter) {
+                io.to(`user:${friendship.requesterId}`).emit('friend:request-accepted', {
+                    accepterName: (accepter as any).name,
+                    accepterId: userId,
+                });
+            }
+            res.json({ message: 'Friend request accepted', friendship });
+        } catch (error) {
+            res.status(500).json({ message: 'Server error' });
+        }
+    }
+);
+
 // ===== Decline friend request =====
 router.post(
-    '/decline',
+    '/:friendshipId/decline',
     authMiddleware,
-    [body('friendshipId').isString().notEmpty()],
     async (req: any, res: any) => {
         try {
             const userId = req.user?.userId;
-            const { friendshipId } = req.body;
+            const friendshipId = req.params.friendshipId || req.body.friendshipId;
 
             const friendship = await Friendship.findById(friendshipId);
             if (!friendship || friendship.recipientId !== userId || friendship.status !== 'pending') {
@@ -125,9 +164,42 @@ router.post(
             friendship.status = 'declined';
             await friendship.save();
 
+            // 🔔 Notify requester their request was declined
+            const io = getIo();
+            if (io) {
+                io.to(`user:${friendship.requesterId}`).emit('friend:request-declined', {
+                    recipientId: userId,
+                });
+            }
+
             res.json({ message: 'Friend request declined' });
         } catch (error) {
             console.error('Decline friend error:', error);
+            res.status(500).json({ message: 'Server error' });
+        }
+    }
+);
+
+// Also support legacy body-based decline
+router.post(
+    '/decline',
+    authMiddleware,
+    async (req: any, res: any) => {
+        try {
+            const userId = req.user?.userId;
+            const friendshipId = req.body.friendshipId;
+            const friendship = await Friendship.findById(friendshipId);
+            if (!friendship || friendship.recipientId !== userId || friendship.status !== 'pending') {
+                return res.status(400).json({ message: 'Invalid friend request' });
+            }
+            friendship.status = 'declined';
+            await friendship.save();
+            const io = getIo();
+            if (io) {
+                io.to(`user:${friendship.requesterId}`).emit('friend:request-declined', { recipientId: userId });
+            }
+            res.json({ message: 'Friend request declined' });
+        } catch (error) {
             res.status(500).json({ message: 'Server error' });
         }
     }

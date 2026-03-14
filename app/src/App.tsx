@@ -59,7 +59,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ===== Global Friend Request Popup =====
+// ===== Global Notification System =====
 interface FriendNotif {
   friendshipId: string;
   requesterId: string;
@@ -67,93 +67,173 @@ interface FriendNotif {
   requesterReputation: number;
 }
 
-function FriendRequestNotifier() {
+interface Toast {
+  id: string;
+  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm';
+  title: string;
+  body: string;
+  data?: any;
+}
+
+function GlobalNotifier() {
   const { isAuthenticated } = useAuth();
-  const [notif, setNotif] = useState<FriendNotif | null>(null);
-  const [responding, setResponding] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [responding, setResponding] = useState<string | null>(null); // friendshipId being responded to
+  const [dmBadge, setDmBadge] = useState(0);
+
+  const addToast = (t: Omit<Toast, 'id'>) => {
+    const id = `toast-${Date.now()}`;
+    setToasts(prev => [...prev.slice(-2), { ...t, id }]); // max 3 toasts
+    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), 8000);
+  };
+
+  const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
 
   useEffect(() => {
     if (!isAuthenticated) return;
     const socket = socketService.getSocket();
     if (!socket) return;
 
-    const handler = (data: FriendNotif) => {
-      setNotif(data);
-      // Auto-dismiss after 12s
-      setTimeout(() => setNotif(null), 12000);
-    };
+    // Friend request received
+    socket.on('friend:request-received', (data: FriendNotif) => {
+      addToast({ type: 'friend-request', title: `${data.requesterName} sent you a friend request`, body: `⭐ ${data.requesterReputation} reputation`, data });
+    });
 
-    socket.on('friend:request-received', handler);
-    return () => { socket.off('friend:request-received', handler); };
+    // Friend request accepted — you sent a request and they accepted
+    socket.on('friend:request-accepted', (data: { accepterName: string }) => {
+      addToast({ type: 'friend-accepted', title: `${data.accepterName} accepted your friend request!`, body: '🎉 You are now friends' });
+    });
+
+    // Friend request declined
+    socket.on('friend:request-declined', () => {
+      addToast({ type: 'friend-declined', title: 'Friend request was declined', body: '' });
+    });
+
+    // New DM message (when not on messages page)
+    socket.on('dm:new-message', (data: { fromName: string; message: { content: string } }) => {
+      const onMessagesPage = window.location.pathname === '/messages';
+      if (!onMessagesPage) {
+        setDmBadge(prev => prev + 1);
+        addToast({
+          type: 'dm',
+          title: `💬 ${data.fromName}`,
+          body: data.message.content.slice(0, 60),
+          data,
+        });
+      }
+    });
+
+    return () => {
+      socket.off('friend:request-received');
+      socket.off('friend:request-accepted');
+      socket.off('friend:request-declined');
+      socket.off('dm:new-message');
+    };
   }, [isAuthenticated]);
 
-  const respond = async (action: 'accept' | 'decline') => {
-    if (!notif || responding) return;
-    setResponding(true);
+  // Clear DM badge when navigating to /messages
+  useEffect(() => {
+    if (window.location.pathname === '/messages') setDmBadge(0);
+  });
+
+  const respond = async (friendshipId: string, action: 'accept' | 'decline', toastId: string) => {
+    setResponding(friendshipId);
     try {
       const token = localStorage.getItem('pairon_token') || '';
       const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-      await fetch(`${API}/api/friends/${notif.friendshipId}/${action}`, {
+      await fetch(`${API}/api/friends/${friendshipId}/${action}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch { /* best effort */ }
-    setResponding(false);
-    setNotif(null);
+    setResponding(null);
+    removeToast(toastId);
   };
 
-  if (!notif) return null;
-
   return (
-    <div
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999]"
-      style={{ animation: 'slideUp 0.3s ease' }}
-    >
-      <div className="bg-[#1e2030] border border-indigo-500/40 rounded-2xl shadow-2xl px-5 py-4 flex items-center gap-4 max-w-sm w-full">
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-          {notif.requesterName.charAt(0).toUpperCase()}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white truncate">{notif.requesterName}</p>
-          <p className="text-xs text-gray-400">sent you a friend request · ⭐ {notif.requesterReputation}</p>
-          <div className="flex gap-2 mt-2">
-            <button
-              onClick={() => respond('accept')}
-              disabled={responding}
-              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs rounded-lg font-medium transition-colors"
-            >
-              ✓ Accept
-            </button>
-            <button
-              onClick={() => respond('decline')}
-              disabled={responding}
-              className="px-3 py-1 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-gray-300 text-xs rounded-lg font-medium transition-colors"
-            >
-              ✗ Decline
-            </button>
-          </div>
-        </div>
-        <button
-          onClick={() => setNotif(null)}
-          className="text-gray-600 hover:text-gray-400 text-lg flex-shrink-0 self-start"
+    <>
+      {/* DM badge — shown as a floating indicator */}
+      {dmBadge > 0 && (
+        <a
+          href="/messages"
+          onClick={() => setDmBadge(0)}
+          style={{
+            position: 'fixed', bottom: 24, right: 24, zIndex: 9998,
+            background: '#6366f1', color: 'white', borderRadius: 9999,
+            padding: '10px 16px', fontFamily: 'Inter, sans-serif',
+            fontSize: 13, fontWeight: 600, boxShadow: '0 4px 24px rgba(99,102,241,0.5)',
+            textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 8,
+            animation: 'pulse 2s ease infinite',
+          }}
         >
-          ✕
-        </button>
+          💬 {dmBadge} new message{dmBadge > 1 ? 's' : ''}
+        </a>
+      )}
+
+      {/* Toast stack */}
+      <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', width: '100%', maxWidth: 360, pointerEvents: 'none' }}>
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            style={{
+              background: '#1e2030', border: `1px solid ${toast.type === 'friend-request' ? 'rgba(99,102,241,0.4)' : toast.type === 'friend-accepted' ? 'rgba(16,185,129,0.4)' : toast.type === 'friend-declined' ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.3)'}`,
+              borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              padding: '14px 16px', width: '100%', pointerEvents: 'all',
+              animation: 'slideUp 0.3s ease',
+              fontFamily: 'Inter, system-ui, sans-serif',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              {/* Icon */}
+              <div style={{
+                width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' ? 'rgba(239,68,68,0.2)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
+              }}>
+                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' ? '✓' : toast.type === 'friend-declined' ? '✗' : '💬'}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: 'white', fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{toast.title}</div>
+                {toast.body && <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{toast.body}</div>}
+
+                {/* Actions for friend request */}
+                {toast.type === 'friend-request' && toast.data && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => respond(toast.data.friendshipId, 'accept', toast.id)}
+                      disabled={responding === toast.data.friendshipId}
+                      style={{ padding: '5px 14px', background: '#6366f1', color: 'white', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: responding === toast.data.friendshipId ? 0.6 : 1 }}
+                    >
+                      ✓ Accept
+                    </button>
+                    <button
+                      onClick={() => respond(toast.data.friendshipId, 'decline', toast.id)}
+                      disabled={responding === toast.data.friendshipId}
+                      style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      ✗ Decline
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <button onClick={() => removeToast(toast.id)} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 16, padding: 0, flexShrink: 0 }}>✕</button>
+            </div>
+          </div>
+        ))}
       </div>
       <style>{`
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%, 100% { box-shadow: 0 4px 24px rgba(99,102,241,0.5); } 50% { box-shadow: 0 4px 32px rgba(99,102,241,0.9); } }
       `}</style>
-    </div>
+    </>
   );
 }
 
 function AppRoutes() {
   return (
     <>
-      <FriendRequestNotifier />
+      <GlobalNotifier />
       <Routes>
         <Route path="/" element={<PublicRoute><LandingPage /></PublicRoute>} />
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
@@ -174,6 +254,7 @@ function AppRoutes() {
     </>
   );
 }
+
 
 function App() {
   return (
