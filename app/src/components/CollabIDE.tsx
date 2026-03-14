@@ -8,7 +8,7 @@ import {
     FolderOpen, Folder, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
     Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer, Info,
-    MoreVertical, Search, Package, Settings2, AlertTriangle,
+    MoreVertical, Search, Package, Settings2, AlertTriangle, RotateCcw,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
@@ -186,6 +186,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [githubPushing, setGithubPushing] = useState(false);
     const [githubResult, setGithubResult] = useState<{ url: string; owner: string } | null>(null);
 
+    // Deletion undo history — each entry = snapshot of deleted files
+    const deletionHistoryRef = useRef<Array<Record<string, string>>>([]);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+
     // formatFile ref for keyboard shortcut (avoids stale closure)
     const formatFileRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
@@ -283,10 +287,20 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
             if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); setFontSize(s => Math.min(s + 1, 28)); }
             if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); setFontSize(s => Math.max(s - 1, 10)); }
+            // Ctrl+Z: undo file deletion (only when Monaco editor is NOT focused)
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                const active = document.activeElement;
+                const isEditor = active?.closest('.monaco-editor');
+                const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+                if (!isEditor && !isInput) {
+                    e.preventDefault();
+                    undoDeletion();
+                }
+            }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+    }, [undoDeletion]);
 
     // Quick open filtered files
     const quickOpenFiles = Object.keys(files).filter(p =>
@@ -985,13 +999,21 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     }, [sessionId, autosave, switchToFile, addToast]);
 
     const deleteFile = useCallback((path: string) => {
-        // Delete all files with this prefix (handles directories)
+        // Save snapshot of deleted files for undo
+        const snapshot: Record<string, string> = {};
         setFiles(prev => {
+            Object.entries(prev).forEach(([p, c]) => {
+                if (p === path || p.startsWith(path + '/')) snapshot[p] = c;
+            });
             const next = { ...prev };
-            Object.keys(next).forEach(p => { if (p === path || p.startsWith(path + '/')) delete next[p]; });
+            Object.keys(snapshot).forEach(p => delete next[p]);
             autosave(next);
             return next;
         });
+        if (Object.keys(snapshot).length > 0) {
+            deletionHistoryRef.current = [...deletionHistoryRef.current.slice(-19), snapshot];
+            addToast(`🗑 Deleted — press Ctrl+Z to undo`, 'info');
+        }
         // Dispose models
         for (const [p, model] of modelsRef.current) {
             if (p === path || p.startsWith(path + '/')) { if (!model.isDisposed()) model.dispose(); modelsRef.current.delete(p); }
@@ -1006,7 +1028,51 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const socket = socketService.getSocket();
         socket?.emit('code:file-delete', { sessionId, path, senderId: socket?.id });
         setContextMenu(null);
-    }, [sessionId, activeFile, autosave]);
+    }, [sessionId, activeFile, autosave, addToast]);
+
+    // Undo last deletion (Ctrl+Z on file deletions)
+    const undoDeletion = useCallback(() => {
+        const history = deletionHistoryRef.current;
+        if (history.length === 0) return;
+        const last = history[history.length - 1];
+        deletionHistoryRef.current = history.slice(0, -1);
+        setFiles(prev => { const next = { ...prev, ...last }; autosave(next); return next; });
+        // Re-write to WebContainers FS
+        if (webcontainerRef.current) {
+            Object.entries(last).forEach(([p, c]) => {
+                const dir = p.split('/').slice(0, -1).join('/');
+                if (dir) webcontainerRef.current!.fs.mkdir(dir, { recursive: true }).catch(() => {});
+                webcontainerRef.current!.fs.writeFile(p, c).catch(() => {});
+            });
+        }
+        addToast(`↩ Restored ${Object.keys(last).length} file(s)`, 'success');
+    }, [autosave, addToast]);
+
+    // Clear entire workspace
+    const clearWorkspace = useCallback(() => {
+        // Save entire workspace to history first
+        setFiles(prev => {
+            deletionHistoryRef.current = [...deletionHistoryRef.current.slice(-19), { ...prev }];
+            return {};
+        });
+        setOpenTabs([]);
+        setActiveFile('');
+        modelsRef.current.forEach(m => { if (!m.isDisposed()) m.dispose(); });
+        modelsRef.current.clear();
+        // Wipe WebContainers FS (delete everything except node_modules)
+        if (webcontainerRef.current) {
+            webcontainerRef.current.fs.readdir('.', { withFileTypes: true }).then(entries => {
+                entries.forEach(e => {
+                    if (e.name !== 'node_modules') {
+                        webcontainerRef.current!.fs.rm(e.name, { recursive: true }).catch(() => {});
+                    }
+                });
+            }).catch(() => {});
+        }
+        setShowClearConfirm(false);
+        addToast('🗑 Workspace cleared — press Ctrl+Z to undo', 'info');
+    }, [addToast]);
+
 
     const renameFile = useCallback((oldPath: string, newName: string) => {
         if (!newName.trim()) { setRenamingPath(null); return; }
@@ -1672,6 +1738,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             {!showSearch && <>
                                 <button onClick={() => { setShowNewFile(true); setNewFileParent(''); setNewItemType('folder'); setNewFileName(''); }} className="p-0.5 text-gray-500 hover:text-white rounded" title="New folder"><FolderPlus className="w-3.5 h-3.5" /></button>
                                 <button onClick={() => { setShowNewFile(true); setNewFileParent(''); setNewItemType('file'); setNewFileName(''); }} className="p-0.5 text-gray-500 hover:text-white rounded" title="New file"><Plus className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => undoDeletion()} className="p-0.5 text-gray-500 hover:text-yellow-400 rounded" title="Undo last deletion (Ctrl+Z)"><RotateCcw className="w-3 h-3" /></button>
+                                <button onClick={() => setShowClearConfirm(true)} className="p-0.5 text-gray-500 hover:text-red-400 rounded" title="Clear workspace (delete all files)"><Trash2 className="w-3.5 h-3.5" /></button>
                             </>}
                         </div>
                     </div>
@@ -1710,7 +1778,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         </div>
                     )}
                     {!showSearch && (
-                        <div className="p-1 overflow-y-auto flex-1" style={{ minHeight: 0 }}>
+                        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto p-1">
+                            {/* Clear confirm bar */}
+                            {showClearConfirm && (
+                                <div className="mb-1 px-2 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center justify-between gap-2 flex-shrink-0">
+                                    <span className="text-[10px] text-red-400">Delete all files?</span>
+                                    <div className="flex gap-1">
+                                        <button onClick={clearWorkspace} className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white text-[10px] rounded transition-colors">Clear</button>
+                                        <button onClick={() => setShowClearConfirm(false)} className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-white text-[10px] rounded transition-colors">Cancel</button>
+                                    </div>
+                                </div>
+                            )}
                             {/* VS Code-style: project name as root folder, always expanded */}
                             <div>
                                 <div className="flex items-center gap-1 px-2 py-1 text-xs text-gray-300 font-semibold hover:bg-[#1e2030] rounded cursor-default group"
