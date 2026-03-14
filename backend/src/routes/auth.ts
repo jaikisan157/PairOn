@@ -4,7 +4,7 @@ import { body, validationResult } from 'express-validator';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import { User } from '../models';
-import { generateToken } from '../middleware/auth';
+import { generateToken, authMiddleware } from '../middleware/auth';
 import { storeOTP, verifyOTP, sendOTPEmail } from '../utils/otp';
 
 const router = Router();
@@ -33,6 +33,7 @@ function safeUserResponse(user: any) {
     isOnline: user.isOnline,
     lastActive: user.lastActive,
     previousMatches: user.previousMatches,
+    githubUsername: user.githubUsername || null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -317,6 +318,110 @@ router.get('/me', async (req: any, res: any) => {
   } catch (error) {
     console.error('Get me error:', error);
     res.status(401).json({ message: 'Invalid token' });
+  }
+});
+
+// ===== GitHub OAuth — Step 1: Redirect to GitHub =====
+router.get('/github/connect', authMiddleware, (req: any, res: any) => {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  if (!clientId) return res.status(500).json({ message: 'GitHub OAuth not configured' });
+  const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+  const redirectUri = `${backendUrl}/api/auth/github/callback`;
+  const state = (req as any).user?.userId || crypto.randomUUID();
+  const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=repo&state=${state}`;
+  res.json({ url });
+});
+
+// ===== GitHub OAuth — Step 2: Callback (GitHub redirects here) =====
+router.get('/github/callback', async (req: any, res: any) => {
+  const { code, state } = req.query;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  if (!code) {
+    return res.redirect(`${frontendUrl}/profile?github=error&reason=no_code`);
+  }
+
+  try {
+    // Exchange code for access token
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: `${process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`}/api/auth/github/callback`,
+      }),
+    });
+    const tokenData = await tokenRes.json() as any;
+
+    if (tokenData.error || !tokenData.access_token) {
+      return res.redirect(`${frontendUrl}/profile?github=error&reason=${tokenData.error || 'no_token'}`);
+    }
+
+    // Get GitHub user info
+    const ghUserRes = await fetch('https://api.github.com/user', {
+      headers: { Authorization: `token ${tokenData.access_token}`, Accept: 'application/vnd.github+json' },
+    });
+    const ghUser = await ghUserRes.json() as any;
+
+    // Find PairOn user by state (userId)
+    const user = await User.findById(state as string);
+    if (!user) {
+      return res.redirect(`${frontendUrl}/profile?github=error&reason=user_not_found`);
+    }
+
+    // Save token + GitHub username
+    user.githubAccessToken = tokenData.access_token;
+    user.githubUsername = ghUser.login || '';
+    await user.save();
+
+    console.log(`✅ GitHub connected for user ${user.email} → @${ghUser.login}`);
+    res.redirect(`${frontendUrl}/profile?github=success&username=${ghUser.login}`);
+  } catch (err) {
+    console.error('GitHub OAuth callback error:', err);
+    res.redirect(`${frontendUrl}/profile?github=error&reason=server_error`);
+  }
+});
+
+// ===== GitHub OAuth — Status: is user connected? =====
+router.get('/github/status', authMiddleware, async (req: any, res: any) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({
+      connected: !!user.githubAccessToken,
+      username: user.githubUsername || null,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ===== GitHub OAuth — Get token for IDE use =====
+router.get('/github/token', authMiddleware, async (req: any, res: any) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user || !user.githubAccessToken) {
+      return res.status(404).json({ message: 'GitHub not connected', connected: false });
+    }
+    res.json({ token: user.githubAccessToken, username: user.githubUsername });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ===== GitHub OAuth — Disconnect =====
+router.delete('/github/disconnect', authMiddleware, async (req: any, res: any) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    user.githubAccessToken = undefined;
+    user.githubUsername = undefined;
+    await user.save();
+    res.json({ message: 'GitHub disconnected' });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

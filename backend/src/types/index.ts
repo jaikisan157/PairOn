@@ -26,6 +26,8 @@ export interface IUser extends Document {
   chatPriority: number;
   onboardingComplete: boolean;
   googleId?: string;
+  githubAccessToken?: string;
+  githubUsername?: string;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;

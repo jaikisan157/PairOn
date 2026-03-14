@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -27,6 +27,29 @@ export function ProfilePage() {
   const { theme, toggleTheme } = useTheme();
   const [isEditing, setIsEditing] = useState(false);
   const [editedUser, setEditedUser] = useState(user);
+  const [searchParams] = useSearchParams();
+  const [githubStatus, setGithubStatus] = useState<{ connected: boolean; username: string | null } | null>(null);
+  const [githubConnecting, setGithubConnecting] = useState(false);
+  const [githubMsg, setGithubMsg] = useState('');
+
+  // Fetch GitHub connection status
+  useEffect(() => {
+    const token = localStorage.getItem('pairon_token') || '';
+    const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    fetch(`${API}/api/auth/github/status`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => setGithubStatus(data))
+      .catch(() => {});
+    // Handle OAuth callback result
+    const ghParam = searchParams.get('github');
+    if (ghParam === 'success') {
+      const uname = searchParams.get('username') || '';
+      setGithubMsg(`✓ GitHub connected${uname ? ` as @${uname}` : ''}!`);
+      setGithubStatus({ connected: true, username: uname });
+    } else if (ghParam === 'error') {
+      setGithubMsg(`GitHub connection failed: ${searchParams.get('reason') || 'unknown error'}`);
+    }
+  }, []);
 
   const handleSave = async () => {
     if (editedUser) {
@@ -298,6 +321,65 @@ export function ProfilePage() {
                 ) : (
                   <p className="text-gray-500">No interests added yet.</p>
                 )}
+              </div>
+            )}
+          </motion.div>
+
+          {/* GitHub Integration */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            className="bg-white dark:bg-gray-800 rounded-[28px] shadow-card p-8 mb-8"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+              <h3 className="font-display text-lg font-semibold text-gray-900 dark:text-white">GitHub Integration</h3>
+            </div>
+
+            {githubMsg && (
+              <p className={`text-sm mb-4 font-medium ${githubMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{githubMsg}</p>
+            )}
+
+            {githubStatus?.connected ? (
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-green-600 dark:text-green-400 font-semibold">✓ Connected as <span className="font-mono">@{githubStatus.username}</span></p>
+                  <p className="text-xs text-gray-500 mt-1">Your GitHub account is linked. Push to GitHub works from the IDE.</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const token = localStorage.getItem('pairon_token') || '';
+                    const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+                    await fetch(`${API}/api/auth/github/disconnect`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                    setGithubStatus({ connected: false, username: null });
+                    setGithubMsg('GitHub disconnected.');
+                  }}
+                  className="text-xs text-red-500 hover:text-red-600 border border-red-200 dark:border-red-800 px-3 py-1.5 rounded-xl transition-colors"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Connect your GitHub account to push projects directly from the IDE — no tokens needed.</p>
+                <button
+                  disabled={githubConnecting}
+                  onClick={async () => {
+                    setGithubConnecting(true);
+                    const token = localStorage.getItem('pairon_token') || '';
+                    const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+                    const res = await fetch(`${API}/api/auth/github/connect`, { headers: { Authorization: `Bearer ${token}` } });
+                    const data = await res.json();
+                    if (data.url) window.location.href = data.url;
+                    else setGithubMsg('GitHub OAuth not configured on server.');
+                    setGithubConnecting(false);
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                  {githubConnecting ? 'Redirecting...' : 'Connect GitHub'}
+                </button>
               </div>
             )}
           </motion.div>

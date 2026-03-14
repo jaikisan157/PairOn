@@ -114,6 +114,14 @@ const UserSchema = new Schema<IUser>(
       type: String,
       default: null,
     },
+    githubAccessToken: {
+      type: String,
+      default: null,
+    },
+    githubUsername: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
