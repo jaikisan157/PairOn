@@ -838,6 +838,71 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             setBootProgress(100);
             setIsBooting(false);
             if (term) term.writeln('\x1b[32m✓ Shell ready — you can type commands now\x1b[0m\n');
+
+            // ── Filesystem watcher: sync terminal changes → file tree ──
+            // Watch every FS event and reconcile React file state so that
+            // files created/deleted in terminal show up (or disappear) in the tree.
+            const IGNORED = (p: string) =>
+                p.includes('node_modules') || p.includes('/.git/') || p === '.git';
+
+            const syncFsToTree = async () => {
+                if (!wc) return;
+                // Recursively read all files from WebContainers FS
+                const readDir = async (dir: string): Promise<Record<string, string>> => {
+                    const result: Record<string, string> = {};
+                    try {
+                        const entries = await wc.fs.readdir(dir, { withFileTypes: true });
+                        for (const entry of entries) {
+                            const fullPath = dir === '.' ? entry.name : `${dir}/${entry.name}`;
+                            if (IGNORED(fullPath)) continue;
+                            if (entry.isDirectory()) {
+                                const sub = await readDir(fullPath);
+                                Object.assign(result, sub);
+                            } else {
+                                try {
+                                    const content = await wc.fs.readFile(fullPath, 'utf-8');
+                                    result[fullPath] = content;
+                                } catch { /* binary or unreadable */ }
+                            }
+                        }
+                    } catch { /* dir may not exist */ }
+                    return result;
+                };
+
+                const fsFiles = await readDir('.');
+                setFiles(prev => {
+                    // Merge: keep existing editor content for unchanged files,
+                    // add new ones, remove deleted ones (but never remove .env)
+                    const next: Record<string, string> = {};
+                    for (const [p, content] of Object.entries(fsFiles)) {
+                        next[p] = prev[p] !== undefined ? prev[p] : content;
+                    }
+                    // Keep .env if it existed in prev
+                    if (prev['.env'] !== undefined) next['.env'] = prev['.env'];
+                    return next;
+                });
+                // Update folders set
+                const newFolders = new Set<string>();
+                for (const p of Object.keys(fsFiles)) {
+                    const parts = p.split('/');
+                    for (let i = 1; i < parts.length; i++) newFolders.add(parts.slice(0, i).join('/'));
+                }
+                setFolders(prev => { const n = new Set(prev); newFolders.forEach(f => n.add(f)); return n; });
+            };
+
+            // Watch with debounce to avoid rapid re-renders on npm install etc.
+            let watchTimer: ReturnType<typeof setTimeout> | null = null;
+            try {
+                wc.fs.watch('/', { recursive: true }, (_event: string, filename: string | Uint8Array | null) => {
+                    const name = filename ? (typeof filename === 'string' ? filename : new TextDecoder().decode(filename)) : '';
+                    if (!name || IGNORED(name)) return;
+                    if (watchTimer) clearTimeout(watchTimer);
+                    watchTimer = setTimeout(syncFsToTree, 800);
+                });
+            } catch {
+                // fs.watch may not be available in older WebContainer versions — silent fail
+            }
+
         } catch (err: any) {
             if (term) { term.writeln(`\x1b[31m✗ Failed: ${err.message}\x1b[0m`); term.writeln('\x1b[33mℹ Requires Chromium browser\x1b[0m'); }
             setIsBooting(false);
