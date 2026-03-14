@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
 import { User } from '../models';
 import { Friendship } from '../models/Friend';
+import { DirectMessage } from '../models';
 import { authMiddleware } from '../middleware/auth';
 import { getIo } from '../lib/ioInstance';
 
@@ -150,7 +151,17 @@ router.delete(
                 return res.status(403).json({ message: 'Not authorized' });
             }
 
+            // Find the other person's ID
+            const otherId = friendship.requesterId === userId
+                ? friendship.recipientId
+                : friendship.requesterId;
+
             await Friendship.findByIdAndDelete(friendshipId);
+
+            // Delete the DM thread between these two users
+            const pair = [userId, otherId].sort();
+            await DirectMessage.deleteOne({ participants: { $all: pair, $size: 2 } }).catch(() => {});
+
             res.json({ message: 'Friend removed' });
         } catch (error) {
             console.error('Remove friend error:', error);

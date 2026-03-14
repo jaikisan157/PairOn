@@ -17,7 +17,6 @@ import {
 } from '@/pages';
 import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
-import { useNavigate } from 'react-router-dom';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -70,8 +69,8 @@ interface FriendNotif {
 
 function FriendRequestNotifier() {
   const { isAuthenticated } = useAuth();
-  const navigate = useNavigate();
   const [notif, setNotif] = useState<FriendNotif | null>(null);
+  const [responding, setResponding] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -80,48 +79,71 @@ function FriendRequestNotifier() {
 
     const handler = (data: FriendNotif) => {
       setNotif(data);
-      // Auto-dismiss after 8s
-      setTimeout(() => setNotif(null), 8000);
+      // Auto-dismiss after 12s
+      setTimeout(() => setNotif(null), 12000);
     };
 
     socket.on('friend:request-received', handler);
     return () => { socket.off('friend:request-received', handler); };
   }, [isAuthenticated]);
 
+  const respond = async (action: 'accept' | 'decline') => {
+    if (!notif || responding) return;
+    setResponding(true);
+    try {
+      const token = localStorage.getItem('pairon_token') || '';
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      await fetch(`${API}/api/friends/${notif.friendshipId}/${action}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch { /* best effort */ }
+    setResponding(false);
+    setNotif(null);
+  };
+
   if (!notif) return null;
 
   return (
     <div
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] animate-slide-up"
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999]"
       style={{ animation: 'slideUp 0.3s ease' }}
     >
-      <div className="bg-[#1e2030] border border-indigo-500/40 rounded-2xl shadow-2xl px-5 py-4 flex items-center gap-4 max-w-sm">
+      <div className="bg-[#1e2030] border border-indigo-500/40 rounded-2xl shadow-2xl px-5 py-4 flex items-center gap-4 max-w-sm w-full">
         <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
           {notif.requesterName.charAt(0).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-white truncate">{notif.requesterName}</p>
           <p className="text-xs text-gray-400">sent you a friend request · ⭐ {notif.requesterReputation}</p>
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => respond('accept')}
+              disabled={responding}
+              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs rounded-lg font-medium transition-colors"
+            >
+              ✓ Accept
+            </button>
+            <button
+              onClick={() => respond('decline')}
+              disabled={responding}
+              className="px-3 py-1 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-gray-300 text-xs rounded-lg font-medium transition-colors"
+            >
+              ✗ Decline
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
-          <button
-            onClick={() => { navigate('/friends'); setNotif(null); }}
-            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-lg font-medium transition-colors"
-          >
-            View
-          </button>
-          <button
-            onClick={() => setNotif(null)}
-            className="px-2 py-1.5 text-gray-500 hover:text-white text-xs rounded-lg transition-colors"
-          >
-            ✕
-          </button>
-        </div>
+        <button
+          onClick={() => setNotif(null)}
+          className="text-gray-600 hover:text-gray-400 text-lg flex-shrink-0 self-start"
+        >
+          ✕
+        </button>
       </div>
       <style>{`
         @keyframes slideUp {
           from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </div>
