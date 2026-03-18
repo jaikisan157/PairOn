@@ -76,6 +76,9 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Trust Render's reverse proxy (fixes express-rate-limit X-Forwarded-For error)
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors({
   origin: (origin, callback) => {
