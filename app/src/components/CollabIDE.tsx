@@ -1088,21 +1088,27 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     }, [sessionId, autosave, switchToFile, addToast]);
 
     const deleteFile = useCallback((path: string) => {
-        // Save snapshot of deleted files for undo
+        const socket = socketService.getSocket();
+
+        // Snapshot deleted files SYNCHRONOUSLY from ref (setFiles updater is async in React 18)
         const snapshot: Record<string, string> = {};
+        Object.entries(filesRef.current).forEach(([p, c]) => {
+            if (p === path || p.startsWith(path + '/')) snapshot[p] = c;
+        });
+
+        // Update React state
         setFiles(prev => {
-            Object.entries(prev).forEach(([p, c]) => {
-                if (p === path || p.startsWith(path + '/')) snapshot[p] = c;
-            });
             const next = { ...prev };
             Object.keys(snapshot).forEach(p => delete next[p]);
             autosave(next);
             return next;
         });
+
         if (Object.keys(snapshot).length > 0) {
             deletionHistoryRef.current = [...deletionHistoryRef.current.slice(-19), snapshot];
             addToast(`🗑 Deleted — press Ctrl+Z to undo`, 'info');
         }
+
         // Dispose models
         for (const [p, model] of modelsRef.current) {
             if (p === path || p.startsWith(path + '/')) { if (!model.isDisposed()) model.dispose(); modelsRef.current.delete(p); }
@@ -1114,14 +1120,24 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             return next;
         });
         if (webcontainerRef.current) webcontainerRef.current.fs.rm(path, { recursive: true }).catch(() => { });
-        // Prune folders state — remove the deleted path and any sub-folders
+        // Prune folders state
         setFolders(prev => {
             const n = new Set(prev);
             n.forEach(f => { if (f === path || f.startsWith(path + '/')) n.delete(f); });
             return n;
         });
-        const socket = socketService.getSocket();
-        socket?.emit('code:file-delete', { sessionId, path, senderId: socket?.id });
+
+        // Emit individual delete events for EACH file (not just the folder path)
+        // Partner's handler needs exact file paths to remove them from their state
+        const filesToDelete = Object.keys(snapshot);
+        if (filesToDelete.length > 0) {
+            filesToDelete.forEach(p => {
+                socket?.emit('code:file-delete', { sessionId, path: p, senderId: socket?.id });
+            });
+        } else {
+            // It's an empty folder — still tell partner to remove it
+            socket?.emit('code:file-delete', { sessionId, path, senderId: socket?.id });
+        }
         setContextMenu(null);
     }, [sessionId, activeFile, autosave, addToast]);
 
