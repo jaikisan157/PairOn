@@ -928,13 +928,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
                 // Update local React state (apply all diffs)
                 if (created.length || deleted.length || changed.length) {
-                    setFiles(prev => {
-                        const next = { ...prev };
-                        for (const f of created) next[f.path] = f.content;
-                        for (const f of changed) next[f.path] = f.content;
-                        for (const p of deleted) delete next[p];
-                        return next;
-                    });
+                    // Update filesRef IMMEDIATELY so next poll doesn't re-detect the same diffs
+                    const nextFiles = { ...filesRef.current };
+                    for (const f of created) nextFiles[f.path] = f.content;
+                    for (const f of changed) nextFiles[f.path] = f.content;
+                    for (const p of deleted) delete nextFiles[p];
+                    filesRef.current = nextFiles;
+
+                    setFiles(() => nextFiles);
+
                     // Also update WebContainer models for modified files
                     for (const f of changed) {
                         const model = modelsRef.current.get(f.path);
