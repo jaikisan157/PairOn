@@ -8,14 +8,13 @@ import {
     FolderOpen, Folder, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
     Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer, Info,
-    MoreVertical, Search, Package, Settings2, AlertTriangle, RotateCcw,
+    MoreVertical, Search, Package, Settings2, RotateCcw,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
 import {
     useToasts, ToastContainer, Breadcrumb, usePanelResize, ResizeDivider,
-    SearchPanel, PackageManagerPanel, ProjectTemplatesModal, EnvVarsPanel,
-    type ProjectTemplate,
+    SearchPanel, PackageManagerPanel, EnvVarsPanel,
 } from './CollabIDEHelpers';
 
 // ===== Types =====
@@ -176,7 +175,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // New panel states
     const [showSearch, setShowSearch] = useState(false);
     const [showPackageManager, setShowPackageManager] = useState(false);
-    const [showTemplates, setShowTemplates] = useState(false);
     const [showEnvPanel, setShowEnvPanel] = useState(false);
 
     // GitHub push modal
@@ -885,17 +883,29 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 };
 
                 const fsFiles = await readDir('.');
+                // Emit newly discovered files to partner in real time
+                const socket = socketService.getSocket();
                 setFiles(prev => {
-                    // Merge: keep existing editor content for unchanged files,
-                    // add new ones, remove deleted ones (but never remove .env)
                     const next: Record<string, string> = {};
                     for (const [p, content] of Object.entries(fsFiles)) {
                         next[p] = prev[p] !== undefined ? prev[p] : content;
+                        // New file the partner doesn't know about yet
+                        if (prev[p] === undefined && socket && sessionId) {
+                            socket.emit('code:file-create', {
+                                sessionId,
+                                path: p,
+                                content: next[p],
+                                senderId: socket.id,
+                            });
+                        }
                     }
-                    // Keep .env if it existed in prev
                     if (prev['.env'] !== undefined) next['.env'] = prev['.env'];
                     return next;
                 });
+                // Also push full state snapshot so server cache stays fresh
+                if (socket && sessionId) {
+                    socket.emit('ide:state-update', { sessionId, files: fsFiles, folders: [] });
+                }
                 // Update folders set — REPLACE (not merge) so deleted folders disappear
                 const newFolders = new Set<string>();
                 for (const p of Object.keys(fsFiles)) {
@@ -1369,33 +1379,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         addToast(`Uninstalling ${pkg}…`, 'info');
     }, [addToast]);
 
-    // ===== Apply project template =====
-    const applyTemplate = useCallback((template: ProjectTemplate) => {
-        // Dispose all existing models
-        for (const [, model] of modelsRef.current) { if (!model.isDisposed()) model.dispose(); }
-        modelsRef.current.clear();
-        // Replace file state
-        const newFiles = { ...template.files };
-        setFiles(newFiles);
-        autosave(newFiles);
-        // Derive folders
-        const newFolders = new Set<string>();
-        for (const p of Object.keys(newFiles)) {
-            const parts = p.split('/');
-            for (let i = 1; i < parts.length; i++) newFolders.add(parts.slice(0, i).join('/'));
-        }
-        setFolders(newFolders);
-        setExpandedDirs(new Set(newFolders));
-        // Open first meaningful file
-        const entryFile = Object.keys(newFiles).find(f => f.endsWith('.tsx') || f.endsWith('.ts') || f.endsWith('.js')) || Object.keys(newFiles)[0];
-        setOpenTabs([entryFile]);
-        setActiveFile(entryFile);
-        // Re-mount files in WebContainer
-        if (webcontainerRef.current) {
-            webcontainerRef.current.mount(toWebContainerFS(newFiles));
-        }
-        addToast(`Applied template: ${template.name}`, 'success');
-    }, [autosave, addToast]);
 
     // ===== Auto-detect node_modules before running =====
     const runProjectWithAutoInstall = useCallback(async () => {
@@ -1644,11 +1627,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded transition-colors" title="Package Manager (npm)">
                         <Package className="w-3.5 h-3.5" />
                     </button>
-                    {/* Project Templates */}
-                    <button onClick={() => setShowTemplates(true)}
-                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-purple-400 hover:bg-purple-400/10 rounded transition-colors" title="Project Templates">
-                        <AlertTriangle className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Project Templates button removed — use terminal instead */}
                     {/* Env Variables */}
                     <button onClick={() => setShowEnvPanel(true)}
                         className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Environment Variables (.env)">
@@ -2234,13 +2213,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 />
             )}
 
-            {/* ===== Project Templates Modal ===== */}
-            {showTemplates && (
-                <ProjectTemplatesModal
-                    onApply={applyTemplate}
-                    onClose={() => setShowTemplates(false)}
-                />
-            )}
 
             {/* ===== Environment Variables Panel ===== */}
             {showEnvPanel && (

@@ -633,9 +633,10 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             // Award partner
             await User.findByIdAndUpdate(partnerId, { $inc: { credits: 10 } });
 
-            // Notify quitter — normal ended
-            io.to(`challenge:${sessionId}`).emit('challenge:ended', sessionId);
+            // Only quitter gets 'ended' — partner gets their own specific event
+            // (room-level emit would wrongly navigate the partner away before showing popup)
             io.to(`user:${userId}`).emit('challenge:ended', sessionId);
+            socket.leave(`challenge:${sessionId}`);
 
             // Notify partner with SPECIFIC event so they can show "partner left" popup + continue alone option
             io.to(`user:${partnerId}`).emit('challenge:partner-force-quit', {
