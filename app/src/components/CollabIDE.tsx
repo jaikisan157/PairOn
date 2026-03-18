@@ -607,13 +607,32 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         };
         const handleFileDelete = (data: { path: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
-            setFiles(prev => { const next = { ...prev }; delete next[data.path]; autosave(next); return next; });
-            // Dispose model
-            const model = modelsRef.current.get(data.path);
-            if (model && !model.isDisposed()) model.dispose();
-            modelsRef.current.delete(data.path);
-            setOpenTabs(prev => prev.filter(t => t !== data.path));
-            if (webcontainerRef.current) webcontainerRef.current.fs.rm(data.path).catch(() => { });
+            // Remove the exact file OR all files inside a deleted directory
+            setFiles(prev => {
+                const next = { ...prev };
+                Object.keys(next).forEach(p => {
+                    if (p === data.path || p.startsWith(data.path + '/')) delete next[p];
+                });
+                autosave(next);
+                return next;
+            });
+            // Dispose Monaco models for the file and any sub-files
+            modelsRef.current.forEach((model, p) => {
+                if (p === data.path || p.startsWith(data.path + '/')) {
+                    if (!model.isDisposed()) model.dispose();
+                    modelsRef.current.delete(p);
+                }
+            });
+            // Close tabs for deleted file(s)
+            setOpenTabs(prev => prev.filter(t => t !== data.path && !t.startsWith(data.path + '/')));
+            // Remove from WebContainer FS (recursive for directories)
+            if (webcontainerRef.current) webcontainerRef.current.fs.rm(data.path, { recursive: true }).catch(() => { });
+            // Clean up folders state
+            setFolders(prev => {
+                const n = new Set(prev);
+                n.forEach(f => { if (f === data.path || f.startsWith(data.path + '/') || data.path.startsWith(f + '/')) n.delete(f); });
+                return n;
+            });
         };
         const handleFileRename = (data: { oldPath: string; newPath: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
