@@ -2052,9 +2052,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <div className="flex items-center gap-1">
                             {previewUrl && <button onClick={() => { const f = document.getElementById('preview-iframe') as HTMLIFrameElement; if (f) f.src = previewUrl; }} className="p-0.5 text-gray-500 hover:text-white"><RefreshCw className="w-3 h-3" /></button>}
                             {previewUrl && (
-                                <button onClick={() => window.open(previewUrl, '_blank')} className="p-0.5 text-gray-500 hover:text-white" title="Open in new tab">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                </button>
+                                <div className="relative group">
+                                    <button className="p-0.5 text-gray-600 cursor-not-allowed" title="Can't open in new tab">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    </button>
+                                    <div className="absolute bottom-full right-0 mb-1 w-52 bg-gray-900 text-[10px] text-gray-300 rounded px-2 py-1.5 hidden group-hover:block z-50 shadow-lg">
+                                        Preview is bound to this tab (WebContainers limitation). Use the iframe here.
+                                    </div>
+                                </div>
                             )}
                             <button onClick={() => preview.setSize(w => w === 350 ? 500 : 350)} className="p-0.5 text-gray-500 hover:text-white">
                                 {preview.size > 350 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}

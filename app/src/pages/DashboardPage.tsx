@@ -113,6 +113,15 @@ export function DashboardPage() {
     // Fetch session history
     socket.emit('dashboard:get-history');
 
+    // Re-fetch history whenever user tabs back to this page (real-time status updates)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        socket.emit('dashboard:cleanup');
+        socket.emit('dashboard:get-history');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     // Receive active long-running sessions after cleanup
     socket.on('dashboard:cleanup-done', (data: { activeSessions: any[] }) => {
       if (data?.activeSessions?.length > 0) {
@@ -186,6 +195,7 @@ export function DashboardPage() {
     });
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (socket) {
         socket.removeAllListeners('challenge:matched');
         socket.removeAllListeners('challenge:waiting');

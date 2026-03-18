@@ -342,6 +342,10 @@ export function CollaborationPage() {
 
     // Rejoined after refresh
     socket.on('challenge:rejoined', (data: any) => {
+      // Cancel the rejoin guard timeout — backend confirmed this session is valid
+      const tid = sessionStorage.getItem('_rejoin_timeout_id');
+      if (tid) { clearTimeout(Number(tid)); sessionStorage.removeItem('_rejoin_timeout_id'); }
+
       setStatus('matched');
       setSession({
         sessionId: data.session.id,
@@ -477,6 +481,19 @@ export function CollaborationPage() {
         socketService.getSocket()?.emit('user:join-session', data.sessionId);
         // Request fresh IDE state from partner
         socketService.getSocket()?.emit('ide:request-state', data.sessionId);
+
+        // Guard: if backend doesn't confirm rejoin within 4s, the session is gone
+        // (partner_skipped, completed, etc.) — clear stale localStorage and go home
+        const rejoinTimeout = setTimeout(() => {
+          // challenge:rejoined would have cancelled this via clearTimeout
+          // If we're here, backend silently rejected the rejoin
+          localStorage.removeItem('challenge_session');
+          setStatus('idle');
+          setSession(null);
+          navigate('/dashboard');
+        }, 4000);
+        // Store so challenge:rejoined handler can cancel it
+        sessionStorage.setItem('_rejoin_timeout_id', String(rejoinTimeout));
 
         // Restore active view from session storage — only if the session was already visited (resume)
         // Fresh matches must always start on 'chat'
