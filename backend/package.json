@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only --ignore dist --ignore node_modules --exit-child src/server.ts",
     "build": "tsc",
     "lint": "eslint src --ext .ts"
   },

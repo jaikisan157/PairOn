@@ -102,6 +102,8 @@ export function CollaborationPage() {
   } | null>(null);
   const [exitDeclined, setExitDeclined] = useState(false);
   const [showForceQuitConfirm, setShowForceQuitConfirm] = useState(false);
+  // Solo mode leave confirmation
+  const [showSoloLeaveConfirm, setShowSoloLeaveConfirm] = useState(false);
 
   // Partner force-quit popup
   const [partnerForceQuit, setPartnerForceQuit] = useState<{ creditsEarned: number; message: string } | null>(null);
@@ -901,7 +903,7 @@ export function CollaborationPage() {
 
               {/* Exit buttons — solo mode shows Leave only, collaborative shows Request + Force */}
               {isSoloMode ? (
-                <Button variant="outline" size="sm" onClick={() => { cleanupAndLeave(); navigate('/dashboard'); }} className="text-gray-600 border-gray-200 hover:bg-gray-50">
+                <Button variant="outline" size="sm" onClick={() => setShowSoloLeaveConfirm(true)} className="text-gray-600 border-gray-200 hover:bg-gray-50">
                   <LogOut className="w-4 h-4 mr-1" /> Leave
                 </Button>
               ) : (
@@ -1393,6 +1395,26 @@ export function CollaborationPage() {
               <div className="flex gap-3">
                 <Button variant="outline" onClick={handleDeclineExit} className="flex-1 rounded-xl">Decline</Button>
                 <Button onClick={handleApproveExit} className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-xl">Approve</Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Solo Leave Confirm */}
+      <AnimatePresence>
+        {showSoloLeaveConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <LogOut className="w-6 h-6 text-orange-500" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">End solo session?</h3>
+              <p className="text-sm text-gray-500 text-center mb-1">You are working alone. Leaving will <strong className="text-orange-500">end this session permanently</strong>.</p>
+              <p className="text-xs text-gray-400 text-center mb-4">Make sure to submit your project first if you want credit.</p>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setShowSoloLeaveConfirm(false)} className="flex-1 rounded-xl">Cancel</Button>
+                <Button onClick={() => { setShowSoloLeaveConfirm(false); cleanupAndLeave(); navigate('/dashboard'); }} className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl">End Session</Button>
               </div>
             </motion.div>
           </motion.div>

@@ -678,7 +678,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             });
         };
 
-        const handlePartnerPreviewUrl = (url: string) => { setPreviewUrl(url); };
+        // NOTE: ide:partner-preview-url intentionally not synced —
+        // WebContainer preview URLs are cross-origin-isolated to the owner's browser tab;
+        // showing them to partner just produces a blank/error iframe.
 
         // ===== Partner terminal handlers =====
         const handlePartnerTermCreate = (data: { terminalId: string; label: string }) => {
@@ -734,7 +736,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
         socket.on('ide:state-snapshot', handleStateSnapshot);
         socket.on('ide:partner-rejoined', handlePartnerRejoined);
-        socket.on('ide:partner-preview-url', handlePartnerPreviewUrl);
         socket.on('terminal:partner-create', handlePartnerTermCreate);
         socket.on('terminal:partner-close', handlePartnerTermClose);
         socket.on('terminal:partner-output', handlePartnerOutput);
@@ -751,7 +752,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             socket.off('code:comment', handleComment);
             socket.off('ide:state-snapshot', handleStateSnapshot);
             socket.off('ide:partner-rejoined', handlePartnerRejoined);
-            socket.off('ide:partner-preview-url', handlePartnerPreviewUrl);
             socket.off('terminal:partner-create', handlePartnerTermCreate);
             socket.off('terminal:partner-close', handlePartnerTermClose);
             socket.off('terminal:partner-output', handlePartnerOutput);
