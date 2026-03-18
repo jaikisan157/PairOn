@@ -1276,75 +1276,83 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             addToast(`📤 Pushing ${filesToPush.length} files to GitHub...`, 'success');
 
-            // Get existing branch ref (if repo already had commits)
-            let parentSha: string | null = null;
-            let baseTreeSha: string | null = null;
+            // Check if repo is empty or has commits
             const branchRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs/heads/main`, { headers: ghHeaders });
-            if (branchRes.ok) {
-                const branchData = await branchRes.json() as { object: { sha: string } };
-                parentSha = branchData.object.sha;
-                // Get base tree SHA for incremental updates
-                const prevCommitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits/${parentSha}`, { headers: ghHeaders });
-                if (prevCommitRes.ok) {
-                    const prevCommit = await prevCommitRes.json() as { tree: { sha: string } };
-                    baseTreeSha = prevCommit.tree.sha;
-                }
-            }
+            const repoIsEmpty = !branchRes.ok; // 404 or 409 = empty repo
 
-            // Create blobs for each file
-            const blobs = await Promise.all(
-                filesToPush.map(async ([, content]) => {
-                    const res = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs`, {
-                        method: 'POST', headers: ghHeaders,
-                        body: JSON.stringify({ content: btoa(unescape(encodeURIComponent(String(content)))), encoding: 'base64' }),
+            if (repoIsEmpty) {
+                // ── EMPTY REPO: use Contents API (initialises the git database) ──
+                // Push files sequentially — Contents API bootstraps empty repos properly
+                let pushed = 0;
+                for (const [filePath, content] of filesToPush) {
+                    const cleanPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
+                    const putRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/contents/${cleanPath}`, {
+                        method: 'PUT',
+                        headers: ghHeaders,
+                        body: JSON.stringify({
+                            message: pushed === 0 ? `Initial commit — built on PairOn 🚀` : `Add ${cleanPath}`,
+                            content: btoa(unescape(encodeURIComponent(String(content)))),
+                        }),
                     });
-                    return res.json() as Promise<{ sha: string }>;
-                })
-            );
+                    if (!putRes.ok) {
+                        const e = await putRes.json().catch(() => ({})) as any;
+                        throw new Error(`Failed to push ${cleanPath}: ${e.message || putRes.status}`);
+                    }
+                    pushed++;
+                }
+            } else {
+                // ── EXISTING REPO: use Trees API (fast bulk update) ──
+                const branchData = await branchRes.json() as { object: { sha: string } };
+                const parentSha = branchData.object.sha;
 
-            // Build tree (with base_tree for incremental update, or from scratch for new repo)
-            const treePayload: any = {
-                tree: filesToPush.map(([path], i) => ({
-                    path: path.startsWith('/') ? path.slice(1) : path,
-                    mode: '100644',
-                    type: 'blob',
-                    sha: blobs[i].sha,
-                })),
-            };
-            if (baseTreeSha) treePayload.base_tree = baseTreeSha;
+                // Get base tree SHA
+                const prevCommitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits/${parentSha}`, { headers: ghHeaders });
+                const prevCommit = prevCommitRes.ok ? await prevCommitRes.json() as { tree: { sha: string } } : null;
+                const baseTreeSha = prevCommit?.tree.sha || null;
 
-            const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees`, {
-                method: 'POST', headers: ghHeaders,
-                body: JSON.stringify(treePayload),
-            });
-            if (!treeRes.ok) {
-                const e = await treeRes.json().catch(() => ({})) as any;
-                throw new Error(`GitHub tree error: ${e.message || treeRes.status}. Your token may lack repo permissions — try re-linking GitHub in Profile.`);
-            }
-            const tree = await treeRes.json() as { sha: string };
+                // Create blobs
+                const blobs = await Promise.all(
+                    filesToPush.map(async ([, content]) => {
+                        const res = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs`, {
+                            method: 'POST', headers: ghHeaders,
+                            body: JSON.stringify({ content: btoa(unescape(encodeURIComponent(String(content)))), encoding: 'base64' }),
+                        });
+                        return res.json() as Promise<{ sha: string }>;
+                    })
+                );
 
-            // Create commit
-            const commitPayload: any = {
-                message: parentSha ? `Update: ${new Date().toLocaleString()} — PairOn 🚀` : `Initial commit — built on PairOn 🚀`,
-                tree: tree.sha,
-                parents: parentSha ? [parentSha] : [],
-            };
-            const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
-                method: 'POST', headers: ghHeaders,
-                body: JSON.stringify(commitPayload),
-            });
-            const commit = await commitRes.json() as { sha: string };
+                // Build tree
+                const treePayload: any = {
+                    tree: filesToPush.map(([path], i) => ({
+                        path: path.startsWith('/') ? path.slice(1) : path,
+                        mode: '100644', type: 'blob', sha: blobs[i].sha,
+                    })),
+                };
+                if (baseTreeSha) treePayload.base_tree = baseTreeSha;
 
-            // Update or create branch ref
-            if (parentSha) {
+                const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees`, {
+                    method: 'POST', headers: ghHeaders, body: JSON.stringify(treePayload),
+                });
+                if (!treeRes.ok) {
+                    const e = await treeRes.json().catch(() => ({})) as any;
+                    throw new Error(`GitHub tree error: ${e.message || treeRes.status}`);
+                }
+                const tree = await treeRes.json() as { sha: string };
+
+                // Create commit
+                const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
+                    method: 'POST', headers: ghHeaders,
+                    body: JSON.stringify({
+                        message: `Update: ${new Date().toLocaleString()} — PairOn 🚀`,
+                        tree: tree.sha, parents: [parentSha],
+                    }),
+                });
+                const commit = await commitRes.json() as { sha: string };
+
+                // Update branch ref
                 await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs/heads/main`, {
                     method: 'PATCH', headers: ghHeaders,
                     body: JSON.stringify({ sha: commit.sha, force: true }),
-                });
-            } else {
-                await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
-                    method: 'POST', headers: ghHeaders,
-                    body: JSON.stringify({ ref: 'refs/heads/main', sha: commit.sha }),
                 });
             }
 
