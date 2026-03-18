@@ -330,7 +330,7 @@ router.get('/github/login', (req: any, res: any) => {
   const redirectUri = `${backendUrl}/api/auth/github/callback`;
   // state prefix 'login:' distinguishes from account-linking (which uses userId as state)
   const nonce = crypto.randomUUID();
-  const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user:email&state=login:${nonce}`;
+  const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user:email,public_repo&state=login:${nonce}`;
   res.redirect(url);
 });
 

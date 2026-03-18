@@ -1317,6 +1317,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 method: 'POST', headers: ghHeaders,
                 body: JSON.stringify(treePayload),
             });
+            if (!treeRes.ok) {
+                const e = await treeRes.json().catch(() => ({})) as any;
+                throw new Error(`GitHub tree error: ${e.message || treeRes.status}. Your token may lack repo permissions — try re-linking GitHub in Profile.`);
+            }
             const tree = await treeRes.json() as { sha: string };
 
             // Create commit
@@ -1347,6 +1351,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             addToast(`✅ ${filesToPush.length} files pushed to ${repoUrl}`, 'success');
 
         } catch (err: any) {
+            // Use toast since modal may already be closed
+            addToast(`❌ GitHub push failed: ${err.message || 'Unknown error'}`, 'error');
             setGithubPushError(err.message || 'Failed to push to GitHub');
         } finally {
             setGithubPushing(false);
