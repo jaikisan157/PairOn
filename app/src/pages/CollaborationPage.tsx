@@ -226,7 +226,7 @@ export function CollaborationPage() {
 
     // Waiting
     socket.on('challenge:waiting', () => {
-      // Still searching â€” no action needed
+  // Still searching — no action needed
     });
 
     // Error
@@ -305,7 +305,7 @@ export function CollaborationPage() {
       handleSessionEnded();
     });
 
-    // Time's up â€” show modal instead of auto-ending
+  // Time's up — show modal instead of auto-submitting
     socket.on('challenge:time-up', () => {
       setTimeRemaining(0);
       if (timerRef.current) clearInterval(timerRef.current);

@@ -181,6 +181,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [showGithubModal, setShowGithubModal] = useState(false);
     const [githubRepoName, setGithubRepoName] = useState('');
     const [githubPartnerUsername, setGithubPartnerUsername] = useState('');
+    const [githubCommitMsg, setGithubCommitMsg] = useState('');
     const [githubPushing, setGithubPushing] = useState(false);
     const [githubResult, setGithubResult] = useState<{ url: string; owner: string } | null>(null);
     const [githubConnected, setGithubConnected] = useState<boolean | null>(null); // null = checking
@@ -577,12 +578,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
         const handleFileChange = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
-            setFiles(prev => { const next = { ...prev, [data.path]: data.content }; autosave(next); return next; });
-            // Update Monaco model
+            // Update files state (no autosave — we are the receiver, not sender)
+            setFiles(prev => ({ ...prev, [data.path]: data.content }));
+            filesRef.current = { ...filesRef.current, [data.path]: data.content };
+            // Update Monaco model using executeEdits to PRESERVE cursor position
+            // (setValue() resets cursor to 0 causing the "retyping" glitch)
             const model = modelsRef.current.get(data.path);
             if (model && !model.isDisposed() && model.getValue() !== data.content) {
                 suppressSyncRef.current = true;
-                model.setValue(data.content);
+                const fullRange = model.getFullModelRange();
+                model.pushEditOperations([], [{ range: fullRange, text: data.content }], () => null);
                 suppressSyncRef.current = false;
             }
             if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(data.path, data.content).catch(() => { });
@@ -1290,7 +1295,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         method: 'PUT',
                         headers: ghHeaders,
                         body: JSON.stringify({
-                            message: pushed === 0 ? `Initial commit — built on PairOn 🚀` : `Add ${cleanPath}`,
+                            message: pushed === 0 ? (githubCommitMsg.trim() || `Initial commit — built on PairOn 🚀`) : `Add ${cleanPath}`,
                             content: btoa(unescape(encodeURIComponent(String(content)))),
                         }),
                     });
@@ -1343,7 +1348,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
                     method: 'POST', headers: ghHeaders,
                     body: JSON.stringify({
-                        message: `Update: ${new Date().toLocaleString()} — PairOn 🚀`,
+                        message: githubCommitMsg.trim() || `Update: ${new Date().toLocaleString()} — PairOn 🚀`,
                         tree: tree.sha, parents: [parentSha],
                     }),
                 });
@@ -1365,7 +1370,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         } finally {
             setGithubPushing(false);
         }
-    }, [githubRepoName, githubPartnerUsername, projectTitle, addToast, setShowGithubModal]);
+    }, [githubRepoName, githubPartnerUsername, githubCommitMsg, projectTitle, addToast, setShowGithubModal]);
 
     // Build project
     const buildProject = useCallback(async () => {
@@ -2431,10 +2436,24 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                     />
                                 </div>
 
+                                {/* Commit message */}
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                                        Commit Message <span className="text-gray-600">(optional)</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={githubCommitMsg}
+                                        onChange={e => setGithubCommitMsg(e.target.value)}
+                                        placeholder="Initial commit — built on PairOn 🚀"
+                                        className="w-full bg-[#0d1117] border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 outline-none transition-colors"
+                                    />
+                                </div>
+
                                 {/* Info */}
                                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
                                     <p className="text-[10px] text-blue-300">
-                                        ℹ️ A new <strong>public</strong> repo will be created on your GitHub. All project files (except .env) will be pushed as the first commit. Your partner will receive a collaborator invite.
+                                        ℹ️ A <strong>public</strong> repo will be created (or updated) on your GitHub. All project files (except .env) will be pushed. Your partner will receive a collaborator invite.
                                     </p>
                                 </div>
 

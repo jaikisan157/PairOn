@@ -702,10 +702,10 @@ export function setupSocketHandlers(io: Server) {
     const ideStateMap = new Map<string, { files: Record<string, string>; folders: string[]; previewUrl?: string; ownerId: string }>();
 
     socket.on('ide:state-update', (data: { sessionId: string; files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
-      // Store state server-side
+      // Store state server-side ONLY — do NOT emit ide:partner-rejoined here.
+      // Doing so would create a feedback loop: autosave → state-update → partner-rejoined
+      // → partner pushes state back → state-snapshot → model.setValue() resets editor (the glitch).
       ideStateMap.set(data.sessionId, { files: data.files, folders: data.folders, previewUrl: data.previewUrl, ownerId: userId });
-      // Relay diff (just trigger partner to request fresh state)
-      socket.to(`session:${data.sessionId}`).emit('ide:partner-rejoined');
     });
 
     // Partner requests a full state push (e.g. they just loaded the page)
