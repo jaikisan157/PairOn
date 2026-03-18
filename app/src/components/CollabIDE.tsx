@@ -2425,7 +2425,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 {/* Partner username */}
                                 <div>
                                     <label className="block text-xs text-gray-400 mb-1.5 font-medium">
-                                        Partner's GitHub Username <span className="text-gray-600">(optional — adds them as collaborator)</span>
+                                        Partner's GitHub Username <span className="text-gray-600">(optional)</span>
                                     </label>
                                     <input
                                         type="text"
@@ -2434,6 +2434,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                         placeholder="their-github-username"
                                         className="w-full bg-[#0d1117] border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 outline-none transition-colors"
                                     />
+                                    {githubPartnerUsername.trim() && (
+                                        <p className="text-[10px] text-blue-400 mt-1">
+                                            ✉️ Your partner will get a GitHub email invite — they need to accept it at github.com/notifications
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* Commit message */}
