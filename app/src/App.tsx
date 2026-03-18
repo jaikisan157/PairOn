@@ -14,7 +14,10 @@ import {
   CreditsPage,
   FriendsPage,
   MessagesPage,
+  UserProfileViewPage,
+  ProjectsPage,
 } from '@/pages';
+
 import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
 
@@ -232,6 +235,8 @@ function AppRoutes() {
         <Route path="/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
         <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><AdminDashboardPage /></ProtectedRoute>} />
+        <Route path="/users/:userId" element={<ProtectedRoute><UserProfileViewPage /></ProtectedRoute>} />
+        <Route path="/projects" element={<ProtectedRoute><ProjectsPage /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

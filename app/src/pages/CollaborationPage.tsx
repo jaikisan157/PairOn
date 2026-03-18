@@ -608,6 +608,7 @@ export function CollaborationPage() {
     gracefulEndRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
+    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
     if (idleCheckRef.current) clearInterval(idleCheckRef.current);
     setSession(null);
     setStatus('idle');
@@ -620,6 +621,7 @@ export function CollaborationPage() {
     gracefulEndRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
+    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
     setSession(null);
     setStatus('idle');
     localStorage.removeItem('challenge_session');

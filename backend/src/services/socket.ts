@@ -191,6 +191,7 @@ export function setupSocketHandlers(io: Server) {
           const partner = partnerMap.get(partnerId);
           return {
             sessionId: (sess as any)._id.toString(),
+            partnerId,
             partnerName: partner?.name || 'Unknown',
             partnerReputation: (partner as any)?.reputation || 0,
             mode: match?.mode || 'sprint',

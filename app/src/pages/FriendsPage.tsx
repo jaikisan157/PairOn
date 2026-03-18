@@ -233,7 +233,7 @@ export function FriendsPage() {
                                     }`}
                                 >
                                     <div className="flex items-center gap-3">
-                                        <div className="relative">
+                                        <div className="relative cursor-pointer" onClick={() => navigate(`/users/${friend.id}`)}>
                                             <div className="w-11 h-11 rounded-full bg-gradient-to-br from-pairon-accent to-purple-600 flex items-center justify-center text-white font-bold text-sm">
                                                 {friend.avatar ? (
                                                     <img src={friend.avatar} alt="" className="w-full h-full rounded-full object-cover" />
@@ -246,7 +246,7 @@ export function FriendsPage() {
                                         </div>
                                         <div>
                                             <div className="flex items-center gap-2">
-                                                <p className="font-semibold text-gray-900 dark:text-white text-sm">{friend.name}</p>
+                                                <p className="font-semibold text-gray-900 dark:text-white text-sm cursor-pointer hover:text-pairon-accent transition-colors" onClick={() => navigate(`/users/${friend.id}`)}>{friend.name}</p>
                                                 {hasUnread && (
                                                     <span className="flex items-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                                                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block" />

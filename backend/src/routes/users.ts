@@ -177,4 +177,30 @@ router.post('/migrate-reputation', authMiddleware, async (_req: any, res: any) =
   }
 });
 
+// Get PUBLIC profile of any user by ID (for viewing partner / friend profiles)
+router.get('/:id', authMiddleware, async (req: any, res: any) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    // Return only public-safe fields
+    res.json({
+      id: user._id,
+      name: user.name,
+      bio: user.bio,
+      avatar: user.avatar,
+      skills: user.skills,
+      interests: user.interests,
+      experienceLevel: user.experienceLevel,
+      reputation: user.reputation,
+      completedProjects: user.completedProjects,
+      badges: user.badges,
+      isOnline: user.isOnline,
+      createdAt: user.createdAt,
+    });
+  } catch (error) {
+    console.error('Get user by id error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 export default router;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -10,9 +10,9 @@ import {
   Trophy,
   Clock,
   Award,
-  CheckCircle,
   Sun,
   Moon,
+  Camera,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +31,8 @@ export function ProfilePage() {
   const [githubStatus, setGithubStatus] = useState<{ connected: boolean; username: string | null } | null>(null);
   const [githubConnecting, setGithubConnecting] = useState(false);
   const [githubMsg, setGithubMsg] = useState('');
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch GitHub connection status
   useEffect(() => {
@@ -62,6 +64,20 @@ export function ProfilePage() {
       });
       setIsEditing(false);
     }
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert('Image must be under 2MB'); return; }
+    setAvatarUploading(true);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string;
+      await updateProfile({ avatar: base64 }).catch(() => {});
+      setAvatarUploading(false);
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleSkill = (skill: string) => {
@@ -156,14 +172,23 @@ export function ProfilePage() {
             <div className="flex flex-col sm:flex-row items-center gap-6">
               {/* Avatar */}
               <div className="relative">
-                <img
-                  src={user.avatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&h=200&fit=crop&crop=face'}
-                  alt={user.name}
-                  className="w-24 h-24 rounded-full object-cover border-4 border-pairon-accent-light"
-                />
-                <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-pairon-accent rounded-full flex items-center justify-center">
-                  <CheckCircle className="w-4 h-4 text-white" />
-                </div>
+                {user.avatar ? (
+                  <img src={user.avatar} alt={user.name} className="w-24 h-24 rounded-full object-cover border-4 border-pairon-accent-light" />
+                ) : (
+                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-pairon-accent to-purple-600 flex items-center justify-center text-white text-2xl font-bold border-4 border-pairon-accent-light">
+                    {user.name?.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)}
+                  </div>
+                )}
+                {/* Upload button — always visible */}
+                <button
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="absolute -bottom-1 -right-1 w-8 h-8 bg-pairon-accent rounded-full flex items-center justify-center hover:bg-pairon-accent/80 transition-colors shadow"
+                  title="Change photo"
+                  disabled={avatarUploading}
+                >
+                  {avatarUploading ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Camera className="w-3.5 h-3.5 text-white" />}
+                </button>
+                <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleAvatarChange} />
               </div>
 
               {/* Info */}

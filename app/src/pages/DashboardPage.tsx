@@ -704,7 +704,8 @@ export function DashboardPage() {
                   return (
                     <div
                       key={sess.sessionId}
-                      className={`flex items-center justify-between p-4 rounded-xl border ${isActive ? 'border-green-300 dark:border-green-700 bg-green-50/50 dark:bg-green-900/10' : 'border-gray-200 dark:border-gray-700'}`}
+                      className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${isActive ? 'border-green-300 dark:border-green-700 bg-green-50/50 dark:bg-green-900/10' : 'border-gray-200 dark:border-gray-700 hover:border-pairon-accent/30 hover:bg-gray-50/50 dark:hover:bg-gray-700/30'} ${!isActive ? 'cursor-pointer' : ''}`}
+                      onClick={!isActive ? () => navigate('/projects') : undefined}
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div>
@@ -717,7 +718,11 @@ export function DashboardPage() {
                             </span>
                           </div>
                           <p className="text-xs text-gray-500 dark:text-gray-400">
-                            {modeLabels[sess.mode]} · with {sess.partnerName}
+                            {modeLabels[sess.mode]} · with{' '}
+                            <span
+                              className="hover:text-pairon-accent transition-colors cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/users/${sess.partnerId}`); }}
+                            >{sess.partnerName}</span>
                             <span className="text-yellow-500 ml-1">⭐ {sess.partnerReputation}</span>
                             {sess.tasksTotal > 0 && <span className="ml-2">· {sess.tasksDone}/{sess.tasksTotal} tasks</span>}
                           </p>
@@ -731,7 +736,8 @@ export function DashboardPage() {
                         {canContinue && (
                           <Button
                             size="sm"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               localStorage.setItem('challenge_session', JSON.stringify(sess));
                               navigate('/collaborate');
                             }}

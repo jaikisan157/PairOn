@@ -904,7 +904,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 });
                 // Also push full state snapshot so server cache stays fresh
                 if (socket && sessionId) {
-                    socket.emit('ide:state-update', { sessionId, files: fsFiles, folders: [] });
+                    const folderArr: string[] = [];
+                    for (const p of Object.keys(fsFiles)) {
+                        const parts = p.split('/');
+                        for (let i = 1; i < parts.length; i++) folderArr.push(parts.slice(0, i).join('/'));
+                    }
+                    socket.emit('ide:state-update', { sessionId, files: fsFiles, folders: [...new Set(folderArr)] });
                 }
                 // Update folders set — REPLACE (not merge) so deleted folders disappear
                 const newFolders = new Set<string>();
