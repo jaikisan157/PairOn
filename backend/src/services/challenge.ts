@@ -458,7 +458,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
     socket.on('challenge:submit', async (sessionId: string, link: string, description: string) => {
         try {
             const session = await CollaborationSession.findById(sessionId) as any;
-            if (!session || session.status !== 'active') return;
+            if (!session) return;
             if (!session.participants.includes(userId)) return;
 
             session.submission = {
@@ -467,11 +467,57 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 submittedAt: new Date(),
                 submittedBy: userId,
             };
+            session.status = 'completed';
+            (session as any).endedAt = new Date();
             await session.save();
 
+            // Increment completedProjects for BOTH participants
+            for (const pid of session.participants) {
+                await User.findByIdAndUpdate(pid, { $inc: { completedProjects: 1 } });
+            }
+
+            clearSessionTimer(sessionId);
+
             io.to(`challenge:${sessionId}`).emit('challenge:submitted', session.submission);
+            // Also emit to individual user rooms (in case they navigated away)
+            for (const pid of session.participants) {
+                io.to(`user:${pid}`).emit('challenge:submitted', session.submission);
+                io.to(`user:${pid}`).emit('challenge:ended', sessionId);
+            }
         } catch (error) {
             console.error('Challenge submit error:', error);
+        }
+    });
+
+    // ===== End after timeout (user chose to end without submitting) =====
+    socket.on('challenge:end-after-timeout', async (sessionId: string) => {
+        try {
+            const session = await CollaborationSession.findById(sessionId) as any;
+            if (!session) return;
+            if (!session.participants.includes(userId)) return;
+            session.status = 'completed';
+            session.endedAt = new Date();
+            await session.save();
+            clearSessionTimer(sessionId);
+            socket.emit('challenge:ended', sessionId);
+        } catch (err) {
+            console.error('end-after-timeout error:', err);
+        }
+    });
+
+    // ===== Continue alone (after partner force-quit) =====
+    socket.on('challenge:continue-alone', async (sessionId: string) => {
+        try {
+            // Mark session as partner_skipped so partner can't rejoin
+            // but keep it active so the remaining user can work
+            const session = await CollaborationSession.findById(sessionId);
+            if (!session) return;
+            if (!session.participants.includes(userId)) return;
+            // No status change needed — session is already partner_skipped
+            // Just notify caller they are now solo
+            socket.emit('challenge:now-solo', { sessionId });
+        } catch (err) {
+            console.error('continue-alone error:', err);
         }
     });
 
@@ -587,17 +633,15 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             // Award partner
             await User.findByIdAndUpdate(partnerId, { $inc: { credits: 10 } });
 
-            // Notify BOTH
+            // Notify quitter — normal ended
             io.to(`challenge:${sessionId}`).emit('challenge:ended', sessionId);
             io.to(`user:${userId}`).emit('challenge:ended', sessionId);
-            io.to(`user:${partnerId}`).emit('challenge:ended', sessionId);
 
-            io.to(`user:${partnerId}`).emit('challenge:message', {
-                id: `sys-fquit-${Date.now()}`,
-                senderId: 'system',
-                content: 'Your partner force-quit. You earned 10 credits as compensation.',
-                timestamp: new Date(),
-                type: 'system',
+            // Notify partner with SPECIFIC event so they can show "partner left" popup + continue alone option
+            io.to(`user:${partnerId}`).emit('challenge:partner-force-quit', {
+                sessionId,
+                creditsEarned: 10,
+                message: 'Your partner force-quit. You earned 10 credits as compensation.',
             });
         } catch (error) {
             console.error('Challenge force quit error:', error);
@@ -978,7 +1022,7 @@ function startChallengeTimer(io: Server, sessionId: string, endsAt: Date, partic
                 console.error('Timer completion error:', e);
             }
 
-            // Notify both
+            // Notify both — time-up does NOT end the session; users choose what to do
             io.to(`challenge:${sessionId}`).emit('challenge:time-up');
             for (const pid of participants) {
                 io.to(`user:${pid}`).emit('challenge:time-up');

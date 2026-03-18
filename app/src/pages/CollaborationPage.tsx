@@ -30,6 +30,7 @@ import { CollabIDE } from '@/components/CollabIDE';
 import { UserProfileModal } from '@/components/UserProfileModal';
 import type { TaskStatus } from '@/types';
 
+
 // ===== Types =====
 type ChallengeMode = 'sprint' | 'challenge' | 'build';
 type PageStatus = 'idle' | 'searching' | 'matched';
@@ -74,13 +75,13 @@ const MODE_LABELS: Record<ChallengeMode, string> = {
 
 export function CollaborationPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, updateProfile } = useAuth();
 
   // Core state (like QuickConnectPage pattern)
   const [status, setStatus] = useState<PageStatus>('idle');
   const [session, setSession] = useState<ChallengeSession | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0);
-  const [timeExpired, setTimeExpired] = useState(false);
+  // timeExpired is tracked via showTimeUpModal
 
   // UI state
   const [newMessage, setNewMessage] = useState('');
@@ -101,6 +102,13 @@ export function CollaborationPage() {
   } | null>(null);
   const [exitDeclined, setExitDeclined] = useState(false);
   const [showForceQuitConfirm, setShowForceQuitConfirm] = useState(false);
+
+  // Partner force-quit popup
+  const [partnerForceQuit, setPartnerForceQuit] = useState<{ creditsEarned: number; message: string } | null>(null);
+  const [isSoloMode, setIsSoloMode] = useState(false);
+
+  // Time-up modal
+  const [showTimeUpModal, setShowTimeUpModal] = useState(false);
 
   // Content moderation
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
@@ -142,6 +150,9 @@ export function CollaborationPage() {
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gracefulEndRef = useRef(false);
   const sessionRef = useRef<ChallengeSession | null>(null);
+  // Idle tracking for slide-to-verify
+  const lastActivityRef = useRef<number>(Date.now());
+  const idleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 
   // Keep sessionRef in sync
@@ -285,11 +296,22 @@ export function CollaborationPage() {
       handleSessionEnded();
     });
 
-    // Time's up
+    // Time's up — show modal instead of auto-ending
     socket.on('challenge:time-up', () => {
-      setTimeExpired(true);
       setTimeRemaining(0);
       if (timerRef.current) clearInterval(timerRef.current);
+      setShowTimeUpModal(true);
+    });
+
+    // Partner force-quit — dedicated event with credits info
+    socket.on('challenge:partner-force-quit', (data: { sessionId: string; creditsEarned: number; message: string }) => {
+      setPartnerForceQuit({ creditsEarned: data.creditsEarned, message: data.message });
+    });
+
+    // Now in solo mode
+    socket.on('challenge:now-solo', () => {
+      setIsSoloMode(true);
+      setPartnerForceQuit(null);
     });
 
     // Exit requested by partner
@@ -397,6 +419,8 @@ export function CollaborationPage() {
         s.removeAllListeners('challenge:submitted');
         s.removeAllListeners('challenge:ended');
         s.removeAllListeners('challenge:time-up');
+        s.removeAllListeners('challenge:partner-force-quit');
+        s.removeAllListeners('challenge:now-solo');
         s.removeAllListeners('challenge:exit-requested');
         s.removeAllListeners('challenge:exit-request-sent');
         s.removeAllListeners('challenge:exit-declined');
@@ -497,21 +521,31 @@ export function CollaborationPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session?.messages]);
 
-  // ===== Activity check (every 15 min) =====
+  // ===== Idle detection for slide-to-verify (10 min idle) =====
   useEffect(() => {
-    if (status === 'matched') {
-      activityIntervalRef.current = setInterval(() => {
+    if (status !== 'matched') return;
+    const recordActivity = () => { lastActivityRef.current = Date.now(); };
+    window.addEventListener('keydown', recordActivity);
+    window.addEventListener('mousemove', recordActivity);
+    window.addEventListener('click', recordActivity);
+    // Check every 60s if user has been idle for 10 min
+    idleCheckRef.current = setInterval(() => {
+      const idleSecs = (Date.now() - lastActivityRef.current) / 1000;
+      if (idleSecs >= 10 * 60 && !showActivityCheck) {
         const min = Math.floor(Math.random() * 60) + 20;
         setTargetZone({ min, max: min + 20 });
         setSliderValue(0);
         setActivityCheckTimer(60);
         setShowActivityCheck(true);
-      }, 15 * 60 * 1000);
-    }
+      }
+    }, 60_000);
     return () => {
-      if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
+      window.removeEventListener('keydown', recordActivity);
+      window.removeEventListener('mousemove', recordActivity);
+      window.removeEventListener('click', recordActivity);
+      if (idleCheckRef.current) clearInterval(idleCheckRef.current);
     };
-  }, [status]);
+  }, [status, showActivityCheck]);
 
   // Activity check countdown
   useEffect(() => {
@@ -555,6 +589,7 @@ export function CollaborationPage() {
     gracefulEndRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
+    if (idleCheckRef.current) clearInterval(idleCheckRef.current);
     setSession(null);
     setStatus('idle');
     setTimeRemaining(0);
@@ -668,7 +703,33 @@ export function CollaborationPage() {
     if (!session) return;
     socketService.getSocket()?.emit('challenge:submit', session.sessionId, submissionLink, submissionDescription);
     setShowSubmitModal(false);
+    setShowTimeUpModal(false);
+    // Refresh user stats so completedProjects updates in UI
+    updateProfile({}).catch(() => {});
   };
+
+  // Continue alone after partner left
+  const handleContinueAlone = useCallback(() => {
+    if (!session) return;
+    socketService.getSocket()?.emit('challenge:continue-alone', session.sessionId);
+    setPartnerForceQuit(null);
+    setIsSoloMode(true);
+  }, [session]);
+
+  // End session after time-up without submitting
+  const handleEndAfterTimeout = useCallback(() => {
+    if (!session) return;
+    socketService.getSocket()?.emit('challenge:end-after-timeout', session.sessionId);
+    setShowTimeUpModal(false);
+    handleSessionEnded();
+  }, [session]);
+
+  // Submit via time-up modal (opens submit form first)
+  const handleTimeUpSubmit = () => {
+    setShowTimeUpModal(false);
+    setShowSubmitModal(true);
+  };
+
 
   const handleActivityVerified = () => {
     if (sliderValue >= targetZone.min && sliderValue <= targetZone.max) {
@@ -1390,25 +1451,76 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
-      {/* Time Expired Overlay */}
+      {/* ── Solo Mode Banner ── shown after continuing alone */}
+      {isSoloMode && session && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-yellow-500/90 backdrop-blur text-black text-xs font-semibold px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          Solo mode — partner left. Submit when ready.
+        </div>
+      )}
+
+      {/* ── Partner Force-Quit Popup ── */}
       <AnimatePresence>
-        {timeExpired && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
-              <div className="w-16 h-16 bg-pairon-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Clock className="w-8 h-8 text-pairon-accent" />
+        {partnerForceQuit && session && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
+              className="bg-[#161b22] border border-yellow-500/30 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+              <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <LogOut className="w-8 h-8 text-yellow-400" />
               </div>
-              <h3 className="font-display text-2xl font-bold text-gray-900 dark:text-white mb-2">⏰ Time's Up!</h3>
-              <p className="text-gray-500 mb-6">
-                {session.submission ? '✅ Your project has been submitted.' : '💡 Submit your project before leaving.'}
-              </p>
+              <h3 className="text-xl font-bold text-white mb-2">Partner Left 👋</h3>
+              <p className="text-gray-400 text-sm mb-2">{partnerForceQuit.message}</p>
+              <div className="inline-flex items-center gap-1.5 bg-green-500/10 border border-green-500/20 rounded-full px-3 py-1 mb-6">
+                <span className="text-green-400 text-xs font-semibold">+{partnerForceQuit.creditsEarned} credits added to your account</span>
+              </div>
               <div className="flex gap-3">
+                <button onClick={handleContinueAlone}
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-colors">
+                  Continue Alone
+                </button>
+                <button onClick={() => { setPartnerForceQuit(null); cleanupAndLeave(); navigate('/dashboard'); }}
+                  className="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 text-white text-sm font-semibold rounded-xl transition-colors">
+                  End Session
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Time's Up Modal ── */}
+      <AnimatePresence>
+        {showTimeUpModal && session && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
+              className="bg-[#161b22] border border-orange-500/30 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+              <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Clock className="w-8 h-8 text-orange-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">⏰ Time's Up!</h3>
+              <p className="text-gray-400 text-sm mb-6">
+                Your session time has ended. What would you like to do?
+              </p>
+              <div className="flex flex-col gap-3">
                 {!session.submission && (
-                  <Button variant="outline" onClick={() => setShowSubmitModal(true)} className="flex-1 rounded-xl">
-                    <Link2 className="w-4 h-4 mr-1" /> Submit project
-                  </Button>
+                  <button onClick={handleTimeUpSubmit}
+                    className="w-full py-3 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> Submit Project
+                  </button>
                 )}
-                <Button onClick={() => { cleanupAndLeave(); navigate('/dashboard'); }} className="flex-1 pairon-btn-primary rounded-xl">Exit session</Button>
+                {session.submission && (
+                  <div className="py-2 text-green-400 text-sm">✅ Project already submitted!</div>
+                )}
+                <button onClick={() => setShowTimeUpModal(false)}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-colors">
+                  Continue Working
+                </button>
+                <button onClick={handleEndAfterTimeout}
+                  className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white text-sm font-semibold rounded-xl transition-colors">
+                  End Without Submitting
+                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -1428,3 +1540,4 @@ export function CollaborationPage() {
     </div>
   );
 }
+
