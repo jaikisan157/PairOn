@@ -860,14 +860,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             if (term) term.writeln('\x1b[32m✓ Shell ready — you can type commands now\x1b[0m\n');
 
             // ── Filesystem watcher: sync terminal changes → file tree ──
-            // Watch every FS event and reconcile React file state so that
-            // files created/deleted in terminal show up (or disappear) in the tree.
             const IGNORED = (p: string) =>
                 p.includes('node_modules') || p.includes('/.git/') || p === '.git';
 
             const syncFsToTree = async () => {
                 if (!wc) return;
-                // Recursively read all files from WebContainers FS
                 const readDir = async (dir: string): Promise<Record<string, string>> => {
                     const result: Record<string, string> = {};
                     try {
@@ -890,26 +887,67 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 };
 
                 const fsFiles = await readDir('.');
-                // Emit newly discovered files to partner in real time
                 const socket = socketService.getSocket();
-                setFiles(prev => {
-                    const next: Record<string, string> = {};
-                    for (const [p, content] of Object.entries(fsFiles)) {
-                        next[p] = prev[p] !== undefined ? prev[p] : content;
-                        // New file the partner doesn't know about yet
-                        if (prev[p] === undefined && socket && sessionId) {
-                            socket.emit('code:file-create', {
-                                sessionId,
-                                path: p,
-                                content: next[p],
-                                senderId: socket.id,
-                            });
+
+                // Collect diffs BEFORE updating state so we can emit them after
+                const currentFiles = filesRef.current;
+                const created: Array<{ path: string; content: string }> = [];
+                const deleted: string[] = [];
+                const changed: Array<{ path: string; content: string }> = [];
+
+                for (const [p, content] of Object.entries(fsFiles)) {
+                    if (p === '.env' || p.startsWith('.env.')) continue;
+                    if (currentFiles[p] === undefined) {
+                        // File is new (terminal created it)
+                        created.push({ path: p, content });
+                    } else if (currentFiles[p] !== content) {
+                        // File was modified by terminal (script wrote to it)
+                        changed.push({ path: p, content });
+                    }
+                }
+                for (const p of Object.keys(currentFiles)) {
+                    if (p === '.env' || p.startsWith('.env.')) continue;
+                    if (fsFiles[p] === undefined) {
+                        // File was deleted from terminal
+                        deleted.push(p);
+                    }
+                }
+
+                // Emit to partner
+                if (socket && sessionId) {
+                    for (const f of created) {
+                        socket.emit('code:file-create', { sessionId, path: f.path, content: f.content, senderId: socket.id });
+                    }
+                    for (const f of changed) {
+                        socket.emit('code:file-change', { sessionId, path: f.path, content: f.content, senderId: socket.id });
+                    }
+                    for (const p of deleted) {
+                        socket.emit('code:file-delete', { sessionId, path: p, senderId: socket.id });
+                    }
+                }
+
+                // Update local React state (apply all diffs)
+                if (created.length || deleted.length || changed.length) {
+                    setFiles(prev => {
+                        const next = { ...prev };
+                        for (const f of created) next[f.path] = f.content;
+                        for (const f of changed) next[f.path] = f.content;
+                        for (const p of deleted) delete next[p];
+                        return next;
+                    });
+                    // Also update WebContainer models for modified files
+                    for (const f of changed) {
+                        const model = modelsRef.current.get(f.path);
+                        if (model && !model.isDisposed() && model.getValue() !== f.content) {
+                            suppressSyncRef.current = true;
+                            const fullRange = model.getFullModelRange();
+                            model.pushEditOperations([], [{ range: fullRange, text: f.content }], () => null);
+                            suppressSyncRef.current = false;
                         }
                     }
-                    if (prev['.env'] !== undefined) next['.env'] = prev['.env'];
-                    return next;
-                });
-                // Also push full state snapshot so server cache stays fresh
+                }
+
+                // Keep server IDE state cache fresh
                 if (socket && sessionId) {
                     const folderArr: string[] = [];
                     for (const p of Object.keys(fsFiles)) {
@@ -918,7 +956,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     }
                     socket.emit('ide:state-update', { sessionId, files: fsFiles, folders: [...new Set(folderArr)] });
                 }
-                // Update folders set — REPLACE (not merge) so deleted folders disappear
+
+                // Update folders set
                 const newFolders = new Set<string>();
                 for (const p of Object.keys(fsFiles)) {
                     const parts = p.split('/');
@@ -927,18 +966,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 setFolders(newFolders);
             };
 
-            // Watch with debounce to avoid rapid re-renders on npm install etc.
+            // fs.watch with debounce — catches most terminal changes
             let watchTimer: ReturnType<typeof setTimeout> | null = null;
             try {
                 wc.fs.watch('/', { recursive: true }, (_event: string, filename: string | Uint8Array | null) => {
                     const name = filename ? (typeof filename === 'string' ? filename : new TextDecoder().decode(filename)) : '';
                     if (!name || IGNORED(name)) return;
                     if (watchTimer) clearTimeout(watchTimer);
-                    watchTimer = setTimeout(syncFsToTree, 800);
+                    watchTimer = setTimeout(syncFsToTree, 600);
                 });
             } catch {
                 // fs.watch may not be available in older WebContainer versions — silent fail
             }
+
+            // Polling fallback every 3s — catches changes fs.watch misses (e.g. bulk shell operations)
+            const pollTimer = setInterval(syncFsToTree, 3000);
+            // Clean up poll on next boot (stored on wc so it's accessible)
+            (wc as any)._pollTimer = pollTimer;
 
         } catch (err: any) {
             if (term) { term.writeln(`\x1b[31m✗ Failed: ${err.message}\x1b[0m`); term.writeln('\x1b[33mℹ Requires Chromium browser\x1b[0m'); }
@@ -970,6 +1014,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             modelsRef.current.clear();
             // Teardown WebContainer
             if (webcontainerRef.current) {
+                if ((webcontainerRef.current as any)._pollTimer) clearInterval((webcontainerRef.current as any)._pollTimer);
                 try { (webcontainerRef.current as any).teardown?.(); } catch { /* */ }
                 webcontainerRef.current = null;
             }
