@@ -312,7 +312,7 @@ export function CollaborationPage() {
       setShowTimeUpModal(true);
     });
 
-    // Partner force-quit â€” dedicated event with credits info
+    // Partner force-quit — dedicated event with credits info
     socket.on('challenge:partner-force-quit', (data: { sessionId: string; creditsEarned: number; message: string }) => {
       setPartnerForceQuit({ creditsEarned: data.creditsEarned, message: data.message });
     });
@@ -351,7 +351,7 @@ export function CollaborationPage() {
 
     // Rejoined after refresh
     socket.on('challenge:rejoined', (data: any) => {
-      // Cancel the rejoin guard timeout â€” backend confirmed this session is valid
+      // Cancel the rejoin guard timeout — backend confirmed this session is valid
       const tid = sessionStorage.getItem('_rejoin_timeout_id');
       if (tid) { clearTimeout(Number(tid)); sessionStorage.removeItem('_rejoin_timeout_id'); }
 
@@ -388,7 +388,7 @@ export function CollaborationPage() {
       setIncomingProjectEdit({ proposerName: data.proposerName, title: data.title, description: data.description });
     });
 
-    // Project edit approved by partner â€” update session for both users
+    // Project edit approved by partner — update session for both users
     socket.on('challenge:project-updated', (data: any) => {
       setSession(prev => prev ? { ...prev, projectIdea: { ...prev.projectIdea, title: data.title, description: data.description } } : prev);
       setIncomingProjectEdit(null);
@@ -400,7 +400,7 @@ export function CollaborationPage() {
       setTimeout(() => setProjectEditNotification(null), 5000);
     });
 
-    // Project edit declined (proposer receives this) â€” show banner
+    // Project edit declined (proposer receives this) — show banner
     socket.on('challenge:project-edit-declined', () => {
       setProjectEditNotification({ type: 'declined' });
       setTimeout(() => setProjectEditNotification(null), 5000);
@@ -500,7 +500,7 @@ export function CollaborationPage() {
         socketService.getSocket()?.emit('ide:request-state', data.sessionId);
 
         // Guard: if backend doesn't confirm rejoin within 4s, the session is gone
-        // (partner_skipped, completed, etc.) â€” clear stale localStorage and go home
+        // (partner_skipped, completed, etc.) — clear stale localStorage and go home
         const rejoinTimeout = setTimeout(() => {
           // challenge:rejoined would have cancelled this via clearTimeout
           // If we're here, backend silently rejected the rejoin
@@ -512,7 +512,7 @@ export function CollaborationPage() {
         // Store so challenge:rejoined handler can cancel it
         sessionStorage.setItem('_rejoin_timeout_id', String(rejoinTimeout));
 
-        // Restore active view from session storage â€” only if the session was already visited (resume)
+        // Restore active view from session storage — only if the session was already visited (resume)
         // Fresh matches must always start on 'chat'
         const savedView = sessionStorage.getItem(`collab_active_view_${data.sessionId}`);
         if (savedView === 'code') {
@@ -654,7 +654,7 @@ export function CollaborationPage() {
   // Sessions only end via: force-quit button, approved exit request, or timer expiry.
   useEffect(() => {
     return () => {
-      // Do nothing â€” session stays alive in backend & localStorage
+      // Do nothing — session stays alive in backend & localStorage
       // User can resume from Dashboard "Recent Sessions"
     };
   }, []);
@@ -664,7 +664,7 @@ export function CollaborationPage() {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (status === 'matched' && session) {
         e.preventDefault();
-        e.returnValue = 'You have an active session. Your progress is saved â€” you can resume from the Dashboard.';
+        e.returnValue = 'You have an active session. Your progress is saved — you can resume from the Dashboard.';
         return e.returnValue;
       }
     };
@@ -679,7 +679,7 @@ export function CollaborationPage() {
 
     const msg = newMessage.trim();
 
-    // Optimistic update â€” show message instantly
+    // Optimistic update — show message instantly
     const optimisticMsg: ChallengeMessage = {
       id: `opt-${Date.now()}`,
       senderId: user?.id || '',
@@ -824,7 +824,7 @@ export function CollaborationPage() {
 
   const handleSaveProjectEdit = useCallback(() => {
     if (!session) return;
-    // Send proposal to partner â€” DON'T update local state until partner approves
+    // Send proposal to partner — DON'T update local state until partner approves
     socketService.getSocket()?.emit('challenge:propose-project-edit', {
       sessionId: session.sessionId,
       title: editProjectTitle,
@@ -889,8 +889,8 @@ export function CollaborationPage() {
                     title="View profile & add friend"
                   >{session.partnerName}</strong>
                   <span className={`inline-block w-2 h-2 rounded-full ml-1 ${partnerStatus === 'online' ? 'bg-green-500' : partnerStatus === 'away' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`} title={`Partner is ${partnerStatus}`} />
-                  <span className="text-yellow-500"> â­ {session.partnerReputation}</span>
-                  {session.projectIdea && ` â€¢ ${session.projectIdea.title}`}
+                  <span className="text-yellow-500"> ⭐ {session.partnerReputation}</span>
+                  {session.projectIdea && ` • ${session.projectIdea.title}`}
                 </p>
               </div>
             </div>
@@ -925,7 +925,7 @@ export function CollaborationPage() {
                 <span className="font-mono text-sm font-semibold">{formatTime(timeRemaining)}</span>
               </div>
 
-              {/* Exit buttons â€” solo mode shows Leave only, collaborative shows Request + Force */}
+              {/* Exit buttons — solo mode shows Leave only, collaborative shows Request + Force */}
               {isSoloMode ? (
                 <Button variant="outline" size="sm" onClick={() => setShowSoloLeaveConfirm(true)} className="text-gray-600 border-gray-200 hover:bg-gray-50">
                   <LogOut className="w-4 h-4 mr-1" /> Leave
@@ -1000,12 +1000,12 @@ export function CollaborationPage() {
             {/* Exit request banners */}
             {exitRequestSent && (
               <div className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 text-sm text-yellow-700">
-                â³ Exit request sent. Waiting for partner's response...
+                ⏳ Exit request sent. Waiting for partner's response...
               </div>
             )}
             {exitDeclined && (
               <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 text-sm text-red-700">
-                âŒ Your exit request was declined.
+                ❌ Your exit request was declined.
               </div>
             )}
 
@@ -1077,7 +1077,7 @@ export function CollaborationPage() {
           </div>
         )}
 
-        {/* Kanban + Sidebar â€” only in chat view */}
+        {/* Kanban + Sidebar — only in chat view */}
         {activeView === 'chat' && sidebarOpen && (<>
           <div className="w-96 bg-gray-50 dark:bg-gray-900/50 flex flex-col border-r border-gray-200 dark:border-gray-700">
             {/* Task Header with + and AI buttons */}
@@ -1499,7 +1499,7 @@ export function CollaborationPage() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">âœï¸</span>
+                <span className="text-2xl">âœ️</span>
               </div>
               <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">Project Edit Proposal</h3>
               <p className="text-sm text-gray-500 text-center mb-3">
@@ -1558,9 +1558,9 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
-      {/* Solo mode indicator moved to header â€” no fixed overlay */}
+      {/* Solo mode indicator moved to header — no fixed overlay */}
 
-      {/* â”€â”€ Partner Force-Quit Popup â”€â”€ */}
+      {/* ── Partner Force-Quit Popup ── */}
       <AnimatePresence>
         {partnerForceQuit && session && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1570,7 +1570,7 @@ export function CollaborationPage() {
               <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <LogOut className="w-8 h-8 text-yellow-400" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Partner Left ðŸ‘‹</h3>
+              <h3 className="text-xl font-bold text-white mb-2">Partner Left 🔒‹</h3>
               <p className="text-gray-400 text-sm mb-2">{partnerForceQuit.message}</p>
               <div className="inline-flex items-center gap-1.5 bg-green-500/10 border border-green-500/20 rounded-full px-3 py-1 mb-6">
                 <span className="text-green-400 text-xs font-semibold">+{partnerForceQuit.creditsEarned} credits added to your account</span>
@@ -1590,7 +1590,7 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
-      {/* â”€â”€ Time's Up Modal â”€â”€ */}
+      {/* ── Time's Up Modal ── */}
       <AnimatePresence>
         {showTimeUpModal && session && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1600,7 +1600,7 @@ export function CollaborationPage() {
               <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Clock className="w-8 h-8 text-orange-400" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">â° Time's Up!</h3>
+              <h3 className="text-xl font-bold text-white mb-2">⏰ Time's Up!</h3>
               <p className="text-gray-400 text-sm mb-6">
                 Your session time has ended. What would you like to do?
               </p>
