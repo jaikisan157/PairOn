@@ -68,9 +68,9 @@ interface ChallengeSession {
 }
 
 const MODE_LABELS: Record<ChallengeMode, string> = {
-  sprint: 'âš¡ Sprint',
-  challenge: 'ðŸ† Challenge',
-  build: 'ðŸ”¨ Build',
+  sprint: '⚡ Sprint',
+  challenge: '🏆 Challenge',
+  build: '🔨 Build Week',
 };
 
 export function CollaborationPage() {
@@ -916,7 +916,7 @@ export function CollaborationPage() {
             <div className="flex items-center gap-3">
               {/* Solo mode indicator (inline, not blocking) */}
               {isSoloMode && (
-                <span className="text-xs bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full font-medium">âš¡ Solo</span>
+                <span className="text-xs bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full font-medium">⚡ Solo</span>
               )}
               {/* Timer */}
               <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full ${timeRemaining < 300 ? 'bg-red-100 text-red-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
@@ -1243,7 +1243,7 @@ export function CollaborationPage() {
                         <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
                           <button onClick={() => handleTaskStatusChange(task.id, 'todo')}
                             className="p-1 text-gray-400 hover:text-blue-500" title="Undo (back to todo)">
-                            â†©
+                            ↩
                           </button>
                           <button onClick={() => socketService.getSocket()?.emit('challenge:delete-task', session.sessionId, task.id)}
                             className="p-1 text-red-400 hover:text-red-600" title="Delete">
@@ -1272,7 +1272,7 @@ export function CollaborationPage() {
                         <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
                           <button onClick={() => handleTaskStatusChange(task.id, 'in-progress')}
                             className="p-1 text-gray-400 hover:text-blue-500" title="Undo (back to in-progress)">
-                            â†©
+                            ↩
                           </button>
                           <button onClick={() => socketService.getSocket()?.emit('challenge:delete-task', session.sessionId, task.id)}
                             className="p-1 text-red-400 hover:text-red-600" title="Delete">
@@ -1335,7 +1335,7 @@ export function CollaborationPage() {
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Submission</h3>
               {session.submission ? (
                 <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
-                  <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">âœ… Submitted</p>
+                  <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
                   <a href={session.submission.link} target="_blank" rel="noopener noreferrer"
                     className="text-xs text-pairon-accent hover:underline break-all">{session.submission.link}</a>
                 </div>
@@ -1534,7 +1534,7 @@ export function CollaborationPage() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
               <div className="w-12 h-12 bg-pairon-accent/10 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-2xl">ðŸŽ¯</span>
+                <span className="text-2xl">🎯</span>
               </div>
               <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white mb-1">Activity Check</h3>
               <p className="text-sm text-gray-500 mb-4">Slide to the <strong className="text-green-500">green zone</strong> to verify</p>
@@ -1612,7 +1612,7 @@ export function CollaborationPage() {
                   </button>
                 )}
                 {session.submission && (
-                  <div className="py-2 text-green-400 text-sm">âœ… Project already submitted!</div>
+                  <div className="py-2 text-green-400 text-sm">✅ Project already submitted!</div>
                 )}
                 <button onClick={() => setShowTimeUpModal(false)}
                   className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-colors">

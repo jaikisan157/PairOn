@@ -614,6 +614,12 @@ export function QuickConnectPage() {
                                             alert('⚠️ Collaboration projects require a desktop/laptop. Please switch to a PC to accept this proposal.');
                                             return;
                                         }
+                                        // Block if user already has an active challenge session
+                                        const existingSession = localStorage.getItem('challenge_session');
+                                        if (existingSession) {
+                                            alert('⚠️ You already have an active collaboration session. Please finish or leave it before accepting another proposal.');
+                                            return;
+                                        }
                                         socketService.acceptProposal(viewingProposal.id);
                                         setIncomingProposals(prev => prev.filter(p => p.id !== viewingProposal.id));
                                         setViewingProposal(null);

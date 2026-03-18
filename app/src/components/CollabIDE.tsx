@@ -1228,7 +1228,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 Accept: 'application/vnd.github+json',
                 'Content-Type': 'application/json',
             };
-            const remoteToken = storedToken as string;
 
             // 2. Create the repository
             const repoName = githubRepoName.trim().replace(/\s+/g, '-').toLowerCase();
@@ -1262,35 +1261,63 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
 
             const repoUrl = `https://github.com/${owner}/${repoName}`;
-            const remoteWithToken = `https://${remoteToken}@github.com/${owner}/${repoName}.git`;
 
-            // 4. Run git commands in the terminal
+            // 4. Push files via GitHub Contents API (no git needed — WebContainers don't have git)
             setGithubResult({ url: repoUrl, owner });
             setShowGithubModal(false);
-            addToast('🎉 Repo created! Running git push in terminal...', 'success');
+            addToast('📤 Uploading files to GitHub...', 'success');
 
-            // Switch to terminal tab
-            setActiveTermTab('shell');
+            const filesToPush = Object.entries(files).filter(([path]) => !path.includes('.env'));
+            if (filesToPush.length > 0) {
+                try {
+                    // Create blobs for each file
+                    const blobs = await Promise.all(
+                        filesToPush.map(async ([, content]) => {
+                            const res = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs`, {
+                                method: 'POST', headers,
+                                body: JSON.stringify({ content: btoa(unescape(encodeURIComponent(content))), encoding: 'base64' }),
+                            });
+                            return res.json() as Promise<{ sha: string }>;
+                        })
+                    );
 
-            // Write git commands to the active shell after small delay
-            await new Promise(r => setTimeout(r, 600));
-            const writer = shellWriterRef.current;
-            if (writer) {
-                const cmds = [
-                    'git init\n',
-                    'git add .\n',
-                    `git commit -m "Initial commit — built on PairOn"\n`,
-                    `git remote add origin ${remoteWithToken}\n`,
-                    'git branch -M main\n',
-                    'git push -u origin main\n',
-                ];
-                for (const cmd of cmds) {
-                    await writer.write(cmd);
-                    await new Promise(r => setTimeout(r, 400));
+                    // Create tree
+                    const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees`, {
+                        method: 'POST', headers,
+                        body: JSON.stringify({
+                            tree: filesToPush.map(([path], i) => ({
+                                path: path.startsWith('/') ? path.slice(1) : path,
+                                mode: '100644',
+                                type: 'blob',
+                                sha: blobs[i].sha,
+                            })),
+                        }),
+                    });
+                    const tree = await treeRes.json() as { sha: string };
+
+                    // Create commit
+                    const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
+                        method: 'POST', headers,
+                        body: JSON.stringify({
+                            message: `Initial commit — built on PairOn 🚀`,
+                            tree: tree.sha,
+                            parents: [],
+                        }),
+                    });
+                    const commit = await commitRes.json() as { sha: string };
+
+                    // Update branch ref
+                    await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
+                        method: 'POST', headers,
+                        body: JSON.stringify({ ref: 'refs/heads/main', sha: commit.sha }),
+                    });
+
+                    addToast(`✅ ${filesToPush.length} files pushed to GitHub!`, 'success');
+                } catch {
+                    addToast('⚠️ Repo created but file upload failed. Try pushing manually.', 'error');
                 }
             } else {
-                // Fallback: show commands in toast for user to copy-paste
-                addToast('Boot the terminal first, then run: git init && git add . && git commit -m "init" && git push', 'info');
+                addToast('✅ Repo created! No files to push yet.', 'success');
             }
 
 
