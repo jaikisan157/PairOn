@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, FolderOpen, CheckCircle, Clock, Download, ExternalLink, Users } from 'lucide-react';
+import { ArrowLeft, FolderOpen, CheckCircle, Clock, Download, ExternalLink, Users, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { socketService } from '@/lib/socket';
+import JSZip from 'jszip';
 
-interface Project {
+interface SavedProject {
   sessionId: string;
   partnerName: string;
   partnerReputation: number;
@@ -18,6 +18,8 @@ interface Project {
   tasksDone: number;
   submissionLink?: string;
   submissionDesc?: string;
+  savedAt?: string;
+  files?: Record<string, string>;
 }
 
 const MODE_LABEL: Record<string, string> = {
@@ -28,60 +30,68 @@ const MODE_LABEL: Record<string, string> = {
 
 export function ProjectsPage() {
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<SavedProject[]>([]);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
-    const socket = socketService.getSocket();
-    if (!socket) { setLoading(false); return; }
-
-    socket.emit('dashboard:get-history');
-    socket.once('dashboard:history', (history: any[]) => {
-      // Only show completed sessions with a project title
-      const completed = history
-        .filter((s: any) => s.status === 'completed' || s.status === 'partner_skipped')
-        .map((s: any) => ({
-          sessionId: s.sessionId,
-          partnerName: s.partnerName,
-          partnerReputation: s.partnerReputation,
-          mode: s.mode,
-          projectIdea: s.projectIdea,
-          status: s.status,
-          startedAt: s.startedAt,
-          endsAt: s.endsAt,
-          tasksTotal: s.tasksTotal || 0,
-          tasksDone: s.tasksDone || 0,
-          submissionLink: s.submissionLink || '',
-          submissionDesc: s.submissionDesc || '',
-        }));
-      setProjects(completed);
-      setLoading(false);
-    });
-    // Timeout fallback
-    const t = setTimeout(() => setLoading(false), 4000);
-    return () => clearTimeout(t);
+    // Load only explicitly-saved projects from localStorage
+    const saved = JSON.parse(localStorage.getItem('saved_projects') || '[]') as SavedProject[];
+    // Sort newest first
+    saved.sort((a, b) => new Date(b.savedAt || b.endsAt).getTime() - new Date(a.savedAt || a.endsAt).getTime());
+    setProjects(saved);
   }, []);
 
-  const downloadProject = (project: Project) => {
-    const content = `
-PROJECT: ${project.projectIdea?.title || 'Untitled'}
-=====================================================
-Description: ${project.projectIdea?.description || 'No description'}
-Mode: ${MODE_LABEL[project.mode] || project.mode}
-Partner: ${project.partnerName}
-Started: ${new Date(project.startedAt).toLocaleString()}
-Completed: ${new Date(project.endsAt).toLocaleString()}
-Tasks: ${project.tasksDone}/${project.tasksTotal} done
-${project.submissionLink ? `Submission: ${project.submissionLink}` : ''}
-${project.submissionDesc ? `Notes: ${project.submissionDesc}` : ''}
-`.trim();
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${(project.projectIdea?.title || 'project').replace(/\s+/g, '_')}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const downloadProject = async (project: SavedProject) => {
+    setDownloadingId(project.sessionId);
+    try {
+      const zip = new JSZip();
+      const files = project.files || {};
+      const hasFiles = Object.keys(files).length > 0;
+
+      if (hasFiles) {
+        // Add all IDE files to the zip
+        for (const [path, content] of Object.entries(files)) {
+          // Remove leading slash if present
+          const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+          zip.file(cleanPath, content);
+        }
+      } else {
+        // No files — create a README with project info
+        const readme = [
+          `# ${project.projectIdea?.title || 'Untitled Project'}`,
+          '',
+          `> ${project.projectIdea?.description || 'No description'}`,
+          '',
+          '## Session Info',
+          `- **Mode**: ${MODE_LABEL[project.mode] || project.mode}`,
+          `- **Partner**: ${project.partnerName}`,
+          `- **Started**: ${new Date(project.startedAt).toLocaleString()}`,
+          `- **Completed**: ${new Date(project.endsAt).toLocaleString()}`,
+          `- **Tasks**: ${project.tasksDone}/${project.tasksTotal} done`,
+          project.submissionLink ? `- **Submission**: ${project.submissionLink}` : '',
+          project.submissionDesc ? `- **Notes**: ${project.submissionDesc}` : '',
+          '',
+          '_No project files were captured. Files are only available if saved immediately after session._',
+        ].filter(Boolean).join('\n');
+        zip.file('README.md', readme);
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(project.projectIdea?.title || 'project').replace(/\s+/g, '_')}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const deleteProject = (sessionId: string) => {
+    const updated = projects.filter(p => p.sessionId !== sessionId);
+    setProjects(updated);
+    localStorage.setItem('saved_projects', JSON.stringify(updated));
   };
 
   return (
@@ -92,22 +102,19 @@ ${project.submissionDesc ? `Notes: ${project.submissionDesc}` : ''}
         </button>
         <div>
           <h1 className="font-display font-semibold text-gray-900 dark:text-white">My Projects</h1>
-          <p className="text-xs text-gray-500">{projects.length} completed project{projects.length !== 1 ? 's' : ''}</p>
+          <p className="text-xs text-gray-500">{projects.length} saved project{projects.length !== 1 ? 's' : ''}</p>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <div className="w-10 h-10 border-4 border-pairon-accent/30 border-t-pairon-accent rounded-full animate-spin" />
-          </div>
-        ) : projects.length === 0 ? (
+        {projects.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
             <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
               <FolderOpen className="w-8 h-8 text-gray-400" />
             </div>
-            <h3 className="font-display text-lg font-semibold text-gray-900 dark:text-white mb-2">No completed projects yet</h3>
-            <p className="text-gray-500 text-sm mb-6">Start a collaboration and submit a project to see it here.</p>
+            <h3 className="font-display text-lg font-semibold text-gray-900 dark:text-white mb-2">No saved projects yet</h3>
+            <p className="text-gray-500 text-sm mb-2">Complete a session and choose to save your project when prompted.</p>
+            <p className="text-gray-400 text-xs mb-6">Projects are saved when you click "Save to My Projects" at the end of a session.</p>
             <Button onClick={() => navigate('/dashboard')} className="bg-pairon-accent hover:bg-pairon-accent/90 text-white rounded-xl">
               Find a Partner
             </Button>
@@ -120,6 +127,7 @@ ${project.submissionDesc ? `Notes: ${project.submissionDesc}` : ''}
                   key={project.sessionId}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
                   transition={{ delay: i * 0.06 }}
                   className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm hover:shadow-md transition-shadow"
                 >
@@ -130,6 +138,11 @@ ${project.submissionDesc ? `Notes: ${project.submissionDesc}` : ''}
                         <h3 className="font-semibold text-gray-900 dark:text-white truncate">
                           {project.projectIdea?.title || 'Untitled Project'}
                         </h3>
+                        {project.files && Object.keys(project.files).length > 0 && (
+                          <span className="flex-shrink-0 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 px-2 py-0.5 rounded-full font-medium">
+                            {Object.keys(project.files).length} files
+                          </span>
+                        )}
                       </div>
                       {project.projectIdea?.description && (
                         <p className="text-sm text-gray-500 dark:text-gray-400 mb-3 line-clamp-2">{project.projectIdea.description}</p>
@@ -149,6 +162,11 @@ ${project.submissionDesc ? `Notes: ${project.submissionDesc}` : ''}
                             {project.tasksDone}/{project.tasksTotal} tasks
                           </span>
                         )}
+                        {project.savedAt && (
+                          <span className="text-gray-300 dark:text-gray-600">
+                            Saved {new Date(project.savedAt).toLocaleDateString()}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -166,10 +184,22 @@ ${project.submissionDesc ? `Notes: ${project.submissionDesc}` : ''}
                       )}
                       <button
                         onClick={() => downloadProject(project)}
-                        className="p-2 text-gray-400 hover:text-pairon-accent rounded-lg hover:bg-pairon-accent/10 transition-colors"
-                        title="Download project summary"
+                        disabled={downloadingId === project.sessionId}
+                        className="p-2 text-gray-400 hover:text-pairon-accent rounded-lg hover:bg-pairon-accent/10 transition-colors disabled:opacity-50"
+                        title={project.files && Object.keys(project.files).length > 0 ? 'Download project ZIP' : 'Download project summary'}
                       >
-                        <Download className="w-4 h-4" />
+                        {downloadingId === project.sessionId ? (
+                          <span className="inline-block w-4 h-4 border-2 border-pairon-accent/30 border-t-pairon-accent rounded-full animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => deleteProject(project.sessionId)}
+                        className="p-2 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        title="Remove from projects"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>

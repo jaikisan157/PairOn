@@ -792,6 +792,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
 
     socket.on('challenge:approve-project-edit', async (data: { sessionId: string; title: string; description: string }) => {
         try {
+            const pending = pendingProjectEdits.get(data.sessionId);
             pendingProjectEdits.delete(data.sessionId);
             const session = await CollaborationSession.findById(data.sessionId);
             if (!session) return;
@@ -801,24 +802,44 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 match.projectIdea.description = data.description;
                 await match.save();
             }
+            // Notify both users: updated title/description
             io.to(`challenge:${data.sessionId}`).emit('challenge:project-updated', {
                 title: data.title,
                 description: data.description,
             });
+            // Also send accepted notification back to proposer specifically
+            if (pending) {
+                io.to(`user:${pending.proposerId}`).emit('challenge:project-edit-accepted', {
+                    sessionId: data.sessionId,
+                    title: data.title,
+                });
+            }
         } catch (error) {
             console.error('Project edit approval error:', error);
         }
     });
 
     socket.on('challenge:decline-project-edit', async (data: { sessionId: string }) => {
+        const pending = pendingProjectEdits.get(data.sessionId);
         pendingProjectEdits.delete(data.sessionId);
         const session = await CollaborationSession.findById(data.sessionId).catch(() => null);
         if (!session) return;
-        const partnerId = session.participants.find((p: string) => p !== userId);
-        if (partnerId) {
-            io.to(`user:${partnerId}`).emit('challenge:project-edit-declined', { sessionId: data.sessionId });
+        // Notify the proposer their edit was declined
+        if (pending) {
+            io.to(`user:${pending.proposerId}`).emit('challenge:project-edit-declined', { sessionId: data.sessionId });
         }
     });
+
+    // ===== Get IDE files for download =====
+    socket.on('challenge:get-files', (sessionId: string) => {
+        const ideState = ideSessionState.get(sessionId);
+        socket.emit('challenge:files-response', {
+            sessionId,
+            files: ideState?.files || {},
+            folders: ideState?.folders || [],
+        });
+    });
+
 
     // ===== Delete task =====
     socket.on('challenge:delete-task', async (sessionId: string, taskId: string) => {
