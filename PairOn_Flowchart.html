@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PairOn – Full App Flowchart</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: #0f0f1a; color: #e2e8f0; }
+
+  .no-print { text-align: center; padding: 18px; background: #1e2035; border-bottom: 1px solid #2d2f4a; }
+  .no-print button {
+    background: linear-gradient(135deg,#6366f1,#8b5cf6);
+    color: white; border: none; padding: 12px 32px; border-radius: 12px;
+    font-size: 15px; font-weight: 700; cursor: pointer; margin: 0 8px;
+    box-shadow: 0 4px 16px rgba(99,102,241,0.4);
+  }
+  .no-print p { color: #9ca3af; font-size: 13px; margin-top: 8px; }
+
+  @media print {
+    .no-print { display: none; }
+    body { background: white; color: #111; }
+    .page { page-break-after: always; background: white !important; }
+    .page:last-child { page-break-after: avoid; }
+    .section-title { color: #3730a3 !important; border-color: #818cf8 !important; }
+    .node { border-color: #374151 !important; }
+    .node.start { background: #1e3a5f !important; }
+    .node.end-node { background: #1a3a2a !important; }
+    .node.decision { background: #3b2a00 !important; }
+    .arrow { color: #4b5563 !important; }
+    .connector { border-color: #6b7280 !important; }
+  }
+
+  .page {
+    max-width: 1100px; margin: 0 auto; padding: 40px 32px;
+    background: #0f0f1a;
+  }
+
+  h1.main-title {
+    text-align: center; font-size: 28px; font-weight: 700;
+    background: linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px;
+  }
+  .subtitle { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 36px; }
+
+  .section { margin-bottom: 48px; }
+  .section-title {
+    font-size: 15px; font-weight: 700; color: #818cf8;
+    border-left: 4px solid #6366f1; padding-left: 12px;
+    margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.08em;
+  }
+
+  /* Flow rows */
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 0; margin-bottom: 12px; }
+  .flow-col { display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+  /* Nodes */
+  .node {
+    display: inline-flex; align-items: center; justify-content: center;
+    text-align: center; border-radius: 10px; border: 1.5px solid #374151;
+    padding: 8px 14px; font-size: 12px; font-weight: 600; line-height: 1.35;
+    min-width: 110px; max-width: 180px; color: #e2e8f0;
+    background: #1e2035;
+  }
+  .node.start { background: linear-gradient(135deg,#1e3a5f,#1e4080); border-color: #3b82f6; color: #93c5fd; }
+  .node.end-node { background: linear-gradient(135deg,#1a3a2a,#1a4a2a); border-color: #22c55e; color: #86efac; }
+  .node.page-node { background: linear-gradient(135deg,#2d1b69,#3b1f8c); border-color: #7c3aed; color: #c4b5fd; }
+  .node.action { background: linear-gradient(135deg,#1a2a3a,#1a3040); border-color: #0ea5e9; color: #7dd3fc; }
+  .node.decision {
+    background: linear-gradient(135deg,#3b2a00,#4a3500); border-color: #f59e0b; color: #fcd34d;
+    border-radius: 6px; transform: rotate(0deg);
+    clip-path: polygon(50% 0%,100% 50%,50% 100%,0% 50%);
+    width: 120px; height: 60px; padding: 0;
+  }
+  .node.feature { background: #1c2333; border-color: #475569; color: #94a3b8; font-size: 11px; }
+  .node.notify { background: linear-gradient(135deg,#1a1a3a,#1e1a4a); border-color: #8b5cf6; color: #c4b5fd; }
+  .node.error { background: linear-gradient(135deg,#3a1a1a,#4a1a1a); border-color: #ef4444; color: #fca5a5; }
+  .node.success { background: linear-gradient(135deg,#0f2a1a,#0f3a1a); border-color: #10b981; color: #6ee7b7; }
+
+  /* Arrows */
+  .arrow { font-size: 18px; color: #4b5563; margin: 0 4px; align-self: center; }
+  .arrow-down { display: block; text-align: center; font-size: 16px; color: #4b5563; line-height: 1; margin: 2px 0; }
+  .label { font-size: 10px; color: #6b7280; margin: 0 4px; align-self: center; font-style: italic; }
+
+  /* Grid layout */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .grid4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; }
+
+  .card {
+    background: #141428; border: 1px solid #2d2f4a; border-radius: 14px; padding: 20px;
+  }
+  .card-title { font-size: 13px; font-weight: 700; color: #818cf8; margin-bottom: 14px; }
+
+  .chain { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
+  .chain-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .chain-bullet {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: #6366f1;
+  }
+  .chain-item .node { min-width: 80px; }
+
+  .branch { display: flex; gap: 16px; }
+  .branch-item { flex: 1; }
+  .branch-label { font-size: 10px; color: #6b7280; text-align: center; margin-bottom: 6px; font-weight: 600; }
+
+  .divider { border: none; border-top: 1px solid #2d2f4a; margin: 32px 0; }
+  .badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 8px; }
+  .badge.blue { background: rgba(99,102,241,0.2); color: #818cf8; }
+  .badge.green { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+  .badge.yellow { background: rgba(245,158,11,0.2); color: #fcd34d; }
+
+  .outcome-list { list-style: none; padding: 0; }
+  .outcome-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: #94a3b8; margin-bottom: 8px; line-height: 1.4; }
+  .outcome-list li::before { content: '→'; color: #6366f1; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+
+  .two-col-list { columns: 2; column-gap: 24px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 32px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9ca3af; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <button onclick="window.print()">🖨️ Save as PDF / Print</button>
+  <p>Use browser Print → Save as PDF. Set paper to A3 or A4 Landscape for best results.</p>
+</div>
+
+<div class="page">
+  <h1 class="main-title">⚡ PairOn — Complete Application Flowchart</h1>
+  <p class="subtitle">All pages, user flows, and outcomes · v1.0 · March 2026</p>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div> Entry/Start</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Page/Screen</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#0ea5e9"></div> Action/Process</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Decision Point</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div> Success/End State</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> Error State</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div> Notification</div>
+  </div>
+
+  <!-- SECTION 1: AUTH -->
+  <div class="section">
+    <div class="section-title">1 · Authentication &amp; Registration</div>
+    <div class="grid2">
+
+      <div class="card">
+        <div class="card-title">Login Flow</div>
+        <div class="chain">
+          <div class="chain-item"><span class="node start">User Visits /login</span></div>
+          <div class="arrow-down">↓</div>
+          <div class="chain-item"><span class="node page-node">Login Page</span></div>
+          <div class="arrow-down">↓</div>
+          <!-- Branch -->
+          <div style="display:flex;gap:12px;margin-bottom:6px;">
+            <div>
+              <div class="branch-label">Email/Password</div>
+              <span class="node action">POST /api/auth/login</span>
+              <div class="arrow-down">↓</div>
+              <div style="display:flex;gap:8px;">
+                <div>
+                  <div class="branch-label" style="color:#22c55e">✓ Valid</div>
+                  <span class="node success">JWT stored</span>
+                </div>
+                <div>
+                  <div class="branch-label" style="color:#ef4444">✗ Invalid</div>
+                  <span class="node error">Error Banner</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="branch-label">Google OAuth</div>
+              <span class="node action">Redirect → Google</span>
+              <div class="arrow-down">↓</div>
+              <span class="node action">Code → Backend</span>
+              <div class="arrow-down">↓</div>
+              <span class="node success">JWT returned</span>
+            </div>
+            <div>
+              <div class="branch-label">GitHub OAuth</div>
+              <span class="node action">Redirect → GitHub</span>
+              <div class="arrow-down">↓</div>
+              <span class="node action">/github/login/callback</span>
+              <div class="arrow-down">↓</div>
+              <span class="node success">?github_token=JWT</span>
+            </div>
+          </div>
+          <div class="arrow-down">↓</div>
+          <div style="display:flex;gap:8px;">
+            <div>
+              <div class="branch-label">Onboarding done?</div>
+              <div style="display:flex;gap:8px;">
+                <div><div class="branch-label" style="color:#22c55e">Yes</div><span class="node page-node">/dashboard</span></div>
+                <div><div class="branch-label" style="color:#f59e0b">No</div><span class="node page-node">/onboarding</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Registration Flow</div>
+        <div class="chain">
+          <div class="chain-item"><span class="node start">User Visits /register</span></div>
+          <div class="arrow-down">↓</div>
+          <div class="chain-item"><span class="node page-node">Register Page – Step 1</span></div>
+          <div style="display:flex;gap:10px;margin-bottom:6px;">
+            <div>
+              <div class="branch-label">Social Sign-up</div>
+              <span class="node action">Google / GitHub →</span>
+              <div class="arrow-down">↓</div>
+              <span class="node success">Instant account + JWT</span>
+            </div>
+            <div>
+              <div class="branch-label">Email</div>
+              <span class="node action">Validate form</span>
+              <div class="arrow-down">↓</div>
+              <span class="node action">Send OTP email</span>
+              <div class="arrow-down">↓</div>
+              <span class="node page-node">Step 2: Enter OTP</span>
+              <div class="arrow-down">↓</div>
+              <div style="display:flex;gap:6px;">
+                <div><div class="branch-label" style="color:#22c55e">Valid</div><span class="node success">Account created</span></div>
+                <div><div class="branch-label" style="color:#ef4444">Invalid</div><span class="node error">Error + Resend</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="arrow-down">↓</div>
+          <span class="node page-node">/onboarding</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 2: ONBOARDING -->
+  <div class="section">
+    <div class="section-title">2 · Onboarding</div>
+    <div class="card">
+      <div class="card-title">New User Onboarding (required before dashboard)</div>
+      <div class="flow" style="flex-wrap:wrap;gap:8px;align-items:center;">
+        <span class="node start">New Account</span>
+        <span class="arrow">→</span>
+        <span class="node page-node">/onboarding</span>
+        <span class="arrow">→</span>
+        <span class="node action">Enter Skills</span>
+        <span class="arrow">→</span>
+        <span class="node action">Enter Interests</span>
+        <span class="arrow">→</span>
+        <span class="node action">Set Exp Level</span>
+        <span class="arrow">→</span>
+        <span class="node action">Write Bio</span>
+        <span class="arrow">→</span>
+        <span class="node action">POST /api/users/onboarding</span>
+        <span class="arrow">→</span>
+        <span class="node success">onboardingComplete=true</span>
+        <span class="arrow">→</span>
+        <span class="node page-node">/dashboard</span>
+      </div>
+      <p style="font-size:11px;color:#6b7280;margin-top:10px;">⚠ ProtectedRoute redirects all pages → /onboarding until complete.</p>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 3: DASHBOARD -->
+  <div class="section">
+    <div class="section-title">3 · Dashboard</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">Dashboard Stats &amp; Navigation</div>
+        <ul class="outcome-list">
+          <li><strong>Credits counter</strong> — displays current credits balance</li>
+          <li><strong>Reputation counter</strong> — displays reputation score</li>
+          <li><strong>Projects counter</strong> — clickable → navigates to /projects</li>
+          <li><strong>Active sessions banner</strong> — shows running challenge sessions</li>
+          <li><strong>Recent Sessions list</strong> — past sessions with "Continue" option</li>
+          <li><strong>Find Partner button</strong> — opens mode selection modal</li>
+          <li><strong>Quick Connect button</strong> — navigates to /quick-connect</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title">Mode Selection → Collaboration</div>
+        <div class="chain">
+          <div style="display:flex;gap:8px;margin-bottom:6px;">
+            <span class="node action">Sprint (3h)</span>
+            <span class="node action">Challenge (24h)</span>
+            <span class="node action">Build (7d)</span>
+          </div>
+          <div class="arrow-down">↓</div>
+          <span class="node action">Enter queue (socket)</span>
+          <div class="arrow-down">↓</div>
+          <div style="display:flex;gap:8px;">
+            <div><div class="branch-label" style="color:#22c55e">Match found</div><span class="node success">challenge:matched → /collaborate</span></div>
+            <div><div class="branch-label" style="color:#6b7280">Waiting</div><span class="node feature">Searching... spinner</span></div>
+            <div><div class="branch-label" style="color:#ef4444">Cancel</div><span class="node error">Leave queue</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 4: COLLABORATION -->
+  <div class="section">
+    <div class="section-title">4 · Collaboration Session (Sprint / Challenge / Build)</div>
+    <div class="grid3">
+
+      <div class="card">
+        <div class="card-title">Session Start &amp; IDE</div>
+        <ul class="outcome-list">
+          <li>Both users join challenge room via socket</li>
+          <li>Project idea suggested by matching algorithm</li>
+          <li>Collaborative code editor (Monaco/CodeMirror)</li>
+          <li>Real-time file sync: create / edit / delete / rename</li>
+          <li>File-lock system — only 1 user edits at a time</li>
+          <li>Multiple terminal instances (shared output)</li>
+          <li>Live preview URL shared between users</li>
+          <li>Heartbeat/activity tracking (30s intervals)</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Project Name Change Flow</div>
+        <div class="chain">
+          <span class="node action">User proposes rename</span>
+          <div class="arrow-down">↓</div>
+          <span class="node action">challenge:propose-project-edit</span>
+          <div class="arrow-down">↓</div>
+          <span class="node notify">Partner sees popup modal</span>
+          <div class="arrow-down">↓</div>
+          <div style="display:flex;gap:8px;">
+            <div>
+              <div class="branch-label" style="color:#22c55e">Accept</div>
+              <span class="node success">Both UIs updated</span>
+              <div class="arrow-down">↓</div>
+              <span class="node notify">✅ "Accepted" banner → proposer</span>
+            </div>
+            <div>
+              <div class="branch-label" style="color:#ef4444">Decline</div>
+              <span class="node error">No change</span>
+              <div class="arrow-down">↓</div>
+              <span class="node notify">❌ "Declined" banner → proposer</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Task Management</div>
+        <ul class="outcome-list">
+          <li>Add task manually or via AI suggestions (@ai in chat)</li>
+          <li>Task statuses: Todo → In Progress → Done</li>
+          <li>Any user can update/delete tasks (synced via socket)</li>
+          <li>AI suggests tasks based on project description</li>
+          <li>Task count shown in Projects page after save</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Chat &amp; Communication</div>
+        <ul class="outcome-list">
+          <li>Real-time chat messages (text)</li>
+          <li>@ai prefix → AI assistant responds in chat</li>
+          <li>Typing indicator shown to partner</li>
+          <li>Activity check (slide-to-verify) after 10min idle</li>
+          <li>Partner status: online / away / offline</li>
+          <li>Content moderation — warning banner on violations</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Exit &amp; Leave Flows</div>
+        <div class="chain">
+          <div style="display:flex;gap:8px;margin-bottom:6px;">
+            <span class="node action">Request Leave</span>
+            <span class="node action">Force Quit</span>
+            <span class="node action">Solo Mode Leave</span>
+          </div>
+          <div class="arrow-down">↓</div>
+          <div style="display:flex;gap:8px;">
+            <div>
+              <div class="branch-label">Request</div>
+              <span class="node notify">Partner sees popup</span>
+              <div class="arrow-down">↓</div>
+              <div style="display:flex;gap:6px;">
+                <span class="node success">Accept → End</span>
+                <span class="node error">Decline → Stay</span>
+              </div>
+            </div>
+            <div>
+              <div class="branch-label">Force Quit</div>
+              <span class="node notify">Partner gets credit popup</span>
+              <div class="arrow-down">↓</div>
+              <span class="node feature">Continue alone? (Solo Mode)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Session End → Save to Projects</div>
+        <div class="chain">
+          <div style="display:flex;gap:6px;margin-bottom:4px;">
+            <span class="node action">Time Up</span>
+            <span class="node action">Submit</span>
+            <span class="node action">Approved Exit</span>
+          </div>
+          <div class="arrow-down">↓</div>
+          <span class="node notify">⏱ Time-up modal (continue / end)</span>
+          <div class="arrow-down">↓</div>
+          <span class="node notify">💾 Save to Projects modal</span>
+          <div class="arrow-down">↓</div>
+          <div style="display:flex;gap:8px;">
+            <div>
+              <div class="branch-label" style="color:#22c55e">Save</div>
+              <span class="node action">Get IDE files via socket</span>
+              <div class="arrow-down">↓</div>
+              <span class="node success">Stored in localStorage</span>
+              <div class="arrow-down">↓</div>
+              <span class="node page-node">/projects</span>
+            </div>
+            <div>
+              <div class="branch-label">Skip</div>
+              <span class="node page-node">/dashboard</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 5: QUICK CONNECT -->
+  <div class="section">
+    <div class="section-title">5 · Quick Connect (Anonymous Chat)</div>
+    <div class="card" style="max-width:700px;">
+      <div class="flow" style="flex-wrap:wrap;gap:8px;">
+        <span class="node start">/quick-connect</span>
+        <span class="arrow">→</span>
+        <span class="node action">Join queue (socket)</span>
+        <span class="arrow">→</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div>
+            <div class="branch-label" style="color:#22c55e">Matched</div>
+            <span class="node success">Random chat partner</span>
+            <div class="arrow-down">↓</div>
+            <span class="node action">Real-time chat</span>
+            <div class="arrow-down">↓</div>
+            <div style="display:flex;gap:6px;">
+              <span class="node feature">Either user leaves → session ends</span>
+            </div>
+          </div>
+          <div>
+            <div class="branch-label">Waiting</div>
+            <span class="node feature">Spinner</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 6: PROJECTS -->
+  <div class="section">
+    <div class="section-title">6 · Projects Page</div>
+    <div class="card" style="max-width:700px;">
+      <ul class="outcome-list two-col-list">
+        <li>Reads only explicitly saved projects (localStorage: saved_projects)</li>
+        <li>Shows project title, partner name, mode, date, task progress</li>
+        <li>File count badge when IDE files were captured</li>
+        <li>Download → JSZip with all project files (or README.md fallback)</li>
+        <li>Delete project from list</li>
+        <li>Submission link → opens in new tab</li>
+        <li>Empty state with "Find a Partner" CTA</li>
+        <li>Accessible from dashboard Projects stat click</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 7: PROFILE -->
+  <div class="section">
+    <div class="section-title">7 · Profile Page</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">Own Profile (/profile)</div>
+        <ul class="outcome-list">
+          <li>Edit name, bio, skills, interests, experience level</li>
+          <li>Upload profile photo</li>
+          <li>Connect / disconnect GitHub account</li>
+          <li>View badges earned</li>
+          <li>View credits &amp; reputation</li>
+          <li>Completed projects count</li>
+          <li>Theme toggle (light/dark)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title">Other User Profile (/users/:userId)</div>
+        <ul class="outcome-list">
+          <li>View user's public info (name, bio, skills, badges)</li>
+          <li>View reputation, joined date</li>
+          <li>Send friend request (if not already friends)</li>
+          <li>Send DM via messages</li>
+          <li>Accessible from: friends list, collaboration session partner name, proposal/challenge requests</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 8: CREDITS -->
+  <div class="section">
+    <div class="section-title">8 · Credits System</div>
+    <div class="card">
+      <div class="card-title">Credits Flow <span class="badge yellow">Upcoming Feature</span></div>
+      <div class="flow" style="flex-wrap:wrap;gap:10px;">
+        <span class="node start">Credits Page</span>
+        <span class="arrow">→</span>
+        <span class="node feature">View balance &amp; transaction history</span>
+        <span class="arrow">→</span>
+        <span class="node feature">Credits earned via: completing sessions, partner force-quit, tasks</span>
+        <span class="arrow">→</span>
+        <span class="node feature">Credits deducted: queue entry, matching fees (future)</span>
+      </div>
+      <p style="font-size:11px;color:#f59e0b;margin-top:8px;">💡 Full credits marketplace is planned as an upcoming feature.</p>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 9: FRIENDS & MESSAGES -->
+  <div class="section">
+    <div class="section-title">9 · Friends &amp; Direct Messages</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">Friends Flow</div>
+        <div class="chain">
+          <span class="node action">Search user / click profile</span>
+          <div class="arrow-down">↓</div>
+          <span class="node action">Send friend request</span>
+          <div class="arrow-down">↓</div>
+          <span class="node notify">🔔 Real-time toast to recipient</span>
+          <div class="arrow-down">↓</div>
+          <div style="display:flex;gap:8px;">
+            <div><div class="branch-label" style="color:#22c55e">Accept</div><span class="node success">Friends ✓ toast to sender</span></div>
+            <div><div class="branch-label" style="color:#ef4444">Decline</div><span class="node error">Declined toast to sender</span></div>
+          </div>
+          <div class="arrow-down">↓</div>
+          <span class="node feature">Friends List — view, message, remove</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Direct Messages</div>
+        <ul class="outcome-list">
+          <li>Real-time socket-based DMs (dm:new-message)</li>
+          <li>Toast notification when DM arrives (off messages page)</li>
+          <li>Click toast → navigate to /messages?friendId=...</li>
+          <li>Message history persisted per friendship pair</li>
+          <li>Send from: messages page, friend profile, notification toast</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 10: GLOBAL NOTIFICATIONS -->
+  <div class="section">
+    <div class="section-title">10 · Global Notification System</div>
+    <div class="card">
+      <div class="grid4">
+        <div>
+          <div class="card-title" style="color:#818cf8;">Friend Request</div>
+          <ul class="outcome-list">
+            <li>Toast with Accept/Decline buttons</li>
+            <li>8-second auto-dismiss</li>
+            <li>Accept → instant friendship</li>
+          </ul>
+        </div>
+        <div>
+          <div class="card-title" style="color:#6ee7b7;">Friend Accepted</div>
+          <ul class="outcome-list">
+            <li>Green toast "🎉 You are now friends"</li>
+            <li>Auto-dismisses after 8s</li>
+          </ul>
+        </div>
+        <div>
+          <div class="card-title" style="color:#fca5a5;">Friend Declined</div>
+          <ul class="outcome-list">
+            <li>Red toast "Friend request was declined"</li>
+            <li>Auto-dismisses after 8s</li>
+          </ul>
+        </div>
+        <div>
+          <div class="card-title" style="color:#7dd3fc;">New DM</div>
+          <ul class="outcome-list">
+            <li>Toast shown when not on /messages</li>
+            <li>Click toast → navigate to conversation</li>
+            <li>Shows sender name + preview text</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 11: ADMIN -->
+  <div class="section">
+    <div class="section-title">11 · Admin Dashboard</div>
+    <div class="card">
+      <div class="flow" style="flex-wrap:wrap;gap:10px;">
+        <span class="node start">Admin User</span>
+        <span class="arrow">→</span>
+        <span class="node page-node">/admin</span>
+        <span class="arrow">→</span>
+        <span class="node feature">View all users</span>
+        <span class="arrow">→</span>
+        <span class="node feature">Issue warnings</span>
+        <span class="arrow">→</span>
+        <span class="node feature">Add permanent remarks</span>
+        <span class="arrow">→</span>
+        <span class="node feature">View session analytics</span>
+        <span class="arrow">→</span>
+        <span class="node feature">Manage credits / reputation</span>
+      </div>
+      <p style="font-size:11px;color:#6b7280;margin-top:8px;">⚠ Protected by role check — non-admin users are redirected away.</p>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- SECTION 12: COMPLETE APP MAP -->
+  <div class="section">
+    <div class="section-title">12 · Full Navigation Map</div>
+    <div class="card">
+      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;font-size:12px;">
+        <span class="node start" style="font-size:11px;">/ Landing</span>
+        <span style="color:#4b5563;margin:0 2px;">→</span>
+        <span class="node page-node" style="font-size:11px;">/login</span>
+        <span style="color:#4b5563;margin:0 2px;">/</span>
+        <span class="node page-node" style="font-size:11px;">/register</span>
+        <span style="color:#4b5563;margin:0 2px;">→</span>
+        <span class="node page-node" style="font-size:11px;">/onboarding</span>
+        <span style="color:#4b5563;margin:0 2px;">→</span>
+        <span class="node page-node" style="font-size:11px;">/dashboard</span>
+        <span style="color:#4b5563;margin:0 4px;">→</span>
+
+        <div style="display:flex;flex-direction:column;gap:6px;margin:4px;">
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <span class="node page-node" style="font-size:11px;">/collaborate</span>
+            <span class="node page-node" style="font-size:11px;">/quick-connect</span>
+            <span class="node page-node" style="font-size:11px;">/projects</span>
+            <span class="node page-node" style="font-size:11px;">/profile</span>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <span class="node page-node" style="font-size:11px;">/friends</span>
+            <span class="node page-node" style="font-size:11px;">/messages</span>
+            <span class="node page-node" style="font-size:11px;">/credits</span>
+            <span class="node page-node" style="font-size:11px;">/users/:id</span>
+            <span class="node page-node" style="font-size:11px;">/admin</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;">
+        <div class="card-title">All Possible Session Outcomes</div>
+        <div class="grid3" style="margin-top:10px;">
+          <ul class="outcome-list">
+            <li><strong>Normal end:</strong> Both users submit → credits awarded → projects saved</li>
+            <li><strong>Time-up:</strong> Modal shown → continue or end without submitting</li>
+            <li><strong>Request leave accepted:</strong> Both navigate to dashboard</li>
+          </ul>
+          <ul class="outcome-list">
+            <li><strong>Force quit:</strong> Partner gets credit notification + solo mode option</li>
+            <li><strong>Solo mode:</strong> Continue alone with only "Leave" option</li>
+            <li><strong>Partner rejoin:</strong> Session resumes seamlessly</li>
+          </ul>
+          <ul class="outcome-list">
+            <li><strong>Activity timeout:</strong> Slide-to-verify shown after 10min idle</li>
+            <li><strong>Content violation:</strong> Warning banner in chat</li>
+            <li><strong>Project rename:</strong> Accepted/declined with notification banner</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p style="text-align:center;font-size:11px;color:#374151;margin-top:40px;">PairOn App Flowchart · Generated March 2026 · All rights reserved</p>
+</div>
+
+</body>
+</html>
