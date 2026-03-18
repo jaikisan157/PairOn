@@ -1162,16 +1162,22 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
     // Clear entire workspace
     const clearWorkspace = useCallback(() => {
-        // Save entire workspace to history first
-        setFiles(prev => {
-            deletionHistoryRef.current = [...deletionHistoryRef.current.slice(-19), { ...prev }];
+        const socket = socketService.getSocket();
+
+        // Snapshot all current files BEFORE clearing (used for undo + socket emit)
+        const allFiles = { ...filesRef.current };
+
+        setFiles(() => {
+            deletionHistoryRef.current = [...deletionHistoryRef.current.slice(-19), allFiles];
             return {};
         });
+        filesRef.current = {};
         setOpenTabs([]);
         setActiveFile('');
         setFolders(new Set());
         modelsRef.current.forEach(m => { if (!m.isDisposed()) m.dispose(); });
         modelsRef.current.clear();
+
         // Wipe WebContainers FS (delete everything except node_modules)
         if (webcontainerRef.current) {
             webcontainerRef.current.fs.readdir('.', { withFileTypes: true }).then(entries => {
@@ -1182,9 +1188,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 });
             }).catch(() => {});
         }
+
+        // Notify partner — emit individual delete for every file
+        if (socket && sessionId) {
+            Object.keys(allFiles).forEach(path => {
+                socket.emit('code:file-delete', { sessionId, path, senderId: socket.id });
+            });
+        }
+
         setShowClearConfirm(false);
         addToast('🗑 Workspace cleared — press Ctrl+Z to undo', 'info');
-    }, [addToast]);
+    }, [sessionId, addToast]);
 
 
     const renameFile = useCallback((oldPath: string, newName: string) => {
