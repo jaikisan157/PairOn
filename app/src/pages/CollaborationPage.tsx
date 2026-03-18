@@ -989,36 +989,6 @@ export function CollaborationPage() {
               )}
             </AnimatePresence>
 
-            {/* Project edit notification banner */}
-            <AnimatePresence>
-              {projectEditNotification && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className={`px-4 py-3 border-b flex items-center gap-2 ${
-                    projectEditNotification.type === 'accepted'
-                      ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800'
-                      : 'bg-orange-50 dark:bg-orange-900/30 border-orange-200 dark:border-orange-800'
-                  }`}
-                >
-                  <span className="text-lg">{projectEditNotification.type === 'accepted' ? 'âœ…' : 'âŒ'}</span>
-                  <p className={`text-sm font-medium ${
-                    projectEditNotification.type === 'accepted'
-                      ? 'text-green-700 dark:text-green-400'
-                      : 'text-orange-700 dark:text-orange-400'
-                  }`}>
-                    {projectEditNotification.type === 'accepted'
-                      ? `Your project name change to "${projectEditNotification.title}" was accepted!`
-                      : 'Your project name change request was declined by your partner.'}
-                  </p>
-                  <button onClick={() => setProjectEditNotification(null)} className="ml-auto text-gray-400 hover:text-gray-600">
-                    <X className="w-4 h-4" />
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             {/* AI hint */}
             <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center gap-2">
               <Bot className="w-4 h-4 text-blue-500" />
@@ -1410,7 +1380,7 @@ export function CollaborationPage() {
       {/* Exit Request Modal */}
       <AnimatePresence>
         {showExitModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="w-6 h-6 text-yellow-500" />
@@ -1437,7 +1407,7 @@ export function CollaborationPage() {
       {/* Incoming Exit Request Modal */}
       <AnimatePresence>
         {incomingExitRequest && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">Partner wants to leave</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-2">
@@ -1458,7 +1428,7 @@ export function CollaborationPage() {
       {/* Solo Leave Confirm */}
       <AnimatePresence>
         {showSoloLeaveConfirm && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <LogOut className="w-6 h-6 text-orange-500" />
@@ -1478,7 +1448,7 @@ export function CollaborationPage() {
       {/* Force Quit Confirm */}
       <AnimatePresence>
         {showForceQuitConfirm && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="w-6 h-6 text-red-500" />
@@ -1494,10 +1464,39 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
+      {/* Project edit notification — fixed floating toast (shows in BOTH code + chat views) */}
+      <AnimatePresence>
+        {projectEditNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`fixed top-20 left-1/2 -translate-x-1/2 z-[55] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl border max-w-sm w-full mx-4 ${
+              projectEditNotification.type === 'accepted'
+                ? 'bg-green-50 dark:bg-green-900 border-green-300 dark:border-green-700'
+                : 'bg-orange-50 dark:bg-orange-900 border-orange-300 dark:border-orange-700'
+            }`}
+          >
+            <span className="text-xl flex-shrink-0">{projectEditNotification.type === 'accepted' ? '✅' : '❌'}</span>
+            <p className={`text-sm font-medium flex-1 ${
+              projectEditNotification.type === 'accepted'
+                ? 'text-green-800 dark:text-green-300'
+                : 'text-orange-800 dark:text-orange-300'
+            }`}>
+              {projectEditNotification.type === 'accepted'
+                ? `✨ Name changed to "${projectEditNotification.title}"`
+                : 'Your rename request was declined.'}
+            </p>
+            <button onClick={() => setProjectEditNotification(null)} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Incoming Project Edit Proposal */}
       <AnimatePresence>
         {incomingProjectEdit && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-2xl">âœï¸</span>

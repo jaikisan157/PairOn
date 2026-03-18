@@ -183,6 +183,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [githubPartnerUsername, setGithubPartnerUsername] = useState('');
     const [githubPushing, setGithubPushing] = useState(false);
     const [githubResult, setGithubResult] = useState<{ url: string; owner: string } | null>(null);
+    const [githubConnected, setGithubConnected] = useState<boolean | null>(null); // null = checking
+    const [githubPushError, setGithubPushError] = useState<string | null>(null);
 
     // Deletion undo history — each entry = snapshot of deleted files
     const deletionHistoryRef = useRef<Array<Record<string, string>>>([]);
@@ -1203,11 +1205,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // Push to GitHub
     const pushToGitHub = useCallback(async () => {
         if (!githubRepoName.trim()) {
-            addToast('Please enter a repo name', 'error');
+            setGithubPushError('Please enter a repo name.');
             return;
         }
         setGithubPushing(true);
         setGithubResult(null);
+        setGithubPushError(null);
         try {
             // Fetch stored token from backend
             const pairon_token = localStorage.getItem('pairon_token') || '';
@@ -1292,7 +1295,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
 
         } catch (err: any) {
-            addToast(err.message || 'Failed to push to GitHub', 'error');
+            setGithubPushError(err.message || 'Failed to push to GitHub');
         } finally {
             setGithubPushing(false);
         }
@@ -1642,7 +1645,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <div className="w-px h-4 bg-gray-700 mx-0.5" />
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
                     <button
-                        onClick={() => { setShowGithubModal(true); setGithubResult(null); setGithubRepoName(projectTitle.replace(/\s+/g, '-').toLowerCase()); }}
+                        onClick={async () => {
+                            setShowGithubModal(true);
+                            setGithubResult(null);
+                            setGithubPushError(null);
+                            setGithubRepoName(projectTitle.replace(/\s+/g, '-').toLowerCase());
+                            // Check GitHub connection status
+                            setGithubConnected(null);
+                            try {
+                                const pairon_token = localStorage.getItem('pairon_token') || '';
+                                const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+                                const res = await fetch(`${API}/api/auth/github/status`, { headers: { Authorization: `Bearer ${pairon_token}` } });
+                                const data = await res.json().catch(() => ({}));
+                                setGithubConnected(!!data.connected);
+                            } catch {
+                                setGithubConnected(false);
+                            }
+                        }}
                         className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-white bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-purple-500 rounded transition-colors"
                         title="Push to GitHub"
                     >
@@ -2285,13 +2304,38 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-400 flex-shrink-0"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
                                     <div className="flex-1 min-w-0">
                                         <p className="text-[11px] text-gray-400">GitHub Account</p>
-                                        {false ? (  // placeholder; connection is always checked via API
+                                        {githubConnected === null ? (
+                                            <p className="text-[11px] text-gray-500">Checking...</p>
+                                        ) : githubConnected ? (
                                             <p className="text-[11px] text-green-400 font-semibold">✓ Connected</p>
                                         ) : (
                                             <p className="text-[11px] text-yellow-400">Not connected — <a href="/profile" target="_blank" className="underline hover:text-yellow-300">Connect in Profile →</a></p>
                                         )}
                                     </div>
+                                    {githubConnected === false && (
+                                        <button
+                                            onClick={async () => {
+                                                setGithubConnected(null);
+                                                const pairon_token = localStorage.getItem('pairon_token') || '';
+                                                const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+                                                const res = await fetch(`${API}/api/auth/github/status`, { headers: { Authorization: `Bearer ${pairon_token}` } }).catch(() => null);
+                                                const data = res ? await res.json().catch(() => ({})) : {};
+                                                setGithubConnected(!!data.connected);
+                                            }}
+                                            className="text-[10px] text-gray-500 hover:text-gray-300 underline flex-shrink-0"
+                                        >Refresh</button>
+                                    )}
                                 </div>
+
+                                {/* Inline push error */}
+                                {githubPushError && (
+                                    <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
+                                        <p className="text-[11px] text-red-400">{githubPushError}</p>
+                                        {githubPushError.includes('already exists') && (
+                                            <p className="text-[11px] text-gray-500 mt-1">💡 Change the repo name above and try again.</p>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Repo name */}
                                 <div>
