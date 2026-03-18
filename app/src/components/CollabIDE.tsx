@@ -1148,6 +1148,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const last = history[history.length - 1];
         deletionHistoryRef.current = history.slice(0, -1);
         setFiles(prev => { const next = { ...prev, ...last }; autosave(next); return next; });
+        filesRef.current = { ...filesRef.current, ...last };
         // Re-write to WebContainers FS
         if (webcontainerRef.current) {
             Object.entries(last).forEach(([p, c]) => {
@@ -1156,8 +1157,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 webcontainerRef.current!.fs.writeFile(p, c).catch(() => {});
             });
         }
+        // Notify partner — emit file-create for each restored file
+        const socket = socketService.getSocket();
+        if (socket && sessionId) {
+            Object.entries(last).forEach(([path, content]) => {
+                socket.emit('code:file-create', { sessionId, path, content, senderId: socket.id });
+            });
+        }
         addToast(`↩ Restored ${Object.keys(last).length} file(s)`, 'success');
-    }, [autosave, addToast]);
+    }, [sessionId, autosave, addToast]);
     undoDeletionRef.current = undoDeletion;
 
     // Clear entire workspace
