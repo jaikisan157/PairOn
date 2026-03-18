@@ -400,7 +400,8 @@ router.get('/github/callback', async (req: any, res: any) => {
         return res.redirect(`${frontendUrl}/login?github=error&reason=no_email`);
       }
 
-      let user = await User.findOne({ email });
+      let user = await User.findOne({ email })
+        ?? await User.findOne({ githubUsername: ghUser.login });
       if (!user) {
         user = new User({
           email,
