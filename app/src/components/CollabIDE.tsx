@@ -1212,7 +1212,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         setGithubResult(null);
         setGithubPushError(null);
         try {
-            // Fetch stored token from backend
+            // 1. Fetch GitHub token from backend
             const pairon_token = localStorage.getItem('pairon_token') || '';
             const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
             const tokenRes = await fetch(`${API}/api/auth/github/token`, {
@@ -1223,17 +1223,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
             const { token: storedToken, username: ghUsername } = await tokenRes.json();
             const owner = ghUsername as string;
-            const headers = {
+            const ghHeaders = {
                 Authorization: `token ${storedToken}`,
                 Accept: 'application/vnd.github+json',
                 'Content-Type': 'application/json',
             };
 
-            // 2. Create the repository
+            // 2. Create repo — if already exists, that's fine, we'll push to it
             const repoName = githubRepoName.trim().replace(/\s+/g, '-').toLowerCase();
             const createRes = await fetch('https://api.github.com/user/repos', {
                 method: 'POST',
-                headers,
+                headers: ghHeaders,
                 body: JSON.stringify({
                     name: repoName,
                     description: `${projectTitle} — built collaboratively on PairOn`,
@@ -1243,90 +1243,115 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             });
             if (!createRes.ok) {
                 const err = await createRes.json().catch(() => ({}));
-                // Handle name already taken
-                const msg = err.message || '';
-                const errDetails = (err.errors || []).map((e: any) => e.message).join(', ');
-                if (msg.toLowerCase().includes('already exists') || errDetails.toLowerCase().includes('already exists')) {
-                    throw new Error(`Repo "${repoName}" already exists on your GitHub. Change the repo name and try again.`);
+                const msg = (err.message || '').toLowerCase();
+                const details = ((err.errors || []) as any[]).map((e: any) => (e.message || '').toLowerCase()).join(' ');
+                // Only throw for errors other than "already exists"
+                if (!msg.includes('already exists') && !details.includes('already exists')) {
+                    throw new Error(`GitHub API error (${createRes.status}): ${err.message || 'Failed to create repository'}`);
                 }
-                throw new Error(`GitHub API error (${createRes.status}): ${errDetails || msg || 'Failed to create repository'}`);
+                // Repo already exists — continue to push
             }
 
             // 3. Add partner as collaborator (if provided)
             if (githubPartnerUsername.trim()) {
                 await fetch(
                     `https://api.github.com/repos/${owner}/${repoName}/collaborators/${githubPartnerUsername.trim()}`,
-                    { method: 'PUT', headers, body: JSON.stringify({ permission: 'push' }) }
+                    { method: 'PUT', headers: ghHeaders, body: JSON.stringify({ permission: 'push' }) }
                 ).catch(() => { /* non-fatal */ });
             }
 
             const repoUrl = `https://github.com/${owner}/${repoName}`;
-
-            // 4. Push files via GitHub Contents API (no git needed — WebContainers don't have git)
             setGithubResult({ url: repoUrl, owner });
             setShowGithubModal(false);
-            addToast('📤 Uploading files to GitHub...', 'success');
 
-            const filesToPush = Object.entries(files).filter(([path]) => !path.includes('.env'));
-            if (filesToPush.length > 0) {
-                try {
-                    // Create blobs for each file
-                    const blobs = await Promise.all(
-                        filesToPush.map(async ([, content]) => {
-                            const res = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs`, {
-                                method: 'POST', headers,
-                                body: JSON.stringify({ content: btoa(unescape(encodeURIComponent(content))), encoding: 'base64' }),
-                            });
-                            return res.json() as Promise<{ sha: string }>;
-                        })
-                    );
+            // 4. Push files using GitHub Trees API
+            // Use filesRef.current to avoid stale closure (files state captured at callback creation time)
+            const currentFiles = filesRef.current;
+            const filesToPush = Object.entries(currentFiles).filter(([path]) => !path.toLowerCase().includes('.env'));
 
-                    // Create tree
-                    const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees`, {
-                        method: 'POST', headers,
-                        body: JSON.stringify({
-                            tree: filesToPush.map(([path], i) => ({
-                                path: path.startsWith('/') ? path.slice(1) : path,
-                                mode: '100644',
-                                type: 'blob',
-                                sha: blobs[i].sha,
-                            })),
-                        }),
-                    });
-                    const tree = await treeRes.json() as { sha: string };
-
-                    // Create commit
-                    const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
-                        method: 'POST', headers,
-                        body: JSON.stringify({
-                            message: `Initial commit — built on PairOn 🚀`,
-                            tree: tree.sha,
-                            parents: [],
-                        }),
-                    });
-                    const commit = await commitRes.json() as { sha: string };
-
-                    // Update branch ref
-                    await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
-                        method: 'POST', headers,
-                        body: JSON.stringify({ ref: 'refs/heads/main', sha: commit.sha }),
-                    });
-
-                    addToast(`✅ ${filesToPush.length} files pushed to GitHub!`, 'success');
-                } catch {
-                    addToast('⚠️ Repo created but file upload failed. Try pushing manually.', 'error');
-                }
-            } else {
-                addToast('✅ Repo created! No files to push yet.', 'success');
+            if (filesToPush.length === 0) {
+                addToast('✅ Repo ready! Start adding files in the IDE then push again.', 'success');
+                return;
             }
 
+            addToast(`📤 Pushing ${filesToPush.length} files to GitHub...`, 'success');
+
+            // Get existing branch ref (if repo already had commits)
+            let parentSha: string | null = null;
+            let baseTreeSha: string | null = null;
+            const branchRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs/heads/main`, { headers: ghHeaders });
+            if (branchRes.ok) {
+                const branchData = await branchRes.json() as { object: { sha: string } };
+                parentSha = branchData.object.sha;
+                // Get base tree SHA for incremental updates
+                const prevCommitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits/${parentSha}`, { headers: ghHeaders });
+                if (prevCommitRes.ok) {
+                    const prevCommit = await prevCommitRes.json() as { tree: { sha: string } };
+                    baseTreeSha = prevCommit.tree.sha;
+                }
+            }
+
+            // Create blobs for each file
+            const blobs = await Promise.all(
+                filesToPush.map(async ([, content]) => {
+                    const res = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs`, {
+                        method: 'POST', headers: ghHeaders,
+                        body: JSON.stringify({ content: btoa(unescape(encodeURIComponent(String(content)))), encoding: 'base64' }),
+                    });
+                    return res.json() as Promise<{ sha: string }>;
+                })
+            );
+
+            // Build tree (with base_tree for incremental update, or from scratch for new repo)
+            const treePayload: any = {
+                tree: filesToPush.map(([path], i) => ({
+                    path: path.startsWith('/') ? path.slice(1) : path,
+                    mode: '100644',
+                    type: 'blob',
+                    sha: blobs[i].sha,
+                })),
+            };
+            if (baseTreeSha) treePayload.base_tree = baseTreeSha;
+
+            const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees`, {
+                method: 'POST', headers: ghHeaders,
+                body: JSON.stringify(treePayload),
+            });
+            const tree = await treeRes.json() as { sha: string };
+
+            // Create commit
+            const commitPayload: any = {
+                message: parentSha ? `Update: ${new Date().toLocaleString()} — PairOn 🚀` : `Initial commit — built on PairOn 🚀`,
+                tree: tree.sha,
+                parents: parentSha ? [parentSha] : [],
+            };
+            const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/commits`, {
+                method: 'POST', headers: ghHeaders,
+                body: JSON.stringify(commitPayload),
+            });
+            const commit = await commitRes.json() as { sha: string };
+
+            // Update or create branch ref
+            if (parentSha) {
+                await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs/heads/main`, {
+                    method: 'PATCH', headers: ghHeaders,
+                    body: JSON.stringify({ sha: commit.sha, force: true }),
+                });
+            } else {
+                await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/refs`, {
+                    method: 'POST', headers: ghHeaders,
+                    body: JSON.stringify({ ref: 'refs/heads/main', sha: commit.sha }),
+                });
+            }
+
+            addToast(`✅ ${filesToPush.length} files pushed to ${repoUrl}`, 'success');
 
         } catch (err: any) {
             setGithubPushError(err.message || 'Failed to push to GitHub');
         } finally {
             setGithubPushing(false);
         }
-    }, [githubRepoName, githubPartnerUsername, projectTitle, addToast, setActiveTermTab, setShowGithubModal]);
+    }, [githubRepoName, githubPartnerUsername, projectTitle, addToast, setShowGithubModal]);
 
     // Build project
     const buildProject = useCallback(async () => {
