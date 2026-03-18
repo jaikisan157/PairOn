@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -953,28 +953,29 @@ export function CollaborationPage() {
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
         {/* Chat/Code area */}
-        {activeView === 'code' ? (
-          /* Full IDE view */
-          <div className="flex-1 flex flex-col">
-            <div className="flex-1 min-h-0">
-              <CollabIDE
-                sessionId={session.sessionId}
-                partnerId={session.partnerId}
-                projectTitle={session.projectIdea?.title || 'Untitled Project'}
-                userId={user?.id || ''}
-                userName={user?.name || 'You'}
-                messages={session.messages}
-                onSendMessage={(msg) => {
-                  socketService.getSocket()?.emit('challenge:message', session.sessionId, msg);
-                }}
-                lastSeenMessageCount={lastSeenMessageCount}
-                onMessagesSeen={(count) => setLastSeenMessageCount(count)}
-              />
-            </div>
+
+        {/* IDE — always mounted so WebContainer/sockets/polling stay alive.
+            Hidden with CSS when in chat view so it doesn't re-boot on tab switch. */}
+        <div className={`flex-1 flex flex-col${activeView !== 'code' ? ' hidden' : ''}`}>
+          <div className="flex-1 min-h-0">
+            <CollabIDE
+              sessionId={session.sessionId}
+              partnerId={session.partnerId}
+              projectTitle={session.projectIdea?.title || 'Untitled Project'}
+              userId={user?.id || ''}
+              userName={user?.name || 'You'}
+              messages={session.messages}
+              onSendMessage={(msg) => {
+                socketService.getSocket()?.emit('challenge:message', session.sessionId, msg);
+              }}
+              lastSeenMessageCount={lastSeenMessageCount}
+              onMessagesSeen={(count) => setLastSeenMessageCount(count)}
+            />
           </div>
-        ) : (
-          /* Chat Panel */
-          <div className="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700">
+        </div>
+
+        {/* Chat Panel — always mounted too, hidden when in code view */}
+        <div className={`flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700${activeView !== 'chat' ? ' hidden' : ''}`}>
             {/* Warning toast */}
             <AnimatePresence>
               {warningMessage && (
@@ -1075,7 +1076,6 @@ export function CollaborationPage() {
               </div>
             </form>
           </div>
-        )}
 
         {/* Kanban + Sidebar — only in chat view */}
         {activeView === 'chat' && sidebarOpen && (<>
