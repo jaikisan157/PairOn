@@ -688,6 +688,8 @@ export function DashboardPage() {
                   }
 
                   const isActive = sess.status === 'active' && new Date(sess.endsAt) > new Date();
+                  // Don't show continue for the person who force-quit
+                  const canContinue = isActive && !(sess.status === 'partner_skipped' && sess.quitterId === user?.id);
 
                   return (
                     <div
@@ -716,7 +718,7 @@ export function DashboardPage() {
                         <span className="text-xs text-gray-400 whitespace-nowrap">
                           {new Date(sess.startedAt).toLocaleDateString()}
                         </span>
-                        {isActive && (
+                        {canContinue && (
                           <Button
                             size="sm"
                             onClick={() => {

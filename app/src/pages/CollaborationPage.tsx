@@ -781,18 +781,21 @@ export function CollaborationPage() {
 
   const handleSaveProjectEdit = useCallback(() => {
     if (!session) return;
-    setSession(prev => prev ? {
-      ...prev,
-      projectIdea: { ...prev.projectIdea, title: editProjectTitle, description: editProjectDesc },
-    } : null);
-    // Send proposal to partner instead of editing directly
+    // Send proposal to partner — DON'T update local state until partner approves
     socketService.getSocket()?.emit('challenge:propose-project-edit', {
       sessionId: session.sessionId,
       title: editProjectTitle,
       description: editProjectDesc,
     });
     setEditingProject(false);
-  }, [session, editProjectTitle, editProjectDesc]);
+    // Optimistic: if solo mode, apply immediately
+    if (isSoloMode) {
+      setSession(prev => prev ? {
+        ...prev,
+        projectIdea: { ...prev.projectIdea, title: editProjectTitle, description: editProjectDesc },
+      } : null);
+    }
+  }, [session, editProjectTitle, editProjectDesc, isSoloMode]);
 
   // ===== RENDER: Loading (session not yet loaded from localStorage) =====
   if (status !== 'matched' || !session) {
@@ -868,6 +871,10 @@ export function CollaborationPage() {
             </div>
 
             <div className="flex items-center gap-3">
+              {/* Solo mode indicator (inline, not blocking) */}
+              {isSoloMode && (
+                <span className="text-xs bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full font-medium">⚡ Solo</span>
+              )}
               {/* Timer */}
               <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full ${timeRemaining < 300 ? 'bg-red-100 text-red-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                 }`}>
@@ -875,13 +882,21 @@ export function CollaborationPage() {
                 <span className="font-mono text-sm font-semibold">{formatTime(timeRemaining)}</span>
               </div>
 
-              {/* Exit buttons */}
-              <Button variant="outline" size="sm" onClick={() => setShowExitModal(true)} className="text-yellow-600 border-yellow-200 hover:bg-yellow-50">
-                <LogOut className="w-4 h-4 mr-1" /> Request to leave
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowForceQuitConfirm(true)} className="text-red-600 border-red-200 hover:bg-red-50">
-                <X className="w-4 h-4 mr-1" /> Force leave
-              </Button>
+              {/* Exit buttons — solo mode shows Leave only, collaborative shows Request + Force */}
+              {isSoloMode ? (
+                <Button variant="outline" size="sm" onClick={() => { cleanupAndLeave(); navigate('/dashboard'); }} className="text-gray-600 border-gray-200 hover:bg-gray-50">
+                  <LogOut className="w-4 h-4 mr-1" /> Leave
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setShowExitModal(true)} className="text-yellow-600 border-yellow-200 hover:bg-yellow-50">
+                    <LogOut className="w-4 h-4 mr-1" /> Request to leave
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowForceQuitConfirm(true)} className="text-red-600 border-red-200 hover:bg-red-50">
+                    <X className="w-4 h-4 mr-1" /> Force leave
+                  </Button>
+                </>
+              )}
               {activeView === 'chat' && (
                 <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-500" title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
                   <Menu className="w-5 h-5" />
@@ -1451,13 +1466,7 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
-      {/* ── Solo Mode Banner ── shown after continuing alone */}
-      {isSoloMode && session && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-yellow-500/90 backdrop-blur text-black text-xs font-semibold px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
-          <AlertTriangle className="w-3.5 h-3.5" />
-          Solo mode — partner left. Submit when ready.
-        </div>
-      )}
+      {/* Solo mode indicator moved to header — no fixed overlay */}
 
       {/* ── Partner Force-Quit Popup ── */}
       <AnimatePresence>
