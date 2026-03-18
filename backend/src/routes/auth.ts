@@ -321,7 +321,108 @@ router.get('/me', async (req: any, res: any) => {
   }
 });
 
-// ===== GitHub OAuth — Step 1: Redirect to GitHub =====
+// ===== GitHub Sign-In — Step 1: Redirect (no auth required) =====
+router.get('/github/login', (req: any, res: any) => {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  if (!clientId) return res.status(500).json({ message: 'GitHub OAuth not configured' });
+  const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+  const redirectUri = `${backendUrl}/api/auth/github/login/callback`;
+  const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user:email`;
+  res.redirect(url);
+});
+
+// ===== GitHub Sign-In — Step 2: Callback =====
+router.get('/github/login/callback', async (req: any, res: any) => {
+  const { code } = req.query;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  if (!code) {
+    return res.redirect(`${frontendUrl}/login?github=error&reason=no_code`);
+  }
+
+  try {
+    const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: `${backendUrl}/api/auth/github/login/callback`,
+      }),
+    });
+    const tokenData = await tokenRes.json() as any;
+
+    if (tokenData.error || !tokenData.access_token) {
+      return res.redirect(`${frontendUrl}/login?github=error&reason=${tokenData.error || 'no_token'}`);
+    }
+
+    // Get GitHub user info
+    const ghUserRes = await fetch('https://api.github.com/user', {
+      headers: { Authorization: `token ${tokenData.access_token}`, Accept: 'application/vnd.github+json' },
+    });
+    const ghUser = await ghUserRes.json() as any;
+
+    // Try to get verified email
+    let email = ghUser.email;
+    if (!email) {
+      const emailsRes = await fetch('https://api.github.com/user/emails', {
+        headers: { Authorization: `token ${tokenData.access_token}`, Accept: 'application/vnd.github+json' },
+      });
+      const emails = await emailsRes.json() as any[];
+      const primary = emails.find((e: any) => e.primary && e.verified);
+      email = primary?.email || emails[0]?.email;
+    }
+
+    if (!email) {
+      return res.redirect(`${frontendUrl}/login?github=error&reason=no_email`);
+    }
+
+    // Find or create user
+    let user = await User.findOne({ email });
+    if (!user) {
+      user = new User({
+        email,
+        password: `github_${ghUser.id}_${Date.now()}`,
+        name: ghUser.name || ghUser.login || email.split('@')[0],
+        avatar: ghUser.avatar_url || '',
+        credits: 100,
+        githubUsername: ghUser.login,
+        githubAccessToken: tokenData.access_token,
+      });
+      await user.save();
+      console.log(`✅ New GitHub user created: ${email}`);
+    } else {
+      // Update GitHub info
+      user.githubUsername = ghUser.login;
+      user.githubAccessToken = tokenData.access_token;
+    }
+
+    const sessionId = crypto.randomUUID();
+    user.loginSessionId = sessionId;
+    user.lastActive = new Date();
+    user.isOnline = true;
+    await user.save();
+
+    const token = generateToken({
+      userId: user._id.toString(),
+      email: user.email,
+      role: user.role,
+      loginSessionId: sessionId,
+    });
+
+    console.log(`✅ GitHub Sign-In successful: ${email}`);
+    // Redirect to frontend with token in query so it can be stored
+    res.redirect(`${frontendUrl}/login?github_token=${token}`);
+  } catch (err) {
+    console.error('GitHub login callback error:', err);
+    res.redirect(`${frontendUrl}/login?github=error&reason=server_error`);
+  }
+});
+
+// ===== GitHub OAuth — Step 1: Redirect to GitHub (account linking, requires auth) =====
+
 router.get('/github/connect', authMiddleware, (req: any, res: any) => {
   const clientId = process.env.GITHUB_CLIENT_ID;
   if (!clientId) return res.status(500).json({ message: 'GitHub OAuth not configured' });

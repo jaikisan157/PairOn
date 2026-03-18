@@ -379,7 +379,8 @@ export function DashboardPage() {
             {stats.map((stat) => (
               <div
                 key={stat.label}
-                className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-card"
+                onClick={stat.label === 'Projects' ? () => navigate('/projects') : undefined}
+                className={`bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-card${stat.label === 'Projects' ? ' cursor-pointer hover:ring-2 hover:ring-purple-400 transition-all' : ''}`}
               >
                 <div className="flex items-center gap-3 mb-2">
                   <stat.icon className={`w-5 h-5 ${stat.color}`} />
@@ -392,6 +393,7 @@ export function DashboardPage() {
                 </p>
               </div>
             ))}
+
           </motion.div>
 
           {/* Active Challenge Card (for 24hr/7day sessions) */}

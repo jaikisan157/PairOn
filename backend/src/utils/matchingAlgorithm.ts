@@ -2,22 +2,13 @@ import type { IUser } from '../types';
 
 /**
  * Matching Algorithm for PairOn
- * 
- * The algorithm calculates a match score based on four weighted factors:
- * 1. Skill Complementarity (40%): Prefers users with different but complementary skills
- * 2. Interest Overlap (20%): Some shared interests for better collaboration
- * 3. Reputation Weight (20%): Higher reputation users get better matches
- * 4. Activity Status (20%): Rewards active users
- * 
- * Additional rules:
- * - Avoid repeated matching (penalty for previous matches)
- * - Only match active users (online in last 24 hours)
+ *
+ * Weighted factors:
+ * 1. Skill Complementarity (40%)
+ * 2. Interest Overlap (20%)
+ * 3. Reputation Weight (20%)
+ * 4. Activity Status (20%)
  */
-
-interface MatchScoreInput {
-  user1: IUser;
-  user2: IUser;
-}
 
 interface MatchScoreResult {
   score: number;
@@ -30,82 +21,33 @@ interface MatchScoreResult {
   };
 }
 
-export function calculateMatchScore(
-  user1: IUser,
-  user2: IUser
-): MatchScoreResult {
-  // 1. Skill Complementarity (40% weight)
-  // We want users with DIFFERENT skills (complementary expertise)
+export function calculateMatchScore(user1: IUser, user2: IUser): MatchScoreResult {
   const user1SkillSet = new Set(user1.skills.map((s) => s.toLowerCase()));
   const user2SkillSet = new Set(user2.skills.map((s) => s.toLowerCase()));
 
-  // Count unique skills for each user
-  const uniqueToUser1 = user1.skills.filter(
-    (s) => !user2SkillSet.has(s.toLowerCase())
-  ).length;
-  const uniqueToUser2 = user2.skills.filter(
-    (s) => !user1SkillSet.has(s.toLowerCase())
-  ).length;
-
+  const uniqueToUser1 = user1.skills.filter((s) => !user2SkillSet.has(s.toLowerCase())).length;
+  const uniqueToUser2 = user2.skills.filter((s) => !user1SkillSet.has(s.toLowerCase())).length;
   const totalUniqueSkills = uniqueToUser1 + uniqueToUser2;
   const totalSkills = user1.skills.length + user2.skills.length;
+  const skillComplementarity = totalSkills > 0 ? (totalUniqueSkills / totalSkills) * 100 : 50;
 
-  // Higher complementarity = more unique skills between them
-  const skillComplementarity =
-    totalSkills > 0 ? (totalUniqueSkills / totalSkills) * 100 : 50;
-
-  // 2. Interest Overlap (20% weight)
-  // We want SOME shared interests for better collaboration
   const user1InterestSet = new Set(user1.interests.map((i) => i.toLowerCase()));
-  const overlappingInterests = user2.interests.filter((i) =>
-    user1InterestSet.has(i.toLowerCase())
-  ).length;
-  const totalInterests = new Set([
-    ...user1.interests,
-    ...user2.interests,
-  ]).size;
+  const overlappingInterests = user2.interests.filter((i) => user1InterestSet.has(i.toLowerCase())).length;
+  const totalInterests = new Set([...user1.interests, ...user2.interests]).size;
+  const interestOverlap = totalInterests > 0 ? Math.min(100, (overlappingInterests / totalInterests) * 200) : 50;
 
-  // Some overlap is good (30-70% is ideal)
-  const interestOverlap =
-    totalInterests > 0
-      ? Math.min(100, (overlappingInterests / totalInterests) * 200)
-      : 50;
-
-  // 3. Reputation Weight (20% weight)
-  // Average reputation of both users, normalized to 0-100
   const avgReputation = (user1.reputation + user2.reputation) / 2;
   const reputationWeight = (avgReputation / 5) * 100;
 
-  // 4. Activity Status (20% weight)
-  // Check if users are online or recently active
   const now = new Date();
   const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const user1Active = user1.isOnline || new Date(user1.lastActive) > oneDayAgo;
+  const user2Active = user2.isOnline || new Date(user2.lastActive) > oneDayAgo;
+  const activityStatus = user1Active && user2Active ? 100 : user1Active || user2Active ? 50 : 0;
 
-  const user1Active =
-    user1.isOnline || new Date(user1.lastActive) > oneDayAgo;
-  const user2Active =
-    user2.isOnline || new Date(user2.lastActive) > oneDayAgo;
-
-  const activityStatus =
-    user1Active && user2Active ? 100 : user1Active || user2Active ? 50 : 0;
-
-  // Calculate weighted score
-  const weightedScore =
-    skillComplementarity * 0.4 +
-    interestOverlap * 0.2 +
-    reputationWeight * 0.2 +
-    activityStatus * 0.2;
-
-  // Previous match penalty (avoid repeated matching)
-  const previousMatchPenalty = user1.previousMatches.includes(user2._id.toString())
-    ? 15
-    : 0;
-
-  // Final score (clamped between 0 and 100)
-  const finalScore = Math.min(
-    100,
-    Math.max(0, Math.round(weightedScore - previousMatchPenalty))
-  );
+  const weightedScore = skillComplementarity * 0.4 + interestOverlap * 0.2 + reputationWeight * 0.2 + activityStatus * 0.2;
+  const previousMatchPenalty = user1.previousMatches.includes(user2._id.toString()) ? 15 : 0;
+  const finalScore = Math.min(100, Math.max(0, Math.round(weightedScore - previousMatchPenalty)));
 
   return {
     score: finalScore,
@@ -119,9 +61,6 @@ export function calculateMatchScore(
   };
 }
 
-/**
- * Find the best match for a user from a pool of candidates
- */
 export function findBestMatch(
   user: IUser,
   candidates: IUser[],
@@ -138,11 +77,8 @@ export function findBestMatch(
   };
 
   for (const candidate of candidates) {
-    // Skip if same user
     if (candidate._id.toString() === user._id.toString()) continue;
-
     const result = calculateMatchScore(user, candidate);
-
     if (result.score > bestScore && result.score >= minScore) {
       bestScore = result.score;
       bestMatch = candidate;
@@ -150,130 +86,145 @@ export function findBestMatch(
     }
   }
 
-  return {
-    matchedUser: bestMatch,
-    score: bestScore,
-    breakdown: bestBreakdown,
-  };
+  return { matchedUser: bestMatch, score: bestScore, breakdown: bestBreakdown };
 }
 
-/**
- * Get project ideas based on matched users' skills and interests.
- * Returns 3 ideas tailored to the users' combined skill set.
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Idea Generator
+// Only includes projects buildable with npm packages inside a browser-based IDE
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface ProjectTemplate {
   title: string;
   description: string;
   category: string;
-  skills: string[]; // skills that make this template relevant
+  skills: string[];
 }
 
 const PROJECT_TEMPLATES: ProjectTemplate[] = [
-  // Web Development
-  { title: 'Real-time Chat Application', description: 'Build a full-stack chat app with rooms, direct messages, and typing indicators.', category: 'Web Development', skills: ['react', 'node.js', 'socket.io', 'javascript', 'typescript'] },
-  { title: 'E-commerce Dashboard', description: 'Create an admin dashboard with real-time analytics, inventory management, and order tracking.', category: 'Web Development', skills: ['react', 'next.js', 'node.js', 'mongodb', 'postgresql'] },
-  { title: 'Blog Platform with CMS', description: 'Build a modern blog with markdown editor, categories, tags, and SEO optimization.', category: 'Web Development', skills: ['react', 'next.js', 'tailwindcss', 'node.js', 'mongodb'] },
-  { title: 'Task Management Board', description: 'Create a Trello-like kanban board with drag-and-drop, real-time sync, and team features.', category: 'Web Development', skills: ['react', 'typescript', 'node.js', 'socket.io', 'mongodb'] },
-  { title: 'URL Shortener with Analytics', description: 'Build a URL shortener that tracks clicks, geographic data, and referral sources.', category: 'Web Development', skills: ['node.js', 'express', 'mongodb', 'react', 'javascript'] },
-  { title: 'Recipe Sharing Platform', description: 'Build a community-driven recipe platform with ratings, meal planning, and shopping lists.', category: 'Web Development', skills: ['react', 'node.js', 'mongodb', 'express', 'javascript'] },
-  { title: 'Online Polling System', description: 'Create a real-time poll platform with live voting, analytics charts, and embeddable widgets.', category: 'Web Development', skills: ['react', 'socket.io', 'node.js', 'mongodb', 'typescript'] },
-  { title: 'Job Board Aggregator', description: 'Build a job board that scrapes listings from multiple sources with filters and alerts.', category: 'Web Development', skills: ['react', 'node.js', 'python', 'mongodb', 'express'] },
-  { title: 'Bookmark Manager', description: 'Create a smart bookmark organizer with auto-tagging, screenshots, and full-text search.', category: 'Web Development', skills: ['react', 'node.js', 'elasticsearch', 'typescript', 'mongodb'] },
-  { title: 'Music Playlist Curator', description: 'Build a collaborative music playlist app with voting, queue management, and mood filters.', category: 'Web Development', skills: ['react', 'node.js', 'socket.io', 'spotify api', 'typescript'] },
-  { title: 'Digital Marketplace', description: 'Create a platform for selling digital products with secure downloads and stripe payments.', category: 'Web Development', skills: ['react', 'node.js', 'stripe', 'mongodb', 'typescript'] },
-  { title: 'Collaborative Note-Taking', description: 'Build a Notion-like workspace with real-time editing, blocks, and team sharing.', category: 'Web Development', skills: ['react', 'socket.io', 'node.js', 'mongodb', 'typescript'] },
-  { title: 'Feedback Widget Builder', description: 'Create an embeddable feedback collection tool with sentiment analysis and reports.', category: 'Web Development', skills: ['react', 'node.js', 'javascript', 'mongodb', 'css'] },
-  { title: 'Meeting Scheduler', description: 'Build a Calendly-like scheduling tool with timezone support and calendar integration.', category: 'Web Development', skills: ['react', 'node.js', 'google api', 'typescript', 'mongodb'] },
-  { title: 'Link-in-Bio Page Generator', description: 'Create a Linktree alternative with custom themes, analytics, and drag-and-drop ordering.', category: 'Web Development', skills: ['react', 'next.js', 'node.js', 'mongodb', 'css'] },
-  { title: 'Multi-Tenant SaaS Starter', description: 'Build a SaaS boilerplate with organizations, role-based access, and billing integration.', category: 'Web Development', skills: ['react', 'next.js', 'node.js', 'postgresql', 'stripe'] },
+  // ── Real-time & Collaboration ─────────────────────────────────────────────
+  { title: 'Real-time Chat App', description: 'Build a full-stack chat with rooms, typing indicators, and online presence using Socket.IO and React.', category: 'Fullstack', skills: ['react', 'node.js', 'socket.io', 'express', 'typescript'] },
+  { title: 'Collaborative Whiteboard', description: 'Create a shared drawing canvas with real-time sync, shapes, and color pickers.', category: 'Fullstack', skills: ['react', 'socket.io', 'node.js', 'canvas', 'typescript'] },
+  { title: 'Multiplayer Trivia Quiz', description: 'Build a real-time quiz game with rooms, timed questions, and a live leaderboard.', category: 'Games', skills: ['react', 'socket.io', 'node.js', 'typescript', 'express'] },
+  { title: 'Live Code Editor Share', description: 'Create a Monaco-based shared code editor with syntax highlighting and real-time cursor sharing.', category: 'Tools', skills: ['react', 'socket.io', 'monaco-editor', 'node.js', 'typescript'] },
+  { title: 'Collaborative Task Board', description: 'Build a Trello-style kanban board with drag-and-drop and real-time team sync.', category: 'Fullstack', skills: ['react', 'socket.io', 'node.js', 'mongodb', 'typescript'] },
+  { title: 'Group Decision Maker', description: 'Create a real-time voting app where teams rank options and reach consensus instantly.', category: 'Fullstack', skills: ['react', 'socket.io', 'node.js', 'express', 'javascript'] },
+  { title: 'Live Poll System', description: 'Build a real-time polling platform with animated live results and embed support.', category: 'Fullstack', skills: ['react', 'socket.io', 'node.js', 'chart.js', 'typescript'] },
+  { title: 'Peer-to-Peer Markdown Wiki', description: 'Build a markdown-powered wiki with real-time collaborative editing and page history.', category: 'Fullstack', skills: ['react', 'socket.io', 'node.js', 'marked', 'typescript'] },
 
-  // Mobile
-  { title: 'Fitness Tracker App', description: 'Build a mobile app that tracks workouts, calories, and displays progress charts.', category: 'Mobile Development', skills: ['react native', 'flutter', 'swift', 'kotlin', 'mobile'] },
-  { title: 'Expense Splitter', description: 'Create an app for groups to split bills, track who owes whom, and settle debts.', category: 'Mobile Development', skills: ['react native', 'flutter', 'firebase', 'mobile', 'javascript'] },
-  { title: 'Habit Tracker with Streaks', description: 'Build a habit tracking app with daily reminders, streak tracking, and data visualization.', category: 'Mobile Development', skills: ['react native', 'flutter', 'mobile', 'typescript', 'firebase'] },
-  { title: 'Plant Care Companion', description: 'Build an app that identifies plants via camera and sends watering/care reminders.', category: 'Mobile Development', skills: ['react native', 'flutter', 'machine learning', 'firebase', 'mobile'] },
-  { title: 'Language Flashcard App', description: 'Create a spaced-repetition flashcard app with audio pronunciation and progress tracking.', category: 'Mobile Development', skills: ['react native', 'flutter', 'mobile', 'firebase', 'typescript'] },
-  { title: 'Local Events Finder', description: 'Build an app that shows nearby events with maps, filters, and social sharing.', category: 'Mobile Development', skills: ['react native', 'flutter', 'google maps', 'firebase', 'mobile'] },
+  // ── Web Apps & SPAs ───────────────────────────────────────────────────────
+  { title: 'Personal Finance Dashboard', description: 'Build a budgeting app with expense categories, charts, and monthly summaries.', category: 'Web App', skills: ['react', 'recharts', 'node.js', 'express', 'mongodb'] },
+  { title: 'Recipe Discovery App', description: 'Create a searchable recipe app with filters, favourites, and step-by-step cooking mode.', category: 'Web App', skills: ['react', 'typescript', 'node.js', 'express', 'mongodb'] },
+  { title: 'Blog Platform with Markdown', description: 'Build a full-stack blog with markdown editor, categories, tags, and reading time.', category: 'Fullstack', skills: ['react', 'node.js', 'marked', 'mongodb', 'express'] },
+  { title: 'Job Board App', description: 'Create a job posting platform with role-based access for employers and applicants.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'mongodb', 'typescript'] },
+  { title: 'Event Ticketing Platform', description: 'Build an event management app with ticket purchase, QR codes, and attendee lists.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'qrcode', 'mongodb'] },
+  { title: 'Social Bookmarks App', description: 'Create a shareable bookmark manager with auto-tagging, collections, and full-text search.', category: 'Fullstack', skills: ['react', 'node.js', 'mongodb', 'express', 'typescript'] },
+  { title: 'Study Flashcard App', description: 'Build a spaced-repetition flashcard app with decks, tags, and a practice session tracker.', category: 'Web App', skills: ['react', 'typescript', 'node.js', 'express', 'mongodb'] },
+  { title: 'Course Progress Tracker', description: 'Create a learning tracker that monitors courses, lessons, and shows streaks and completion rates.', category: 'Web App', skills: ['react', 'typescript', 'recharts', 'node.js', 'mongodb'] },
+  { title: 'Habit Tracker', description: 'Build a daily habit tracker with streak counts, calendar heatmap, and reminders.', category: 'Web App', skills: ['react', 'typescript', 'date-fns', 'recharts', 'mongodb'] },
+  { title: 'Expense Splitter', description: 'Create an app for groups to track shared expenses, calculate who owes whom, and settle up.', category: 'Web App', skills: ['react', 'typescript', 'node.js', 'express', 'mongodb'] },
+  { title: 'Book Review Platform', description: 'Build a Goodreads-like app where users track reading lists, write reviews, and follow friends.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'mongodb', 'typescript'] },
+  { title: 'Online Marketplace', description: 'Build a product listing platform with search, filters, product pages, and cart.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'mongodb', 'typescript'] },
+  { title: 'Movie & TV Watchlist App', description: 'Create a watchlist manager with TMDB API integration, ratings, and progress tracking.', category: 'Web App', skills: ['react', 'typescript', 'node.js', 'axios', 'css'] },
+  { title: 'Resume Builder', description: 'Build an interactive resume editor with templates, live preview, and PDF export.', category: 'Web App', skills: ['react', 'typescript', 'jspdf', 'css', 'html2canvas'] },
+  { title: 'Music Player App', description: 'Create a web music player with playlist management, visualizer, and audio controls.', category: 'Web App', skills: ['react', 'typescript', 'web audio api', 'css', 'howler'] },
+  { title: 'Weather Dashboard', description: 'Build a weather app with city search, 7-day forecast, and animated icons.', category: 'Web App', skills: ['react', 'typescript', 'axios', 'recharts', 'leaflet'] },
+  { title: 'Dictionary & Word Explorer', description: 'Create an advanced dictionary app with synonyms, usage examples, and pronunciation.', category: 'Web App', skills: ['react', 'typescript', 'node.js', 'express', 'axios'] },
+  { title: 'Invoice Generator', description: 'Build a professional invoice builder with line items, tax calculation, and PDF export.', category: 'Web App', skills: ['react', 'typescript', 'jspdf', 'node.js', 'express'] },
+  { title: 'Grocery List Manager', description: 'Create a smart grocery list app with categories, price tracking, and recurring item memory.', category: 'Web App', skills: ['react', 'typescript', 'node.js', 'express', 'mongodb'] },
+  { title: 'Travel Planner App', description: 'Build an itinerary planner with day-by-day planning, maps, and packing checklist.', category: 'Web App', skills: ['react', 'typescript', 'leaflet', 'node.js', 'mongodb'] },
+  { title: 'Countdown Timer Collection', description: 'Create a multi-purpose countdown app for events, focus sessions, and custom timers.', category: 'Web App', skills: ['react', 'typescript', 'css', 'javascript', 'howler'] },
+  { title: 'Meditation & Breathing App', description: 'Build a guided breathing and meditation app with animated sessions and progress tracking.', category: 'Web App', skills: ['react', 'typescript', 'framer-motion', 'css', 'howler'] },
 
-  // AI/ML
-  { title: 'Sentiment Analysis Dashboard', description: 'Build a tool that analyzes sentiment from social media posts or product reviews using NLP.', category: 'AI/ML', skills: ['python', 'machine learning', 'nlp', 'tensorflow', 'react'] },
-  { title: 'Image Classification Web App', description: 'Create a web app where users upload images and get AI-powered classifications.', category: 'AI/ML', skills: ['python', 'tensorflow', 'pytorch', 'react', 'flask'] },
-  { title: 'AI-Powered Resume Screener', description: 'Build a tool that parses resumes and scores candidates based on job requirements.', category: 'AI/ML', skills: ['python', 'machine learning', 'nlp', 'node.js', 'react'] },
-  { title: 'Chatbot with Natural Language', description: 'Create an AI chatbot that understands natural language and provides helpful responses.', category: 'AI/ML', skills: ['python', 'nlp', 'machine learning', 'javascript', 'react'] },
-  { title: 'AI Content Summarizer', description: 'Build a tool that summarizes articles, PDFs, and YouTube videos into concise bullet points.', category: 'AI/ML', skills: ['python', 'nlp', 'openai', 'react', 'node.js'] },
-  { title: 'Code Review Assistant', description: 'Create an AI tool that reviews pull requests and suggests improvements and catches bugs.', category: 'AI/ML', skills: ['python', 'machine learning', 'github api', 'node.js', 'typescript'] },
-  { title: 'Music Genre Classifier', description: 'Build a tool that analyzes audio files and classifies them by genre using ML.', category: 'AI/ML', skills: ['python', 'tensorflow', 'machine learning', 'react', 'flask'] },
-  { title: 'Smart Email Categorizer', description: 'Create an AI that auto-categorizes emails into folders with priority scoring.', category: 'AI/ML', skills: ['python', 'nlp', 'machine learning', 'react', 'node.js'] },
+  // ── Productivity Tools ────────────────────────────────────────────────────
+  { title: 'Markdown Note-Taking App', description: 'Build a split-pane markdown editor with folders, tags, and local storage sync.', category: 'Tools', skills: ['react', 'typescript', 'marked', 'codemirror', 'css'] },
+  { title: 'Pomodoro Focus Timer', description: 'Create a Pomodoro app with session tracking, stats, and background sounds.', category: 'Tools', skills: ['react', 'typescript', 'css', 'howler', 'javascript'] },
+  { title: 'Clipboard Manager', description: 'Build a browser clipboard manager that stores copy history with search and pin features.', category: 'Tools', skills: ['react', 'typescript', 'indexeddb', 'css', 'javascript'] },
+  { title: 'JSON/YAML Editor', description: 'Create an interactive JSON and YAML editor with schema validation and diff view.', category: 'Tools', skills: ['react', 'typescript', 'codemirror', 'js-yaml', 'javascript'] },
+  { title: 'Password Generator & Manager', description: 'Build a secure password tool with strength checker, custom rules, and local encrypted vault.', category: 'Tools', skills: ['react', 'typescript', 'crypto-js', 'zxcvbn', 'css'] },
+  { title: 'Code Snippet Manager', description: 'Create a developer snippet library with syntax highlighting, tags, and quick copy.', category: 'Tools', skills: ['react', 'typescript', 'prism.js', 'mongodb', 'node.js'] },
+  { title: 'Read-It-Later App', description: 'Build a read-later service where users save URLs, and it extracts and presents articles cleanly.', category: 'Tools', skills: ['react', 'node.js', 'cheerio', 'express', 'mongodb'] },
+  { title: 'Time Zone Converter', description: 'Build a beautiful tool to compare times across multiple time zones simultaneously.', category: 'Tools', skills: ['react', 'typescript', 'luxon', 'date-fns', 'css'] },
+  { title: 'API Tester (Postman Lite)', description: 'Create an in-browser REST API tester with request builder, history, and response viewer.', category: 'Tools', skills: ['react', 'typescript', 'axios', 'node.js', 'css'] },
+  { title: 'Color Palette Studio', description: 'Build a color palette tool with accessibility checking, contrast ratios, and CSS export.', category: 'Tools', skills: ['react', 'typescript', 'chroma.js', 'css', 'javascript'] },
+  { title: 'Regex Playground', description: 'Build an interactive regex tester with live highlighting and a reusable pattern library.', category: 'Tools', skills: ['react', 'javascript', 'typescript', 'css', 'node.js'] },
+  { title: 'CSS Gradient Generator', description: 'Create a visual gradient builder with multi-stop support, preview, and CSS copy.', category: 'Tools', skills: ['react', 'typescript', 'css', 'javascript', 'chroma.js'] },
+  { title: 'SVG Icon Editor', description: 'Build a browser-based SVG editor for tweaking icons with color, size, and path transforms.', category: 'Tools', skills: ['react', 'typescript', 'svg', 'css', 'javascript'] },
+  { title: 'Text Diff Viewer', description: 'Create a clean diff viewer that highlights changes between two text blocks word-by-word.', category: 'Tools', skills: ['react', 'typescript', 'diff', 'css', 'javascript'] },
+  { title: 'Unit Converter', description: 'Build a comprehensive unit converter covering length, weight, temperature, currency, and more.', category: 'Tools', skills: ['react', 'typescript', 'javascript', 'css', 'node.js'] },
+  { title: 'QR Code Generator & Scanner', description: 'Create a QR code generator with custom styling and a live camera scanner.', category: 'Tools', skills: ['react', 'qrcode', 'typescript', 'css', 'javascript'] },
 
-  // DevOps / Backend
-  { title: 'CI/CD Pipeline Dashboard', description: 'Build a monitoring dashboard for CI/CD pipelines with build status and deployment history.', category: 'DevOps', skills: ['docker', 'kubernetes', 'aws', 'node.js', 'react'] },
-  { title: 'API Rate Limiter Service', description: 'Create a distributed rate limiting service with Redis and a monitoring dashboard.', category: 'Backend', skills: ['node.js', 'redis', 'docker', 'go', 'python'] },
-  { title: 'Microservices Starter Kit', description: 'Build a template with API gateway, service discovery, and inter-service communication.', category: 'Backend', skills: ['node.js', 'docker', 'kubernetes', 'go', 'python'] },
-  { title: 'Server Health Monitor', description: 'Create a monitoring tool that tracks uptime, CPU, memory, and sends alerts on anomalies.', category: 'DevOps', skills: ['node.js', 'docker', 'prometheus', 'react', 'typescript'] },
-  { title: 'Log Aggregation Platform', description: 'Build a centralized logging platform with search, filtering, and real-time tailing.', category: 'DevOps', skills: ['node.js', 'elasticsearch', 'docker', 'react', 'typescript'] },
+  // ── Data Visualization ────────────────────────────────────────────────────
+  { title: 'CSV Data Visualizer', description: 'Build an interactive CSV viewer that auto-detects columns and renders charts from data.', category: 'Data', skills: ['react', 'typescript', 'recharts', 'd3', 'papaparse'] },
+  { title: 'GitHub Stats Dashboard', description: 'Visualize GitHub profile stats, repo activity graphs, and language breakdowns via the GitHub API.', category: 'Data', skills: ['react', 'typescript', 'recharts', 'd3', 'axios'] },
+  { title: 'Crypto Price Tracker', description: 'Build a dashboard tracking live cryptocurrency prices with candlestick charts and portfolio view.', category: 'Data', skills: ['react', 'typescript', 'recharts', 'axios', 'node.js'] },
+  { title: 'Sports Stats Dashboard', description: 'Create an analytics dashboard for a sport of choice with charts, tables, and player comparisons.', category: 'Data', skills: ['react', 'typescript', 'recharts', 'd3', 'javascript'] },
+  { title: 'Real-time Stock Watcher', description: 'Build a stock price monitor with real-time updates, watchlists, and simple technical indicators.', category: 'Data', skills: ['react', 'typescript', 'recharts', 'axios', 'socket.io'] },
+  { title: 'World Map Data Explorer', description: 'Create an interactive SVG world map that visualizes country-level data with tooltips.', category: 'Data', skills: ['react', 'typescript', 'd3', 'topojson', 'css'] },
+  { title: 'Fitness Progress Charts', description: 'Build a workout logging app with progress charts, volume tracking, and personal bests.', category: 'Data', skills: ['react', 'typescript', 'recharts', 'node.js', 'mongodb'] },
 
-  // Data / Analytics
-  { title: 'Data Visualization Tool', description: 'Build an interactive dashboard that visualizes CSV/JSON data with charts and filters.', category: 'Data', skills: ['python', 'd3.js', 'react', 'postgresql', 'data science'] },
-  { title: 'Web Scraper with Dashboard', description: 'Create a web scraper that collects data and displays it in a beautiful dashboard.', category: 'Data', skills: ['python', 'node.js', 'react', 'mongodb', 'data science'] },
-  { title: 'Personal Finance Tracker', description: 'Build an app that visualizes spending patterns, creates budgets, and forecasts expenses.', category: 'Data', skills: ['react', 'python', 'd3.js', 'node.js', 'postgresql'] },
-  { title: 'GitHub Analytics Dashboard', description: 'Create a tool that visualizes GitHub activity, contribution patterns, and repo health.', category: 'Data', skills: ['react', 'github api', 'd3.js', 'node.js', 'typescript'] },
-  { title: 'Survey Analytics Platform', description: 'Build a survey tool with advanced analytics, cross-tabulation, and export features.', category: 'Data', skills: ['react', 'node.js', 'mongodb', 'd3.js', 'python'] },
+  // ── Browser Games ─────────────────────────────────────────────────────────
+  { title: 'Typing Speed Racer', description: 'Build a multiplayer typing race with real-time WPM tracking, accuracy, and leaderboards.', category: 'Games', skills: ['react', 'socket.io', 'node.js', 'typescript', 'css'] },
+  { title: 'Snake Game with Power-ups', description: 'Recreate the classic snake game with modern power-ups, modes, and high scores.', category: 'Games', skills: ['react', 'typescript', 'canvas', 'css', 'javascript'] },
+  { title: 'Tetris Clone', description: 'Build a faithful Tetris implementation with hold piece, ghost piece, and score system.', category: 'Games', skills: ['react', 'typescript', 'canvas', 'javascript', 'css'] },
+  { title: 'Wordle Clone', description: 'Recreate Wordle with a custom word list, hard mode, share feature, and dark theme.', category: 'Games', skills: ['react', 'typescript', 'javascript', 'css', 'node.js'] },
+  { title: 'Memory Card Game', description: 'Build a card matching memory game with themes, difficulty levels, and timer.', category: 'Games', skills: ['react', 'typescript', 'css', 'framer-motion', 'javascript'] },
+  { title: 'Minesweeper', description: 'Create a fully-featured Minesweeper with flagging, chord-click, and difficulty settings.', category: 'Games', skills: ['react', 'typescript', 'css', 'javascript', 'canvas'] },
+  { title: '2048 Puzzle Game', description: 'Build the popular 2048 tile puzzle with undo, animations, and high score persistence.', category: 'Games', skills: ['react', 'typescript', 'framer-motion', 'css', 'javascript'] },
+  { title: 'Chess Board (PvP)', description: 'Create a browser chess game with legal move validation, check detection, and PvP mode.', category: 'Games', skills: ['react', 'typescript', 'chess.js', 'css', 'javascript'] },
+  { title: 'Tower Defense Game', description: 'Build a top-down tower defense game with wave mechanics, upgrades, and canvas rendering.', category: 'Games', skills: ['react', 'typescript', 'canvas', 'javascript', 'css'] },
+  { title: 'Flappy Bird Clone', description: 'Recreate Flappy Bird in the browser with physics, obstacles, and a difficulty curve.', category: 'Games', skills: ['react', 'typescript', 'canvas', 'javascript', 'css'] },
+  { title: 'Hangman Game', description: 'Build a themed hangman game with categories, hints, and animated SVG gallows.', category: 'Games', skills: ['react', 'typescript', 'svg', 'css', 'javascript'] },
+  { title: 'Space Shooter Game', description: 'Create a scrolling space shooter with enemies, power-ups, and boss fights using canvas.', category: 'Games', skills: ['react', 'typescript', 'canvas', 'javascript', 'howler'] },
+  { title: 'Tic-Tac-Toe with AI', description: 'Build a tic-tac-toe game with a minimax AI opponent and adjustable difficulty.', category: 'Games', skills: ['react', 'typescript', 'javascript', 'css', 'algorithm'] },
+  { title: 'Infinite Runner Game', description: 'Create a browser-based endless runner with obstacles, coins, and procedural generation.', category: 'Games', skills: ['react', 'canvas', 'typescript', 'howler', 'javascript'] },
+  { title: 'Breakout / Arkanoid Clone', description: 'Build a ball-and-paddle breakout game with power-ups, lives, and level editor.', category: 'Games', skills: ['react', 'typescript', 'canvas', 'javascript', 'css'] },
 
-  // Design / UI
-  { title: 'Design System Library', description: 'Build a reusable component library with documentation, theming, and accessibility.', category: 'Design', skills: ['react', 'ui/ux design', 'css', 'tailwindcss', 'figma'] },
-  { title: 'Portfolio Builder', description: 'Create a tool where users pick templates, customize, and deploy personal portfolios.', category: 'Design', skills: ['react', 'next.js', 'css', 'ui/ux design', 'figma'] },
-  { title: 'Color Palette Generator', description: 'Build an AI-powered color palette tool with accessibility checking and export options.', category: 'Design', skills: ['react', 'javascript', 'css', 'ui/ux design', 'typescript'] },
-  { title: 'Icon Library with Search', description: 'Create a searchable icon library with SVG editing, size variants, and copy-to-clipboard.', category: 'Design', skills: ['react', 'svg', 'css', 'typescript', 'figma'] },
+  // ── E-commerce ────────────────────────────────────────────────────────────
+  { title: 'Product Landing Page Builder', description: 'Build a no-code landing page editor for products with drag-and-drop sections and live preview.', category: 'Web App', skills: ['react', 'typescript', 'framer-motion', 'css', 'node.js'] },
+  { title: 'Shopping Cart & Checkout', description: 'Create a full e-commerce cart with product filters, cart management, and checkout flow.', category: 'Fullstack', skills: ['react', 'typescript', 'node.js', 'express', 'mongodb'] },
+  { title: 'Flash Sale Timer App', description: 'Create an e-commerce flash deal system with countdown timers and live stock counters.', category: 'Web App', skills: ['react', 'socket.io', 'node.js', 'typescript', 'mongodb'] },
+  { title: 'Coupon Code Manager', description: 'Build a discount code generator, validator, and redemption tracker for small shops.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'mongodb', 'typescript'] },
 
-  // Games
-  { title: 'Multiplayer Quiz Game', description: 'Build a real-time multiplayer quiz game with rooms, scoring, and leaderboards.', category: 'Gaming', skills: ['javascript', 'typescript', 'socket.io', 'react', 'node.js'] },
-  { title: '2D Platformer Game', description: 'Create a browser-based 2D platformer with levels, enemies, and a level editor.', category: 'Gaming', skills: ['javascript', 'game development', 'html5', 'canvas', 'typescript'] },
-  { title: 'Typing Speed Racer', description: 'Build a multiplayer typing test app with real-time racing, WPM tracking, and leagues.', category: 'Gaming', skills: ['react', 'socket.io', 'node.js', 'typescript', 'javascript'] },
-  { title: 'Chess with AI Opponent', description: 'Create a chess game with multiplayer support and an AI opponent of varying difficulty.', category: 'Gaming', skills: ['javascript', 'typescript', 'react', 'node.js', 'algorithm'] },
-  { title: 'Card Game Engine', description: 'Build a flexible card game engine supporting multiple game types (poker, uno, etc).', category: 'Gaming', skills: ['javascript', 'typescript', 'socket.io', 'react', 'node.js'] },
+  // ── Social / Community ────────────────────────────────────────────────────
+  { title: 'Micro-Blog Platform', description: 'Create a Twitter-like microblogging platform with posts, likes, follows, and hashtags.', category: 'Fullstack', skills: ['react', 'node.js', 'socket.io', 'express', 'mongodb'] },
+  { title: 'Community Forum', description: 'Build a Reddit-style forum with threads, upvotes, categories, and nested comments.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'mongodb', 'typescript'] },
+  { title: 'Anonymous Confessions Board', description: 'Create an anonymous sharing platform with moderation, upvotes, and category filters.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'mongodb', 'socket.io'] },
+  { title: 'Study Partner Finder', description: 'Build a matchmaking platform for students to find study partners based on subject and schedule.', category: 'Fullstack', skills: ['react', 'socket.io', 'node.js', 'mongodb', 'typescript'] },
+  { title: 'Remote Work Hub', description: 'Create a platform for remote workers to find coworking buddies, share resources, and post check-ins.', category: 'Fullstack', skills: ['react', 'node.js', 'socket.io', 'express', 'mongodb'] },
+  { title: 'Daily Stand-up Tracker', description: 'Build a team stand-up tracker where members post daily updates and blockers.', category: 'Fullstack', skills: ['react', 'node.js', 'express', 'mongodb', 'typescript'] },
 
-  // Blockchain
-  { title: 'NFT Marketplace', description: 'Build a marketplace for creating, listing, and trading digital collectibles.', category: 'Blockchain', skills: ['solidity', 'ethereum', 'react', 'web3', 'blockchain'] },
-  { title: 'DeFi Yield Calculator', description: 'Create a tool that compares DeFi yields across protocols and tracks returns.', category: 'Blockchain', skills: ['solidity', 'web3', 'react', 'blockchain', 'javascript'] },
-  { title: 'DAO Voting Platform', description: 'Build a decentralized governance platform with proposal creation and token voting.', category: 'Blockchain', skills: ['solidity', 'web3', 'react', 'ethereum', 'typescript'] },
+  // ── API / Backend Focused ─────────────────────────────────────────────────
+  { title: 'URL Shortener with Analytics', description: 'Build a URL shortener that tracks click counts, referrers, and geographic data.', category: 'Fullstack', skills: ['node.js', 'express', 'mongodb', 'react', 'typescript'] },
+  { title: 'REST API Playground', description: 'Scaffold a full CRUD REST API with auth, rate limiting, and Swagger docs.', category: 'Backend', skills: ['node.js', 'express', 'mongodb', 'jwt', 'typescript'] },
+  { title: 'Webhook Relay & Inspector', description: 'Build a tool that receives webhooks, logs payloads, and lets you replay them.', category: 'Backend', skills: ['node.js', 'express', 'socket.io', 'typescript', 'mongodb'] },
+  { title: 'API Mock Server', description: 'Create a mock server that generates realistic fake data for API endpoints on demand.', category: 'Tools', skills: ['node.js', 'express', 'faker.js', 'typescript', 'react'] },
+  { title: 'GraphQL Server & Playground', description: 'Build a simple GraphQL server with schema explorer and live query playground.', category: 'Backend', skills: ['node.js', 'graphql', 'express', 'mongodb', 'typescript'] },
+  { title: 'Email Template Builder', description: 'Build a drag-and-drop email template editor with preview and HTML export.', category: 'Tools', skills: ['react', 'typescript', 'mjml', 'node.js', 'express'] },
+  { title: 'Notification Center API', description: 'Create an in-app notification system with read/unread, types, and real-time push.', category: 'Backend', skills: ['node.js', 'express', 'socket.io', 'mongodb', 'typescript'] },
 
-  // Tools
-  { title: 'CLI Tool for Developers', description: 'Build a useful CLI utility (code formatter, project scaffolder, or dev workflow tool).', category: 'Tools', skills: ['node.js', 'python', 'go', 'rust', 'typescript'] },
-  { title: 'VS Code Extension', description: 'Create a productivity-boosting VS Code extension with custom commands and UI.', category: 'Tools', skills: ['typescript', 'javascript', 'node.js', 'vscode', 'electron'] },
-  { title: 'Open Source Documentation Site', description: 'Build a beautiful documentation site generator with search, versioning, and themes.', category: 'Open Source', skills: ['react', 'next.js', 'markdown', 'typescript', 'node.js'] },
-  { title: 'API Testing Dashboard', description: 'Create a Postman-like tool in the browser with collections, environments, and history.', category: 'Tools', skills: ['react', 'typescript', 'node.js', 'javascript', 'css'] },
-  { title: 'Regex Playground', description: 'Build an interactive regex tester with explanation, highlighting, and pattern library.', category: 'Tools', skills: ['react', 'javascript', 'typescript', 'css', 'node.js'] },
-  { title: 'Screenshot to Code', description: 'Create a tool that converts website screenshots to HTML/CSS code using AI.', category: 'Tools', skills: ['python', 'react', 'openai', 'typescript', 'machine learning'] },
-
-  // Cybersecurity
-  { title: 'Password Strength Analyzer', description: 'Build a tool that checks password strength, suggests improvements, and detects breaches.', category: 'Security', skills: ['cybersecurity', 'python', 'node.js', 'react', 'javascript'] },
-  { title: 'Network Scanner Dashboard', description: 'Create a web-based network scanning tool with port analysis and vulnerability detection.', category: 'Security', skills: ['cybersecurity', 'python', 'node.js', 'react', 'networking'] },
-  { title: 'Phishing Email Detector', description: 'Build a tool that analyzes emails for phishing indicators with ML-based scoring.', category: 'Security', skills: ['python', 'machine learning', 'cybersecurity', 'react', 'node.js'] },
-
-  // Collaboration / Social
-  { title: 'Collaborative Whiteboard', description: 'Build a real-time collaborative whiteboard with drawing, sticky notes, and sharing.', category: 'Collaboration', skills: ['react', 'socket.io', 'node.js', 'canvas', 'typescript'] },
-  { title: 'Event Management Platform', description: 'Create a platform for organizing events with RSVP, ticketing, and notifications.', category: 'Web Development', skills: ['react', 'node.js', 'mongodb', 'express', 'javascript'] },
-  { title: 'Social Media Scheduler', description: 'Build a tool to schedule and manage posts across multiple social media platforms.', category: 'Web Development', skills: ['react', 'node.js', 'api', 'mongodb', 'typescript'] },
-  { title: 'Study Group Finder', description: 'Create a platform for students to find study partners based on courses and schedule.', category: 'Collaboration', skills: ['react', 'node.js', 'mongodb', 'socket.io', 'typescript'] },
-  { title: 'Peer Code Review Tool', description: 'Build a platform for anonymous code review with inline comments and ratings.', category: 'Collaboration', skills: ['react', 'node.js', 'github api', 'typescript', 'mongodb'] },
-  { title: 'Standing Desk Reminder', description: 'Create a desktop app that reminds users to stand, tracks sit/stand time, and shows health stats.', category: 'Tools', skills: ['electron', 'react', 'typescript', 'node.js', 'css'] },
-  { title: 'Open Mic Night Signup', description: 'Build a platform for venues to manage open mic signups with waitlists and time slots.', category: 'Web Development', skills: ['react', 'node.js', 'mongodb', 'socket.io', 'javascript'] },
-  { title: 'Meme Generator', description: 'Create a meme generator with templates, custom text, image upload, and social sharing.', category: 'Web Development', skills: ['react', 'canvas', 'javascript', 'css', 'node.js'] },
-  { title: 'Weather Outfit Recommender', description: 'Build an app that suggests outfits based on weather, occasion, and personal wardrobe.', category: 'Mobile Development', skills: ['react native', 'weather api', 'machine learning', 'mobile', 'python'] },
-  { title: 'Podcast Discovery Platform', description: 'Create a podcast recommendation engine with episode summarization and social features.', category: 'Web Development', skills: ['react', 'node.js', 'nlp', 'mongodb', 'python'] },
+  // ── Creative / Fun ────────────────────────────────────────────────────────
+  { title: 'Meme Generator', description: 'Create a meme builder with templates, drag-and-drop text, image upload, and share link.', category: 'Web App', skills: ['react', 'typescript', 'canvas', 'css', 'javascript'] },
+  { title: 'ASCII Art Generator', description: 'Build a tool that converts images or text to styled ASCII art with copy and download.', category: 'Tools', skills: ['react', 'typescript', 'canvas', 'javascript', 'css'] },
+  { title: 'Pixel Art Editor', description: 'Create a browser pixel art editor with palette, fill, undo/redo, and PNG export.', category: 'Creative', skills: ['react', 'typescript', 'canvas', 'javascript', 'css'] },
+  { title: 'Generative Art Canvas', description: 'Build an interactive generative art app where parameters create unique visuals.', category: 'Creative', skills: ['react', 'typescript', 'p5.js', 'canvas', 'css'] },
+  { title: 'Random Quote Machine', description: 'Create a beautifully designed random quote generator with categories, favorites, and share.', category: 'Web App', skills: ['react', 'typescript', 'node.js', 'express', 'css'] },
+  { title: 'Virtual Drum Kit', description: 'Build a browser drum machine with keyboard controls, sound packs, and beat recording.', category: 'Creative', skills: ['react', 'typescript', 'web audio api', 'css', 'howler'] },
+  { title: 'Interactive Storyteller', description: 'Create a choose-your-own-adventure engine with branching narratives and progress saving.', category: 'Web App', skills: ['react', 'typescript', 'framer-motion', 'node.js', 'mongodb'] },
+  { title: 'Mood Journal', description: 'Build a mood tracking journal with emoji entry, trend charts, and private notes.', category: 'Web App', skills: ['react', 'typescript', 'recharts', 'date-fns', 'node.js'] },
+  { title: 'Emoji Keyboard Builder', description: 'Create a customisable emoji keyboard widget with categories, copy, and skin-tone support.', category: 'Web App', skills: ['react', 'typescript', 'css', 'javascript', 'node.js'] },
+  { title: 'Soundboard App', description: 'Build a browser soundboard with customisable buttons, sound upload, and keyboard shortcuts.', category: 'Creative', skills: ['react', 'typescript', 'howler', 'css', 'javascript'] },
 ];
 
-// Dynamic variations to make titles more unique
-const TITLE_PREFIXES = ['', 'Modern ', 'Smart ', 'AI-Powered ', 'Next-Gen ', 'Open Source ', 'Minimal ', 'Full-Stack '];
+// Dynamic title variations so suggestions feel fresh each session
+const TITLE_PREFIXES = ['', 'Modern ', 'Smart ', 'Next-Gen ', 'Open Source ', 'Minimal ', 'Full-Stack '];
 const TITLE_SUFFIXES = ['', ' 2.0', ' Pro', ' Lite', ' Studio', ' Hub', ' Kit'];
 
 export function generateProjectIdea(
   user1: IUser,
   user2: IUser
 ): { title: string; description: string; category: string; difficulty: string } {
-  const ideas = generateProjectIdeas(user1, user2);
-  return ideas[0];
+  return generateProjectIdeas(user1, user2)[0];
 }
 
 export function generateProjectIdeas(
@@ -281,45 +232,33 @@ export function generateProjectIdeas(
   user2: IUser,
   count: number = 3
 ): Array<{ title: string; description: string; category: string; difficulty: string }> {
-  const allSkills = [...user1.skills, ...user2.skills].map(s => s.toLowerCase());
-  const allInterests = [...user1.interests, ...user2.interests].map(i => i.toLowerCase());
+  const allSkills = [...user1.skills, ...user2.skills].map((s) => s.toLowerCase());
+  const allInterests = [...user1.interests, ...user2.interests].map((i) => i.toLowerCase());
 
-  // Score each template based on skill match
-  const scored = PROJECT_TEMPLATES.map(template => {
+  const scored = PROJECT_TEMPLATES.map((template) => {
     let score = 0;
-
-    // Skills match (weighted heavily)
     for (const skill of template.skills) {
-      if (allSkills.some(s => s.includes(skill) || skill.includes(s))) {
-        score += 10;
-      }
+      if (allSkills.some((s) => s.includes(skill) || skill.includes(s))) score += 10;
     }
-
-    // Interest/category match
-    if (allInterests.some(i =>
-      template.category.toLowerCase().includes(i) || i.includes(template.category.toLowerCase())
-    )) {
+    if (allInterests.some((i) => template.category.toLowerCase().includes(i) || i.includes(template.category.toLowerCase()))) {
       score += 5;
     }
-
     return { template, score };
   });
 
-  // Heavier randomization to avoid repetition (random weight 0-8 instead of 0-3)
-  scored.sort((a, b) => (b.score + Math.random() * 8) - (a.score + Math.random() * 8));
+  // Strong randomisation so each match session picks differently
+  scored.sort((a, b) => b.score + Math.random() * 12 - (a.score + Math.random() * 12));
 
-  // Determine difficulty
   const experienceLevels = ['beginner', 'intermediate', 'advanced', 'expert'];
   const user1Level = experienceLevels.indexOf(user1.experienceLevel);
   const user2Level = experienceLevels.indexOf(user2.experienceLevel);
   const avgLevel = Math.round((user1Level + user2Level) / 2);
   const difficulty = avgLevel <= 0 ? 'easy' : avgLevel >= 3 ? 'hard' : 'medium';
 
-  // Return top N unique ideas with dynamic title variations
   return scored.slice(0, count).map(({ template }) => {
     const prefix = TITLE_PREFIXES[Math.floor(Math.random() * TITLE_PREFIXES.length)];
     const suffix = TITLE_SUFFIXES[Math.floor(Math.random() * TITLE_SUFFIXES.length)];
-    const hasVariation = Math.random() > 0.4; // 60% chance of variation
+    const hasVariation = Math.random() > 0.4;
     return {
       title: hasVariation ? `${prefix}${template.title}${suffix}`.trim() : template.title,
       description: template.description,
@@ -328,4 +267,3 @@ export function generateProjectIdeas(
     };
   });
 }
-
