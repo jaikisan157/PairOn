@@ -244,31 +244,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setCallStatusSync('ringing');
       });
 
-      // Caller receives the answer
+      // Caller receives the answer → set remote description and mark connected
       socket.on('call:answer', async (data: { sessionId: string; answer: RTCSessionDescriptionInit }) => {
-        // EDGE CASE: ignore answers for different sessions
-        if (data.sessionId !== callSessionIdRef.current) return;
+        if (!pcRef.current) return; // No active call, ignore
         try {
-          if (pcRef.current) {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-            // Drain queued ICE candidates
-            for (const c of iceCandidateQueueRef.current) {
-              try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
-            }
-            iceCandidateQueueRef.current = [];
-            setCallStatusSync('connected');
-            callStartRef.current = Date.now();
-            callTimerRef.current = setInterval(
-              () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          // Drain queued ICE candidates that arrived before the answer
+          for (const c of iceCandidateQueueRef.current) {
+            try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
           }
+          iceCandidateQueueRef.current = [];
+          setCallStatusSync('connected');
+          callStartRef.current = Date.now();
+          callTimerRef.current = setInterval(
+            () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
         } catch (_) {}
       });
 
-      // ICE candidate exchange
-      socket.on('call:ice-candidate', async (data: { sessionId: string; candidate: RTCIceCandidateInit }) => {
-        // Accept candidates for current session OR pending offer session (callee before accepting)
-        const relevantSession = callSessionIdRef.current ?? pendingOfferRef.current?.sessionId;
-        if (data.sessionId !== relevantSession) return;
+      // ICE candidate — backend already routes to correct session room, no extra check needed
+      socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
         try {
           if (pcRef.current?.remoteDescription)
             await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
