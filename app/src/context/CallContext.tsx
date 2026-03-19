@@ -62,11 +62,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const ringIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   // Ref-mirrors of state — safe to read inside socket closures
+  // NOTE: We update these SYNCHRONOUSLY alongside their state setters
+  // (NOT via useEffect) so closures always see the latest value immediately.
   const callStatusRef    = useRef<CallStatus>('idle');
   const callSessionIdRef = useRef<string | null>(null);
 
-  useEffect(() => { callStatusRef.current    = callStatus;    }, [callStatus]);
-  useEffect(() => { callSessionIdRef.current = callSessionId; }, [callSessionId]);
+  // Helper to update both state + ref atomically
+  const setCallStatusSync = useCallback((s: CallStatus) => {
+    callStatusRef.current = s;
+    setCallStatus(s);
+  }, []);
+  const setCallSessionIdSync = useCallback((id: string | null) => {
+    callSessionIdRef.current = id;
+    setCallSessionId(id);
+  }, []);
 
   // ── Cleanup helper ──────────────────────────────────────────────────────────
   const cleanupCall = useCallback(() => {
@@ -79,6 +88,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     callTimerRef.current = null;
     iceCandidateQueueRef.current = [];
     pendingOfferRef.current = null;
+    // Reset refs synchronously before state updates so any in-flight
+    // socket events see the idle state immediately
+    callStatusRef.current    = 'idle';
+    callSessionIdRef.current = null;
     setCallStatus('idle');
     setCallDuration(0);
     setIsMuted(false);
@@ -133,23 +146,30 @@ export function CallProvider({ children }: { children: ReactNode }) {
       localStreamRef.current = stream;
       const pc = createPC();
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
 
+      // ⚡ Set ref BEFORE setLocalDescription — ICE gathering starts there
+      // and onicecandidate reads callSessionIdRef.current synchronously
+      callSessionIdRef.current = sessionId;
       setCallSessionId(sessionId);
       setCallPartnerName(partnerName);
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer); // ← ICE gathering starts, ref already set ✅
+
       socketService.getSocket()?.emit('call:offer', { sessionId, offer, callerName });
-      setCallStatus('calling');
+      setCallStatusSync('calling');
     } catch (err: any) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
       pcRef.current?.close(); pcRef.current = null;
+      callSessionIdRef.current = null;
+      setCallSessionId(null);
       if (err.name === 'NotAllowedError')
         alert('Microphone access denied. Please allow microphone in browser settings and try again.');
       else
         alert('Could not start call: ' + err.message);
     }
-  }, [createPC]);
+  }, [createPC, setCallStatusSync]);
 
   // ── acceptCall ──────────────────────────────────────────────────────────────
   const acceptCall = useCallback(async () => {
@@ -162,6 +182,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       localStreamRef.current = stream;
       const pc = createPC();
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
       // Drain any ICE candidates queued before we had a remote description
@@ -171,11 +192,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
       iceCandidateQueueRef.current = [];
 
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+
+      // ⚡ Set ref BEFORE setLocalDescription — ICE gathering starts there
+      callSessionIdRef.current = sessionId;
+      setCallSessionId(sessionId);
+
+      await pc.setLocalDescription(answer); // ← ICE gathering continues, ref already set ✅
       socketService.getSocket()?.emit('call:answer', { sessionId, answer });
 
-      setCallSessionId(sessionId);
-      setCallStatus('connected');
+      setCallStatusSync('connected');
       callStartRef.current = Date.now();
       callTimerRef.current = setInterval(
         () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
@@ -183,7 +208,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       alert('Could not answer call: ' + err.message);
       cleanupCall();
     }
-  }, [createPC, cleanupCall]);
+  }, [createPC, cleanupCall, setCallStatusSync]);
 
   // ── declineCall ─────────────────────────────────────────────────────────────
   const declineCall = useCallback(() => {
@@ -220,7 +245,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
         pendingOfferRef.current = { offer: data.offer, sessionId: data.sessionId };
         setCallPartnerName(data.callerName);
-        setCallStatus('ringing');
+        setCallStatusSync('ringing');
       });
 
       // Caller receives the answer
@@ -235,7 +260,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
               try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
             }
             iceCandidateQueueRef.current = [];
-            setCallStatus('connected');
+            setCallStatusSync('connected');
             callStartRef.current = Date.now();
             callTimerRef.current = setInterval(
               () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
