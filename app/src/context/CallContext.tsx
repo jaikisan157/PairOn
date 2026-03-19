@@ -1,3 +1,9 @@
+/**
+ * CallContext — global voice call state.
+ *
+ * This is a direct port of the original working call code from CollaborationPage.
+ * No extra sessionId checks. Keep it simple — it worked before.
+ */
 import {
   createContext, useContext, useRef, useState, useEffect, useCallback,
 } from 'react';
@@ -5,7 +11,7 @@ import type { ReactNode } from 'react';
 import { socketService } from '@/lib/socket';
 import { useAuth } from '@/context/AuthContext';
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connected';
 
 interface CallContextType {
@@ -16,7 +22,6 @@ interface CallContextType {
   callDuration: number;
   callBarPos: { x: number; y: number };
   setCallBarPos: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
-  /** Only callable from a collaboration session */
   startCall: (sessionId: string, partnerName: string, callerName: string) => Promise<void>;
   acceptCall: () => Promise<void>;
   declineCall: () => void;
@@ -32,7 +37,7 @@ export function useCall(): CallContextType {
   return ctx;
 }
 
-// ── ICE servers (Google STUN + Open Relay free TURN) ─────────────────────────
+// ── ICE servers ───────────────────────────────────────────────────────────────
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
@@ -40,11 +45,11 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 export function CallProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
 
-  // ── Reactive state ──────────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────
   const [callStatus,      setCallStatus]      = useState<CallStatus>('idle');
   const [callSessionId,   setCallSessionId]   = useState<string | null>(null);
   const [callPartnerName, setCallPartnerName] = useState<string | null>(null);
@@ -52,44 +57,52 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [callDuration,    setCallDuration]    = useState(0);
   const [callBarPos,      setCallBarPos]      = useState({ x: 0, y: 0 });
 
-  // ── Mutable refs (safe in closures) ────────────────────────────────────────
+  // ── Refs (same as original CollaborationPage) ─────────────────────────────
   const pcRef               = useRef<RTCPeerConnection | null>(null);
   const localStreamRef      = useRef<MediaStream | null>(null);
-  const remoteAudioRef      = useRef<HTMLAudioElement | null>(null);
   const callTimerRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef        = useRef<number>(0);
-  const pendingOfferRef     = useRef<{ offer: RTCSessionDescriptionInit; sessionId: string } | null>(null);
+  const pendingOfferRef     = useRef<RTCSessionDescriptionInit | null>(null);      // just the offer
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const ringIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Ref-mirrors of state — safe to read inside socket closures
-  // NOTE: We update these SYNCHRONOUSLY alongside their state setters
-  // (NOT via useEffect) so closures always see the latest value immediately.
-  const callStatusRef    = useRef<CallStatus>('idle');
-  const callSessionIdRef = useRef<string | null>(null);
+  // A ref-mirror of callStatus so socket closures can read it without stale capture
+  const callStatusRef       = useRef<CallStatus>('idle');
+  const callSessionIdRef    = useRef<string | null>(null);
 
-  // Helper to update both state + ref atomically
-  const setCallStatusSync = useCallback((s: CallStatus) => {
-    callStatusRef.current = s;
-    setCallStatus(s);
-  }, []);
+  // Keep ref mirrors in sync
+  useEffect(() => { callStatusRef.current    = callStatus;    }, [callStatus]);
+  useEffect(() => { callSessionIdRef.current = callSessionId; }, [callSessionId]);
 
-  // ── Cleanup helper ──────────────────────────────────────────────────────────
-  const cleanupCall = useCallback(() => {
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const getRemoteAudio = (): HTMLAudioElement => {
+    let el = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
+    if (!el) {
+      el = document.createElement('audio');
+      el.id = 'pairon-call-audio';
+      el.autoplay = true;
+      document.body.appendChild(el);
+    }
+    return el;
+  };
+
+  // ── endCall ───────────────────────────────────────────────────────────────
+  const endCall = useCallback((notify = true) => {
+    if (notify && callSessionIdRef.current)
+      socketService.getSocket()?.emit('call:end', { sessionId: callSessionIdRef.current });
+
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
     pcRef.current?.close();
     pcRef.current = null;
-    // Remove injected audio element from DOM
-    const audioEl = document.getElementById('pairon-remote-audio');
-    if (audioEl) audioEl.remove();
-    if (remoteAudioRef.current) { remoteAudioRef.current.srcObject = null; remoteAudioRef.current = null; }
+
+    const audio = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
+    if (audio) { audio.srcObject = null; audio.remove(); }
+
     if (callTimerRef.current) clearInterval(callTimerRef.current);
     callTimerRef.current = null;
     iceCandidateQueueRef.current = [];
     pendingOfferRef.current = null;
-    // Reset refs synchronously before state updates
-    callStatusRef.current    = 'idle';
-    callSessionIdRef.current = null;
+
     setCallStatus('idle');
     setCallDuration(0);
     setIsMuted(false);
@@ -98,15 +111,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCallBarPos({ x: 0, y: 0 });
   }, []);
 
-  // ── endCall (exported, works from any page) ─────────────────────────────────
-  const endCall = useCallback((notify = true) => {
-    if (notify && callSessionIdRef.current) {
-      socketService.getSocket()?.emit('call:end', { sessionId: callSessionIdRef.current });
-    }
-    cleanupCall();
-  }, [cleanupCall]);
-
-  // ── createPC ────────────────────────────────────────────────────────────────
+  // ── createPC — exact copy from original ──────────────────────────────────
   const createPC = useCallback((): RTCPeerConnection => {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
@@ -119,21 +124,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (e) => {
-      // Append a real DOM audio element — more reliable than new Audio()
-      // detached Audio objects are silently blocked by browser autoplay policies
-      let audio = document.getElementById('pairon-remote-audio') as HTMLAudioElement | null;
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'pairon-remote-audio';
-        audio.autoplay = true;
-        (audio as any).playsInline = true;
-        document.body.appendChild(audio);
-      }
+      const audio = getRemoteAudio();
       audio.srcObject = e.streams[0];
-      remoteAudioRef.current = audio;
       audio.play().catch(() => {
-        // If autoplay is still blocked, resume on next user interaction
-        const resume = () => { audio!.play().catch(() => {}); document.removeEventListener('click', resume); };
+        // Queue play on next user interaction if autoplay blocked
+        const resume = () => { audio.play().catch(() => {}); };
         document.addEventListener('click', resume, { once: true });
       });
     };
@@ -147,9 +142,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return pc;
   }, [endCall]);
 
-  // ── startCall ───────────────────────────────────────────────────────────────
+  // ── startCall — exact copy from original ─────────────────────────────────
   const startCall = useCallback(async (sessionId: string, partnerName: string, callerName: string) => {
-    // EDGE CASE: prevent starting if already in any call
     if (callStatusRef.current !== 'idle') return;
 
     try {
@@ -158,34 +152,28 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const pc = createPC();
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-      // ⚡ Set ref BEFORE setLocalDescription — ICE gathering starts there
-      // and onicecandidate reads callSessionIdRef.current synchronously
-      callSessionIdRef.current = sessionId;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
       setCallSessionId(sessionId);
       setCallPartnerName(partnerName);
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer); // ← ICE gathering starts, ref already set ✅
-
       socketService.getSocket()?.emit('call:offer', { sessionId, offer, callerName });
-      setCallStatusSync('calling');
+      setCallStatus('calling');
     } catch (err: any) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
       pcRef.current?.close(); pcRef.current = null;
-      callSessionIdRef.current = null;
-      setCallSessionId(null);
       if (err.name === 'NotAllowedError')
-        alert('Microphone access denied. Please allow microphone in browser settings and try again.');
+        alert('Microphone blocked. Allow microphone access in your browser and try again.');
       else
         alert('Could not start call: ' + err.message);
     }
-  }, [createPC, setCallStatusSync]);
+  }, [createPC]);
 
-  // ── acceptCall ──────────────────────────────────────────────────────────────
+  // ── acceptCall — exact copy from original ────────────────────────────────
   const acceptCall = useCallback(async () => {
     if (!pendingOfferRef.current) return;
-    const { offer, sessionId } = pendingOfferRef.current;
+    const offer = pendingOfferRef.current;
     pendingOfferRef.current = null;
 
     try {
@@ -196,48 +184,48 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
-      // Drain any ICE candidates queued before we had a remote description
+      // Drain queued ICE candidates
       for (const c of iceCandidateQueueRef.current) {
         try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
       }
       iceCandidateQueueRef.current = [];
 
       const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
 
-      // ⚡ Set ref BEFORE setLocalDescription — ICE gathering starts there
-      callSessionIdRef.current = sessionId;
-      setCallSessionId(sessionId);
+      if (callSessionIdRef.current)
+        socketService.getSocket()?.emit('call:answer', {
+          sessionId: callSessionIdRef.current,
+          answer,
+        });
 
-      await pc.setLocalDescription(answer); // ← ICE gathering continues, ref already set ✅
-      socketService.getSocket()?.emit('call:answer', { sessionId, answer });
-
-      setCallStatusSync('connected');
+      setCallStatus('connected');
       callStartRef.current = Date.now();
       callTimerRef.current = setInterval(
         () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
     } catch (err: any) {
       alert('Could not answer call: ' + err.message);
-      cleanupCall();
+      setCallStatus('idle');
     }
-  }, [createPC, cleanupCall, setCallStatusSync]);
+  }, [createPC]);
 
-  // ── declineCall ─────────────────────────────────────────────────────────────
+  // ── declineCall ───────────────────────────────────────────────────────────
   const declineCall = useCallback(() => {
-    if (pendingOfferRef.current) {
-      socketService.getSocket()?.emit('call:end', { sessionId: pendingOfferRef.current.sessionId });
-      pendingOfferRef.current = null;
-    }
+    pendingOfferRef.current = null;
+    if (callSessionIdRef.current)
+      socketService.getSocket()?.emit('call:end', { sessionId: callSessionIdRef.current });
     setCallStatus('idle');
     setCallPartnerName(null);
+    setCallSessionId(null);
   }, []);
 
-  // ── toggleMute ──────────────────────────────────────────────────────────────
+  // ── toggleMute ────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
     const track = localStreamRef.current?.getAudioTracks()[0];
-    if (track) { track.enabled = !track.enabled; setIsMuted(v => !v); }
+    if (track) { track.enabled = !track.enabled; setIsMuted(!track.enabled); }
   }, []);
 
-  // ── Socket listeners (global — persists across page navigation) ─────────────
+  // ── Socket listeners — attached once when authenticated ──────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -249,34 +237,36 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       // Incoming call offer
       socket.on('call:offer', (data: { sessionId: string; offer: RTCSessionDescriptionInit; callerName: string }) => {
-        // EDGE CASE: already on a call → auto-decline the new one
+        // Already on a call — auto-decline
         if (callStatusRef.current !== 'idle') {
           socket.emit('call:end', { sessionId: data.sessionId });
           return;
         }
-        pendingOfferRef.current = { offer: data.offer, sessionId: data.sessionId };
+        pendingOfferRef.current = data.offer;
+        setCallSessionId(data.sessionId);
         setCallPartnerName(data.callerName);
-        setCallStatusSync('ringing');
+        setCallStatus('ringing');
       });
 
-      // Caller receives the answer → set remote description and mark connected
-      socket.on('call:answer', async (data: { sessionId: string; answer: RTCSessionDescriptionInit }) => {
-        if (!pcRef.current) return; // No active call, ignore
+      // Caller gets the answer — exact copy from original
+      socket.on('call:answer', async (data: { answer: RTCSessionDescriptionInit }) => {
         try {
-          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-          // Drain queued ICE candidates that arrived before the answer
-          for (const c of iceCandidateQueueRef.current) {
-            try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+          if (pcRef.current) {
+            await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+            // Drain queued ICE candidates
+            for (const c of iceCandidateQueueRef.current) {
+              try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+            }
+            iceCandidateQueueRef.current = [];
+            setCallStatus('connected');
+            callStartRef.current = Date.now();
+            callTimerRef.current = setInterval(
+              () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
           }
-          iceCandidateQueueRef.current = [];
-          setCallStatusSync('connected');
-          callStartRef.current = Date.now();
-          callTimerRef.current = setInterval(
-            () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
         } catch (_) {}
       });
 
-      // ICE candidate — backend already routes to correct session room, no extra check needed
+      // ICE candidates — exact copy from original
       socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
         try {
           if (pcRef.current?.remoteDescription)
@@ -287,14 +277,28 @@ export function CallProvider({ children }: { children: ReactNode }) {
       });
 
       // Partner ended call
-      socket.on('call:end', () => { cleanupCall(); });
+      socket.on('call:end', () => {
+        localStreamRef.current?.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+        pcRef.current?.close();
+        pcRef.current = null;
+        const audio = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
+        if (audio) { audio.srcObject = null; audio.remove(); }
+        if (callTimerRef.current) clearInterval(callTimerRef.current);
+        callTimerRef.current = null;
+        setCallStatus('idle');
+        setCallDuration(0);
+        setIsMuted(false);
+        setCallSessionId(null);
+        setCallPartnerName(null);
+      });
 
       return true;
     }
 
     if (!attach()) {
       pollTimer = setInterval(() => {
-        if (attach() && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (attach()) { clearInterval(pollTimer!); pollTimer = null; }
       }, 300);
     }
 
@@ -307,12 +311,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         s.removeAllListeners('call:ice-candidate');
         s.removeAllListeners('call:end');
       }
-      endCall(false);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // ── Ring / dial tones via Web Audio API (no files, no server) ──────────────
+  // ── Ring / dial tones ─────────────────────────────────────────────────────
   useEffect(() => {
     const stopRing = () => {
       if (ringIntervalRef.current) { clearInterval(ringIntervalRef.current); ringIntervalRef.current = null; }
@@ -325,14 +328,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
         gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
         gain.connect(ctx.destination);
         freqs.forEach(f => {
-          const osc = ctx.createOscillator(); osc.frequency.value = f;
-          osc.connect(gain); osc.start(); osc.stop(ctx.currentTime + dur);
+          const osc = ctx.createOscillator();
+          osc.frequency.value = f;
+          osc.connect(gain);
+          osc.start();
+          osc.stop(ctx.currentTime + dur);
         });
         setTimeout(() => ctx.close(), (dur + 0.1) * 1000);
       } catch (_) {}
     };
 
-    if      (callStatus === 'ringing')   { beep([480, 440], 0.4); ringIntervalRef.current = setInterval(() => beep([480, 440], 0.4), 3000); }
+    if (callStatus === 'ringing')        { beep([480, 440], 0.4); ringIntervalRef.current = setInterval(() => beep([480, 440], 0.4), 3000); }
     else if (callStatus === 'calling')   { beep([350, 440], 0.6, 0.05); ringIntervalRef.current = setInterval(() => beep([350, 440], 0.6, 0.05), 3000); }
     else if (callStatus === 'connected') { beep([880], 0.15, 0.06); stopRing(); }
     else                                 { stopRing(); }
@@ -340,10 +346,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return stopRing;
   }, [callStatus]);
 
-  // ── Cleanup on unmount ──────────────────────────────────────────────────────
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => () => { endCall(false); }, [endCall]);
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <CallContext.Provider value={{
       callStatus, callSessionId, callPartnerName, isMuted, callDuration,
