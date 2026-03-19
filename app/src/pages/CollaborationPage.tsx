@@ -19,6 +19,11 @@ import {
   Wand2,
   Edit3,
   Check,
+  Phone,
+  PhoneOff,
+  PhoneIncoming,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -162,6 +167,18 @@ export function CollaborationPage() {
   // Idle tracking for slide-to-verify
   const lastActivityRef = useRef<number>(Date.now());
   const idleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Voice call state ──────────────────────────────────────────────────────
+  const [callStatus, setCallStatus] = useState<'idle' | 'calling' | 'ringing' | 'connected'>('idle');
+  const [isMuted, setIsMuted] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const callStartRef = useRef<number>(0);
+  const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  // ─────────────────────────────────────────────────────────────────────────
 
 
   // Keep sessionRef in sync
@@ -411,6 +428,45 @@ export function CollaborationPage() {
       setSession(prev => prev ? { ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) } : prev);
     });
 
+    // ── Voice call signaling ─────────────────────────────────────────────────
+    socket.on('call:offer', (data: { offer: RTCSessionDescriptionInit }) => {
+      pendingOfferRef.current = data.offer;
+      setCallStatus('ringing');
+    });
+
+    socket.on('call:answer', async (data: { answer: RTCSessionDescriptionInit }) => {
+      try {
+        if (pcRef.current) {
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          setCallStatus('connected');
+          callStartRef.current = Date.now();
+          callTimerRef.current = setInterval(() =>
+            setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
+        }
+      } catch (_) { /* ignore */ }
+    });
+
+    socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
+      try {
+        if (pcRef.current?.remoteDescription)
+          await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } catch (_) { /* ignore */ }
+    });
+
+    socket.on('call:end', () => {
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+      pcRef.current?.close();
+      pcRef.current = null;
+      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+      setCallStatus('idle');
+      setCallDuration(0);
+      setIsMuted(false);
+    });
+    // ─────────────────────────────────────────────────────────────────────────
+
     return true;
   }
 
@@ -455,12 +511,121 @@ export function CollaborationPage() {
         s.removeAllListeners('challenge:task-deleted');
         s.removeAllListeners('challenge:partner-typing');
         s.removeAllListeners('challenge:partner-stop-typing');
+        s.removeAllListeners('call:offer');
+        s.removeAllListeners('call:answer');
+        s.removeAllListeners('call:ice-candidate');
+        s.removeAllListeners('call:end');
       }
       if (timerRef.current) clearInterval(timerRef.current);
       if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     };
   }, []);
+
+  // ── WebRTC Voice Call helpers ────────────────────────────────────────────
+  const ICE_SERVERS: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // Free TURN server for users behind strict NAT (no credit card, no signup)
+    { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  ];
+
+  const formatCallDuration = (s: number) => {
+    const m = Math.floor(s / 60);
+    return `${m}:${(s % 60).toString().padStart(2, '0')}`;
+  };
+
+  const createPC = useCallback((): RTCPeerConnection => {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    pc.onicecandidate = (e) => {
+      if (e.candidate && sessionRef.current)
+        socketService.getSocket()?.emit('call:ice-candidate', { sessionId: sessionRef.current.sessionId, candidate: e.candidate });
+    };
+    pc.ontrack = (e) => {
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = e.streams[0];
+        remoteAudioRef.current.play().catch(() => {});
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') endCall(false);
+    };
+    pcRef.current = pc;
+    return pc;
+  }, []);
+
+  const endCall = useCallback((notify = true) => {
+    if (notify && sessionRef.current)
+      socketService.getSocket()?.emit('call:end', { sessionId: sessionRef.current.sessionId });
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    localStreamRef.current = null;
+    pcRef.current?.close();
+    pcRef.current = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    if (callTimerRef.current) clearInterval(callTimerRef.current);
+    callTimerRef.current = null;
+    setCallStatus('idle');
+    setCallDuration(0);
+    setIsMuted(false);
+  }, []);
+
+  const startCall = useCallback(async () => {
+    if (!session) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = stream;
+      const pc = createPC();
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socketService.getSocket()?.emit('call:offer', { sessionId: session.sessionId, offer });
+      setCallStatus('calling');
+    } catch (err: any) {
+      if (err.name === 'NotAllowedError')
+        alert('Microphone blocked. Allow microphone access in your browser and try again.');
+      else alert('Could not start call: ' + err.message);
+    }
+  }, [session, createPC]);
+
+  const acceptCall = useCallback(async () => {
+    if (!session || !pendingOfferRef.current) return;
+    const offer = pendingOfferRef.current;
+    pendingOfferRef.current = null;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = stream;
+      const pc = createPC();
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socketService.getSocket()?.emit('call:answer', { sessionId: session.sessionId, answer });
+      setCallStatus('connected');
+      callStartRef.current = Date.now();
+      callTimerRef.current = setInterval(() =>
+        setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
+    } catch (err: any) {
+      alert('Could not answer call: ' + err.message);
+      setCallStatus('idle');
+    }
+  }, [session, createPC]);
+
+  const declineCall = useCallback(() => {
+    pendingOfferRef.current = null;
+    if (sessionRef.current)
+      socketService.getSocket()?.emit('call:end', { sessionId: sessionRef.current.sessionId });
+    setCallStatus('idle');
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const track = localStreamRef.current?.getAudioTracks()[0];
+    if (track) { track.enabled = !track.enabled; setIsMuted(!track.enabled); }
+  }, []);
+
+  // Cleanup call on page unmount
+  useEffect(() => () => { endCall(false); }, [endCall]);
+  // ─────────────────────────────────────────────────────────────────────────
 
   // ===== Load session from localStorage (set by Dashboard) or rejoin on refresh =====
   useEffect(() => {
@@ -945,6 +1110,39 @@ export function CollaborationPage() {
                   <Menu className="w-5 h-5" />
                 </Button>
               )}
+
+              {/* ── Voice Call Button ───────────────────────────────────── */}
+              {session && (
+                callStatus === 'idle' ? (
+                  <button
+                    onClick={startCall}
+                    title="Start voice call"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    Call
+                  </button>
+                ) : callStatus === 'calling' ? (
+                  <button
+                    onClick={() => endCall(true)}
+                    title="Cancel call"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-400 hover:bg-red-500 text-white text-xs font-semibold transition-all animate-pulse"
+                  >
+                    <PhoneOff className="w-3.5 h-3.5" />
+                    Calling…
+                  </button>
+                ) : callStatus === 'connected' ? (
+                  <button
+                    onClick={() => endCall(true)}
+                    title="End call"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold transition-all"
+                  >
+                    <PhoneOff className="w-3.5 h-3.5" />
+                    {formatCallDuration(callDuration)}
+                  </button>
+                ) : null
+              )}
+              {/* ───────────────────────────────────────────────── */}
             </div>
           </div>
         </div>
@@ -953,6 +1151,88 @@ export function CollaborationPage() {
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
         {/* Chat/Code area */}
+
+        {/* ── Hidden audio element for remote voice stream ── */}
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+
+        {/* ── Incoming call overlay ───────────────────────────────────── */}
+        <AnimatePresence>
+          {callStatus === 'ringing' && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            >
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-5 min-w-[280px]">
+                {/* Pulsing ring animation */}
+                <div className="relative">
+                  <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-30 animate-ping" />
+                  <div className="relative w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center">
+                    <PhoneIncoming className="w-8 h-8 text-white" />
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-gray-900 dark:text-white">
+                    {session?.partnerName ?? 'Your partner'} is calling…
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">Voice call</p>
+                </div>
+                <div className="flex gap-4">
+                  <button
+                    onClick={declineCall}
+                    className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-all active:scale-95 shadow-lg"
+                    title="Decline"
+                  >
+                    <PhoneOff className="w-6 h-6 text-white" />
+                  </button>
+                  <button
+                    onClick={acceptCall}
+                    className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center transition-all active:scale-95 shadow-lg"
+                    title="Accept"
+                  >
+                    <Phone className="w-6 h-6 text-white" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Active call bar (mute + end, visible on both Chat & Code tabs) ── */}
+        <AnimatePresence>
+          {callStatus === 'connected' && (
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-gray-900/95 backdrop-blur-md text-white rounded-full px-5 py-3 shadow-2xl border border-white/10"
+            >
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-sm font-semibold font-mono">{formatCallDuration(callDuration)}</span>
+              <span className="text-gray-400 text-xs">{session?.partnerName}</span>
+              <div className="w-px h-4 bg-white/20" />
+              <button
+                onClick={toggleMute}
+                title={isMuted ? 'Unmute' : 'Mute'}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95 ${
+                  isMuted ? 'bg-red-500 hover:bg-red-600' : 'bg-white/10 hover:bg-white/20'
+                }`}
+              >
+                {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => endCall(true)}
+                title="End call"
+                className="w-9 h-9 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-all active:scale-95"
+              >
+                <PhoneOff className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {/* ───────────────────────────────────────────────────────────────────── */}
 
         {/* IDE — always mounted so WebContainer/sockets/polling stay alive.
             Hidden with CSS when in chat view so it doesn't re-boot on tab switch. */}

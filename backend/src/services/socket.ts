@@ -667,6 +667,18 @@ export function setupSocketHandlers(io: Server) {
       socket.to(`session:${data.sessionId}`).emit('code:file-unlock', { path: data.path });
     });
 
+    // ── Voice call signaling (WebRTC) ──────────────────────────────────────
+    // Backend is ONLY a relay — actual audio travels peer-to-peer, zero server cost
+    socket.on('call:offer',         (data: { sessionId: string; offer: any }) =>
+      socket.to(`session:${data.sessionId}`).emit('call:offer', data));
+    socket.on('call:answer',        (data: { sessionId: string; answer: any }) =>
+      socket.to(`session:${data.sessionId}`).emit('call:answer', data));
+    socket.on('call:ice-candidate', (data: { sessionId: string; candidate: any }) =>
+      socket.to(`session:${data.sessionId}`).emit('call:ice-candidate', data));
+    socket.on('call:end',           (data: { sessionId: string }) =>
+      socket.to(`session:${data.sessionId}`).emit('call:end', data));
+    // ── End voice call signaling ───────────────────────────────────────────
+
     // Inline code comment
     socket.on('code:comment', (data: { sessionId: string; filePath: string; comment: any; senderId: string }) => {
       socket.to(`session:${data.sessionId}`).emit('code:comment', data);
