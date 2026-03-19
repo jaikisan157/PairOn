@@ -62,10 +62,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const localStreamRef      = useRef<MediaStream | null>(null);
   const callTimerRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef        = useRef<number>(0);
-  const pendingOfferRef     = useRef<RTCSessionDescriptionInit | null>(null);      // just the offer
+  // Store {offer, sessionId} so acceptCall can use sessionId without async ref
+  const pendingOfferRef     = useRef<{ offer: RTCSessionDescriptionInit; sessionId: string } | null>(null);
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const ringIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
-  // A ref-mirror of callStatus so socket closures can read it without stale capture
   const callStatusRef       = useRef<CallStatus>('idle');
   const callSessionIdRef    = useRef<string | null>(null);
 
@@ -152,17 +152,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const pc = createPC();
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
+      // ⚡ Set ref synchronously BEFORE setLocalDescription
+      // ICE gathering starts inside setLocalDescription and onicecandidate
+      // reads callSessionIdRef.current — if it's null the candidate is dropped
+      callSessionIdRef.current = sessionId;
       setCallSessionId(sessionId);
       setCallPartnerName(partnerName);
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer); // ← ICE gathering starts, ref already set ✅
+
       socketService.getSocket()?.emit('call:offer', { sessionId, offer, callerName });
       setCallStatus('calling');
+      callStatusRef.current = 'calling';
     } catch (err: any) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
       pcRef.current?.close(); pcRef.current = null;
+      callSessionIdRef.current = null;
+      setCallSessionId(null);
       if (err.name === 'NotAllowedError')
         alert('Microphone blocked. Allow microphone access in your browser and try again.');
       else
@@ -173,7 +181,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ── acceptCall — exact copy from original ────────────────────────────────
   const acceptCall = useCallback(async () => {
     if (!pendingOfferRef.current) return;
-    const offer = pendingOfferRef.current;
+    // Get sessionId directly from pendingOfferRef — don't rely on async callSessionIdRef
+    const { offer, sessionId } = pendingOfferRef.current;
     pendingOfferRef.current = null;
 
     try {
@@ -191,32 +200,39 @@ export function CallProvider({ children }: { children: ReactNode }) {
       iceCandidateQueueRef.current = [];
 
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
 
-      if (callSessionIdRef.current)
-        socketService.getSocket()?.emit('call:answer', {
-          sessionId: callSessionIdRef.current,
-          answer,
-        });
+      // ⚡ Set ref synchronously BEFORE setLocalDescription so outgoing
+      // ICE candidates (onicecandidate) have a valid sessionId
+      callSessionIdRef.current = sessionId;
+      setCallSessionId(sessionId);
+
+      await pc.setLocalDescription(answer); // ← ICE gathering, ref already set ✅
+
+      socketService.getSocket()?.emit('call:answer', { sessionId, answer });
 
       setCallStatus('connected');
+      callStatusRef.current = 'connected';
       callStartRef.current = Date.now();
       callTimerRef.current = setInterval(
         () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
     } catch (err: any) {
       alert('Could not answer call: ' + err.message);
       setCallStatus('idle');
+      callStatusRef.current = 'idle';
     }
   }, [createPC]);
 
   // ── declineCall ───────────────────────────────────────────────────────────
   const declineCall = useCallback(() => {
+    const sessionId = pendingOfferRef.current?.sessionId ?? callSessionIdRef.current;
     pendingOfferRef.current = null;
-    if (callSessionIdRef.current)
-      socketService.getSocket()?.emit('call:end', { sessionId: callSessionIdRef.current });
+    if (sessionId)
+      socketService.getSocket()?.emit('call:end', { sessionId });
     setCallStatus('idle');
+    callStatusRef.current = 'idle';
     setCallPartnerName(null);
     setCallSessionId(null);
+    callSessionIdRef.current = null;
   }, []);
 
   // ── toggleMute ────────────────────────────────────────────────────────────
@@ -242,10 +258,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
           socket.emit('call:end', { sessionId: data.sessionId });
           return;
         }
-        pendingOfferRef.current = data.offer;
+        // ⚡ Store {offer, sessionId} together so acceptCall can use sessionId directly
+        pendingOfferRef.current = { offer: data.offer, sessionId: data.sessionId };
+        // Also set callSessionIdRef synchronously for immediate availability
+        callSessionIdRef.current = data.sessionId;
         setCallSessionId(data.sessionId);
         setCallPartnerName(data.callerName);
         setCallStatus('ringing');
+        callStatusRef.current = 'ringing';
       });
 
       // Caller gets the answer — exact copy from original
