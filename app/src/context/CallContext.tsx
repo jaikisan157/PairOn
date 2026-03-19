@@ -79,13 +79,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
     localStreamRef.current = null;
     pcRef.current?.close();
     pcRef.current = null;
+    // Remove injected audio element from DOM
+    const audioEl = document.getElementById('pairon-remote-audio');
+    if (audioEl) audioEl.remove();
     if (remoteAudioRef.current) { remoteAudioRef.current.srcObject = null; remoteAudioRef.current = null; }
     if (callTimerRef.current) clearInterval(callTimerRef.current);
     callTimerRef.current = null;
     iceCandidateQueueRef.current = [];
     pendingOfferRef.current = null;
-    // Reset refs synchronously before state updates so any in-flight
-    // socket events see the idle state immediately
+    // Reset refs synchronously before state updates
     callStatusRef.current    = 'idle';
     callSessionIdRef.current = null;
     setCallStatus('idle');
@@ -117,10 +119,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (e) => {
-      // Use a dynamic Audio element — no JSX <audio> needed
-      if (!remoteAudioRef.current) remoteAudioRef.current = new Audio();
-      remoteAudioRef.current.srcObject = e.streams[0];
-      remoteAudioRef.current.play().catch(() => {});
+      // Append a real DOM audio element — more reliable than new Audio()
+      // detached Audio objects are silently blocked by browser autoplay policies
+      let audio = document.getElementById('pairon-remote-audio') as HTMLAudioElement | null;
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'pairon-remote-audio';
+        audio.autoplay = true;
+        (audio as any).playsInline = true;
+        document.body.appendChild(audio);
+      }
+      audio.srcObject = e.streams[0];
+      remoteAudioRef.current = audio;
+      audio.play().catch(() => {
+        // If autoplay is still blocked, resume on next user interaction
+        const resume = () => { audio!.play().catch(() => {}); document.removeEventListener('click', resume); };
+        document.addEventListener('click', resume, { once: true });
+      });
     };
 
     pc.onconnectionstatechange = () => {
