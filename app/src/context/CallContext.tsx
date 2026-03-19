@@ -72,10 +72,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     callStatusRef.current = s;
     setCallStatus(s);
   }, []);
-  const setCallSessionIdSync = useCallback((id: string | null) => {
-    callSessionIdRef.current = id;
-    setCallSessionId(id);
-  }, []);
 
   // ── Cleanup helper ──────────────────────────────────────────────────────────
   const cleanupCall = useCallback(() => {
