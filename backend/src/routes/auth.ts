@@ -95,11 +95,12 @@ router.post(
   [body('credential').exists()],
   async (req: any, res: any) => {
     try {
-      const { credential } = req.body;
+      const { credential, redirectUri: clientRedirectUri } = req.body;
 
-      // Determine redirect URI (same as frontend uses)
+      // Use the redirect_uri the frontend actually sent to Google.
+      // This MUST match what the frontend used — Google validates it.
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const redirectUri = `${frontendUrl}/login`;
+      const redirectUri = clientRedirectUri || `${frontendUrl}/login`;
 
       // Exchange authorization code for tokens
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {

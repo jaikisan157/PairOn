@@ -99,7 +99,7 @@ export function LoginPage() {
     window.history.replaceState({}, '', '/login');
     setGoogleLoading(true);
     setError('');
-    api.googleAuth(code)
+    api.googleAuth(code, `${window.location.origin}/login`)
       .then(({ token, user }) => {
         localStorage.setItem('pairon_token', token);
         localStorage.setItem('pairon_user', JSON.stringify(user));

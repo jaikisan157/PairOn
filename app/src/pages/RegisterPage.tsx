@@ -84,7 +84,7 @@ export function RegisterPage() {
     if (!code) return;
     window.history.replaceState({}, '', '/register');
     setGoogleLoading(true);
-    api.googleAuth(code)
+    api.googleAuth(code, `${window.location.origin}/register`)
       .then(({ token, user }) => {
         localStorage.setItem('pairon_token', token);
         localStorage.setItem('pairon_user', JSON.stringify(user));

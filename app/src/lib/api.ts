@@ -69,11 +69,11 @@ class ApiService {
         return this.handleResponse<{ user: any }>(response);
     }
 
-    async googleAuth(credential: string) {
+    async googleAuth(credential: string, redirectUri?: string) {
         const response = await fetch(`${this.baseUrl}/api/auth/google`, {
             method: 'POST',
             headers: this.getHeaders(false),
-            body: JSON.stringify({ credential }),
+            body: JSON.stringify({ credential, redirectUri }),
         });
         return this.handleResponse<{ token: string; user: any }>(response);
     }
