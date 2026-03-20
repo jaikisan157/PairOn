@@ -73,7 +73,7 @@ interface FriendNotif {
 
 interface Toast {
   id: string;
-  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info';
+  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner';
   title: string;
   body: string;
   data?: any;
@@ -162,6 +162,26 @@ function GlobalNotifier() {
       }
     });
 
+    // ── Partner force-quit while user B is on Dashboard/other pages ──
+    // (If user B is on /collaborate, CollaborationPage handles its own popup)
+    socket.on('challenge:partner-force-quit', (data: { sessionId: string; creditsEarned: number; message: string }) => {
+      if (window.location.pathname === '/collaborate') return; // collab page handles its own
+      // Only show if there's a stored session matching this one
+      const stored = localStorage.getItem('challenge_session');
+      if (!stored) return;
+      try {
+        const session = JSON.parse(stored);
+        if (session.sessionId !== data.sessionId) return;
+      } catch { return; }
+
+      addToast({
+        type: 'force-quit-partner',
+        title: '⚠️ Your partner left the session',
+        body: `${data.message || 'Your collaboration partner force-quit. Would you like to continue solo?'}`,
+        data: data,
+      });
+    });
+
     return () => {
       socket.off('friend:request-received');
       socket.off('friend:request-accepted');
@@ -170,6 +190,7 @@ function GlobalNotifier() {
       socket.off('collab:proposal-declined');
       socket.off('challenge:matched');
       socket.off('dm:new-message');
+      socket.off('challenge:partner-force-quit');
     };
   }, [isAuthenticated]);
 
@@ -199,6 +220,25 @@ function GlobalNotifier() {
     removeToast(toastId);
   };
 
+  const handleForceQuitResponse = (action: 'continue' | 'leave', toastId: string, _data?: any) => {
+    removeToast(toastId);
+    if (action === 'continue') {
+      // Navigate to /collaborate — the CollaborationPage will handle solo mode
+      const socket = socketService.getSocket();
+      const stored = localStorage.getItem('challenge_session');
+      if (stored) {
+        try {
+          const session = JSON.parse(stored);
+          socket?.emit('challenge:continue-alone', session.sessionId);
+        } catch { /* */ }
+      }
+      navigate('/collaborate');
+    } else {
+      // User chose to leave — clear session data
+      localStorage.removeItem('challenge_session');
+    }
+  };
+
   return (
     <>
       {/* Toast stack */}
@@ -207,7 +247,7 @@ function GlobalNotifier() {
           <div
             key={toast.id}
             style={{
-              background: '#1e2030', border: `1px solid ${toast.type === 'friend-request' ? 'rgba(99,102,241,0.4)' : toast.type === 'friend-accepted' ? 'rgba(16,185,129,0.4)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.3)' : toast.type === 'collab-proposal' ? 'rgba(16,185,129,0.4)' : toast.type === 'info' ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.3)'}`,
+              background: '#1e2030', border: `1px solid ${toast.type === 'friend-request' ? 'rgba(99,102,241,0.4)' : toast.type === 'friend-accepted' ? 'rgba(16,185,129,0.4)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.3)' : toast.type === 'collab-proposal' ? 'rgba(16,185,129,0.4)' : toast.type === 'info' ? 'rgba(16,185,129,0.3)' : toast.type === 'force-quit-partner' ? 'rgba(245,158,11,0.5)' : 'rgba(99,102,241,0.3)'}`,
               borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
               padding: '14px 16px', width: '100%', pointerEvents: 'all',
               animation: 'slideUp 0.3s ease',
@@ -225,9 +265,9 @@ function GlobalNotifier() {
               {/* Icon */}
               <div style={{
                 width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: 'white',
-                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.2)' : toast.type === 'collab-proposal' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'info' ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
+                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.2)' : toast.type === 'collab-proposal' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'info' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'force-quit-partner' ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
               }}>
-                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' || toast.type === 'info' ? '✓' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? '✗' : toast.type === 'collab-proposal' ? '🤝' : '💬'}
+                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' || toast.type === 'info' ? '✓' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? '✗' : toast.type === 'collab-proposal' ? '🤝' : toast.type === 'force-quit-partner' ? '⚠️' : '💬'}
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -268,6 +308,24 @@ function GlobalNotifier() {
                       style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
                     >
                       ✗ Decline
+                    </button>
+                  </div>
+                )}
+
+                {/* Actions for partner force-quit */}
+                {toast.type === 'force-quit-partner' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => handleForceQuitResponse('continue', toast.id, toast.data)}
+                      style={{ padding: '5px 14px', background: '#6366f1', color: 'white', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      🚀 Continue Solo
+                    </button>
+                    <button
+                      onClick={() => handleForceQuitResponse('leave', toast.id, toast.data)}
+                      style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Leave Session
                     </button>
                   </div>
                 )}

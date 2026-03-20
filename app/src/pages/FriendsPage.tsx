@@ -574,17 +574,22 @@ export function FriendsPage() {
                             <div className="mb-4">
                                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mode</p>
                                 <div className="flex gap-2">
-                                    {(['sprint', 'challenge', 'build'] as const).map(m => (
+                                    {([
+                                        { key: 'sprint' as const, label: '⚡ Sprint', duration: '3 hours' },
+                                        { key: 'challenge' as const, label: '🏆 Challenge', duration: '24 hours' },
+                                        { key: 'build' as const, label: '🔨 Build', duration: '7 days' },
+                                    ]).map(m => (
                                         <button
-                                            key={m}
-                                            onClick={() => setFriendProposalMode(m)}
-                                            className={`flex-1 py-2 rounded-xl text-sm font-medium capitalize transition-all ${
-                                                friendProposalMode === m
+                                            key={m.key}
+                                            onClick={() => setFriendProposalMode(m.key)}
+                                            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex flex-col items-center gap-0.5 ${
+                                                friendProposalMode === m.key
                                                     ? 'bg-pairon-accent text-white shadow'
                                                     : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                                             }`}
                                         >
-                                            {m}
+                                            <span>{m.label}</span>
+                                            <span className={`text-[10px] font-normal ${friendProposalMode === m.key ? 'text-white/70' : 'text-gray-400 dark:text-gray-500'}`}>{m.duration}</span>
                                         </button>
                                     ))}
                                 </div>

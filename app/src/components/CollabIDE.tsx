@@ -2002,10 +2002,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <div className="flex items-center bg-[#161b22] border-b border-gray-800 overflow-x-auto flex-shrink-0">
                         {openTabs.map(tab => {
                             const locked = isLockedByPartner(tab);
+                            const lockerInitial = locked ? getLockerName(tab).charAt(0).toUpperCase() : '';
                             return (
                                 <button key={tab} onClick={() => switchToFile(tab)}
                                     className={`flex items-center gap-1.5 px-3 py-1.5 text-xs border-r border-gray-800 whitespace-nowrap transition-colors ${activeFile === tab ? 'bg-[#0d1117] text-white border-t-2 border-t-blue-500' : 'text-gray-500 hover:text-gray-300'}`}>
-                                    {locked && <Lock className="w-3 h-3 text-yellow-500" />}
+                                    {locked && (
+                                        <span className="relative flex items-center" title={`${getLockerName(tab)} is editing`}>
+                                            <span className="w-4 h-4 rounded-full bg-purple-500/80 text-[8px] font-bold text-white flex items-center justify-center animate-pulse">{lockerInitial}</span>
+                                        </span>
+                                    )}
                                     <span>{tab.split('/').pop()}</span>
                                     <span onClick={(e) => closeTab(tab, e)} className="p-0.5 rounded hover:bg-gray-700"><X className="w-3 h-3" /></span>
                                 </button>

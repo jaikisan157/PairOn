@@ -634,6 +634,8 @@ export function CollaborationPage() {
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
     if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
     if (idleCheckRef.current) clearInterval(idleCheckRef.current);
+    // End any active call when session ends
+    try { globalEndCall(true); } catch { /* */ }
     const snap = sessionRef.current;
     setSession(null);
     setStatus('idle');
@@ -653,6 +655,8 @@ export function CollaborationPage() {
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
     if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+    // End any active call
+    try { globalEndCall(true); } catch { /* */ }
     setSession(null);
     setStatus('idle');
     localStorage.removeItem('challenge_session');
@@ -736,6 +740,8 @@ export function CollaborationPage() {
 
   const handleForceQuit = useCallback(() => {
     if (!session) return;
+    // End any active call before quitting
+    try { globalEndCall(true); } catch { /* */ }
     socketService.getSocket()?.emit('challenge:force-quit', session.sessionId);
     setShowForceQuitConfirm(false);
     cleanupAndLeave();
@@ -840,6 +846,17 @@ export function CollaborationPage() {
       description: editProjectDesc,
     });
     setEditingProject(false);
+    // Notify proposer that request has been sent
+    if (!isSoloMode) {
+      setProjectEditNotification({ type: 'accepted', title: undefined });
+      // Clear the "sent" banner, then show a temporary "request sent" banner
+      setProjectEditNotification(null);
+      // Use a brief timeout so React picks up the null then the new value
+      setTimeout(() => {
+        setProjectEditNotification({ type: 'accepted', title: '📨 Request sent — waiting for partner\'s approval' });
+        setTimeout(() => setProjectEditNotification(null), 5000);
+      }, 50);
+    }
     // Optimistic: if solo mode, apply immediately
     if (isSoloMode) {
       setSession(prev => prev ? {
@@ -996,6 +1013,13 @@ export function CollaborationPage() {
               userName={user?.name || 'You'}
               messages={session.messages}
               onSendMessage={(msg) => {
+                // Handle @ai commands in mini chat (same as main chat)
+                if (msg.toLowerCase().startsWith('@ai ')) {
+                  const question = msg.substring(4).trim();
+                  if (question) {
+                    socketService.getSocket()?.emit('challenge:ai-help', session.sessionId, question);
+                  }
+                }
                 socketService.getSocket()?.emit('challenge:message', session.sessionId, msg);
               }}
               lastSeenMessageCount={lastSeenMessageCount}

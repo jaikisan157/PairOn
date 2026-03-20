@@ -159,11 +159,11 @@ export function setupProposalHandlers(io: Server, socket: Socket) {
             const recipient = await User.findById(userId);
             if (!proposer || !recipient) return;
 
-            // Duration based on mode: sprint=1hr, challenge=2hr, build=3hr
+            // Duration based on mode: sprint=3hr, challenge=24hr, build=7days
             const durationMap: Record<string, number> = {
-                sprint: 60,
-                challenge: 120,
-                build: 180,
+                sprint: 180,       // 3 hours
+                challenge: 1440,   // 24 hours
+                build: 10080,      // 7 days
             };
             const durationMinutes = durationMap[proposal.mode] || 60;
             const now = new Date();
