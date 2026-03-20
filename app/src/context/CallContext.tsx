@@ -88,8 +88,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!el) {
       el = document.createElement('audio');
       el.id = 'pairon-call-audio';
-      el.autoplay = true;
-      (el as any).playsInline = true; // Required on iOS
+      el.setAttribute('autoplay', '');
+      el.setAttribute('playsinline', ''); // iOS requires the content attribute, not JS property
       document.body.appendChild(el);
     }
     return el;
@@ -178,16 +178,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (e) => {
-      const stream = (e.streams && e.streams.length > 0)
-        ? e.streams[0]
-        : new MediaStream([e.track]);
-
+      // Exact same approach as original working code
       const audio = getRemoteAudio();
-      audio.srcObject = stream;
-
-      // Attempt play immediately - works when user gesture is still recent
+      if (e.streams && e.streams[0]) {
+        audio.srcObject = e.streams[0];
+      } else {
+        audio.srcObject = new MediaStream([e.track]);
+      }
       audio.play().catch(() => {
-        // Proactive retry every 500 ms until it plays (covers delayed ontrack on caller side)
+        // Proactive retry — caller's gesture may have expired by the time ontrack fires
         let attempts = 0;
         const retryTimer = setInterval(() => {
           attempts++;
@@ -195,8 +194,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
             .then(() => clearInterval(retryTimer))
             .catch(() => { if (attempts > 20) clearInterval(retryTimer); });
         }, 500);
-
-        // Also retry on any user interaction
         const resume = () => { audio.play().catch(() => {}); clearInterval(retryTimer); };
         document.addEventListener('click',      resume, { once: true });
         document.addEventListener('touchstart', resume, { once: true });
@@ -221,11 +218,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
       const pc = createPC();
-
-      // Use addTransceiver with sendrecv so both sides explicitly include bidirectional audio
-      stream.getAudioTracks().forEach(track => {
-        pc.addTransceiver(track, { direction: 'sendrecv', streams: [stream] });
-      });
+      // Use addTrack — same as original working code
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       // ⚡ Set ref synchronously BEFORE setLocalDescription
       // ICE gathering starts inside setLocalDescription and onicecandidate
@@ -264,11 +258,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
       const pc = createPC();
-
-      // Use addTransceiver with sendrecv so the answer SDP includes bidirectional audio
-      stream.getAudioTracks().forEach(track => {
-        pc.addTransceiver(track, { direction: 'sendrecv', streams: [stream] });
-      });
+      // Use addTrack — same as original working code
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
@@ -323,6 +314,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ── Socket listeners — attached once when authenticated ──────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
+
+    // Pre-create audio element NOW (same as original JSX <audio autoPlay playsInline>
+    // existed in the DOM from page load). Browsers need this registered early.
+    getRemoteAudio();
 
     let pollTimer: ReturnType<typeof setInterval> | null = null;
 
