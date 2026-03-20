@@ -43,8 +43,13 @@ export function useCall(): CallContextType {
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,24 +178,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (e) => {
+      const stream = (e.streams && e.streams.length > 0)
+        ? e.streams[0]
+        : new MediaStream([e.track]);
+
       const audio = getRemoteAudio();
-      // Handle both bundled streams and individual tracks
-      const stream = (e.streams && e.streams[0]) ? e.streams[0] : new MediaStream([e.track]);
       audio.srcObject = stream;
+
+      // Attempt play immediately - works when user gesture is still recent
       audio.play().catch(() => {
-        // Retry on next user interaction (mobile browsers may still block)
-        const resume = () => audio.play().catch(() => {});
+        // Proactive retry every 500 ms until it plays (covers delayed ontrack on caller side)
+        let attempts = 0;
+        const retryTimer = setInterval(() => {
+          attempts++;
+          audio.play()
+            .then(() => clearInterval(retryTimer))
+            .catch(() => { if (attempts > 20) clearInterval(retryTimer); });
+        }, 500);
+
+        // Also retry on any user interaction
+        const resume = () => { audio.play().catch(() => {}); clearInterval(retryTimer); };
         document.addEventListener('click',      resume, { once: true });
         document.addEventListener('touchstart', resume, { once: true });
       });
-
-      // Also route through AudioContext if available (more reliable on some mobile browsers)
-      if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
-        try {
-          const src = audioCtxRef.current.createMediaStreamSource(stream);
-          src.connect(audioCtxRef.current.destination);
-        } catch (_) {}
-      }
     };
 
     pc.onconnectionstatechange = () => {
@@ -211,7 +221,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
       const pc = createPC();
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+      // Use addTransceiver with sendrecv so both sides explicitly include bidirectional audio
+      stream.getAudioTracks().forEach(track => {
+        pc.addTransceiver(track, { direction: 'sendrecv', streams: [stream] });
+      });
 
       // ⚡ Set ref synchronously BEFORE setLocalDescription
       // ICE gathering starts inside setLocalDescription and onicecandidate
@@ -250,7 +264,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
       const pc = createPC();
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+      // Use addTransceiver with sendrecv so the answer SDP includes bidirectional audio
+      stream.getAudioTracks().forEach(track => {
+        pc.addTransceiver(track, { direction: 'sendrecv', streams: [stream] });
+      });
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
