@@ -19,6 +19,7 @@ interface CallContextType {
   callSessionId: string | null;
   callPartnerName: string | null;
   isMuted: boolean;
+  isSpeakerOn: boolean;
   callDuration: number;
   callBarPos: { x: number; y: number };
   setCallBarPos: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
@@ -27,6 +28,7 @@ interface CallContextType {
   declineCall: () => void;
   endCall: (notify?: boolean) => void;
   toggleMute: () => void;
+  toggleSpeaker: () => Promise<void>;
 }
 
 const CallContext = createContext<CallContextType | null>(null);
@@ -54,6 +56,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [callSessionId,   setCallSessionId]   = useState<string | null>(null);
   const [callPartnerName, setCallPartnerName] = useState<string | null>(null);
   const [isMuted,         setIsMuted]         = useState(false);
+  const [isSpeakerOn,     setIsSpeakerOn]     = useState(false);
   const [callDuration,    setCallDuration]    = useState(0);
   const [callBarPos,      setCallBarPos]      = useState({ x: 0, y: 0 });
 
@@ -62,30 +65,72 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const localStreamRef      = useRef<MediaStream | null>(null);
   const callTimerRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef        = useRef<number>(0);
-  // Store {offer, sessionId} so acceptCall can use sessionId without async ref
   const pendingOfferRef     = useRef<{ offer: RTCSessionDescriptionInit; sessionId: string } | null>(null);
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const ringIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStatusRef       = useRef<CallStatus>('idle');
   const callSessionIdRef    = useRef<string | null>(null);
+  // AudioContext — resumed during user gesture to unlock audio on iOS/mobile
+  const audioCtxRef         = useRef<AudioContext | null>(null);
 
   // Keep ref mirrors in sync
   useEffect(() => { callStatusRef.current    = callStatus;    }, [callStatus]);
   useEffect(() => { callSessionIdRef.current = callSessionId; }, [callSessionId]);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // Ensure a persistent DOM audio element exists for the remote stream
   const getRemoteAudio = (): HTMLAudioElement => {
     let el = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
     if (!el) {
       el = document.createElement('audio');
       el.id = 'pairon-call-audio';
       el.autoplay = true;
+      (el as any).playsInline = true; // Required on iOS
       document.body.appendChild(el);
     }
     return el;
   };
 
-  // ── endCall ───────────────────────────────────────────────────────────────
+  // Unlock audio playback on mobile — MUST be called synchronously inside a user gesture
+  const unlockAudio = () => {
+    try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new AudioContext();
+      }
+      audioCtxRef.current.resume().catch(() => {});
+    } catch (_) {}
+    // Also touch the audio element to unlock it on iOS
+    const audio = getRemoteAudio();
+    // play() on empty element will fail but touch unlocks autoplay permission
+    audio.load();
+  };
+
+  // Speaker toggle — uses setSinkId on desktop, informs user on iOS
+  const toggleSpeaker = useCallback(async () => {
+    const audio = document.getElementById('pairon-call-audio') as any;
+    if (!audio) return;
+    if (typeof audio.setSinkId !== 'function') {
+      // iOS Safari does not support setSinkId
+      alert('Speaker switching is not supported on this browser. Use your device volume controls.');
+      return;
+    }
+    try {
+      if (isSpeakerOn) {
+        await audio.setSinkId('default');
+        setIsSpeakerOn(false);
+      } else {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const speaker = devices.find(
+          d => d.kind === 'audiooutput' &&
+          (d.label.toLowerCase().includes('speaker') || d.label.toLowerCase().includes('external'))
+        );
+        await audio.setSinkId(speaker?.deviceId ?? 'default');
+        setIsSpeakerOn(true);
+      }
+    } catch (_) {
+      alert('Could not switch speaker output.');
+    }
+  }, [isSpeakerOn]);
+
   const endCall = useCallback((notify = true) => {
     if (notify && callSessionIdRef.current)
       socketService.getSocket()?.emit('call:end', { sessionId: callSessionIdRef.current });
@@ -98,6 +143,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const audio = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
     if (audio) { audio.srcObject = null; audio.remove(); }
 
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+
     if (callTimerRef.current) clearInterval(callTimerRef.current);
     callTimerRef.current = null;
     iceCandidateQueueRef.current = [];
@@ -106,6 +154,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCallStatus('idle');
     setCallDuration(0);
     setIsMuted(false);
+    setIsSpeakerOn(false);
     setCallSessionId(null);
     setCallPartnerName(null);
     setCallBarPos({ x: 0, y: 0 });
@@ -125,12 +174,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     pc.ontrack = (e) => {
       const audio = getRemoteAudio();
-      audio.srcObject = e.streams[0];
+      // Handle both bundled streams and individual tracks
+      const stream = (e.streams && e.streams[0]) ? e.streams[0] : new MediaStream([e.track]);
+      audio.srcObject = stream;
       audio.play().catch(() => {
-        // Queue play on next user interaction if autoplay blocked
-        const resume = () => { audio.play().catch(() => {}); };
-        document.addEventListener('click', resume, { once: true });
+        // Retry on next user interaction (mobile browsers may still block)
+        const resume = () => audio.play().catch(() => {});
+        document.addEventListener('click',      resume, { once: true });
+        document.addEventListener('touchstart', resume, { once: true });
       });
+
+      // Also route through AudioContext if available (more reliable on some mobile browsers)
+      if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+        try {
+          const src = audioCtxRef.current.createMediaStreamSource(stream);
+          src.connect(audioCtxRef.current.destination);
+        } catch (_) {}
+      }
     };
 
     pc.onconnectionstatechange = () => {
@@ -145,6 +205,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ── startCall — exact copy from original ─────────────────────────────────
   const startCall = useCallback(async (sessionId: string, partnerName: string, callerName: string) => {
     if (callStatusRef.current !== 'idle') return;
+    unlockAudio(); // Unlock audio context within user gesture — required on iOS/mobile
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -181,7 +242,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ── acceptCall — exact copy from original ────────────────────────────────
   const acceptCall = useCallback(async () => {
     if (!pendingOfferRef.current) return;
-    // Get sessionId directly from pendingOfferRef — don't rely on async callSessionIdRef
+    unlockAudio(); // Unlock audio context within user gesture — required on iOS/mobile
     const { offer, sessionId } = pendingOfferRef.current;
     pendingOfferRef.current = null;
 
@@ -372,9 +433,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <CallContext.Provider value={{
-      callStatus, callSessionId, callPartnerName, isMuted, callDuration,
+      callStatus, callSessionId, callPartnerName, isMuted, isSpeakerOn, callDuration,
       callBarPos, setCallBarPos,
-      startCall, acceptCall, declineCall, endCall, toggleMute,
+      startCall, acceptCall, declineCall, endCall, toggleMute, toggleSpeaker,
     }}>
       {children}
     </CallContext.Provider>

@@ -1,15 +1,15 @@
 import { useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, PhoneOff, PhoneIncoming, Mic, MicOff } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { useCall } from '@/context/CallContext';
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
 export function GlobalCallUI() {
   const {
-    callStatus, callPartnerName, callDuration, isMuted,
+    callStatus, callPartnerName, callDuration, isMuted, isSpeakerOn,
     callBarPos, setCallBarPos,
-    acceptCall, declineCall, endCall, toggleMute,
+    acceptCall, declineCall, endCall, toggleMute, toggleSpeaker,
   } = useCall();
 
   const dragStartRef = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
@@ -206,6 +206,24 @@ export function GlobalCallUI() {
               {isMuted
                 ? <MicOff style={{ width: 15, height: 15, color: 'white' }} />
                 : <Mic    style={{ width: 15, height: 15, color: 'white' }} />}
+            </button>
+
+            {/* Speaker */}
+            <button
+              onMouseDown={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+              onClick={toggleSpeaker}
+              title={isSpeakerOn ? 'Speaker on' : 'Speaker off'}
+              style={{
+                width: 34, height: 34, borderRadius: '50%', border: 'none', flexShrink: 0,
+                background: isSpeakerOn ? '#10b981' : 'rgba(255,255,255,0.1)',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.2s',
+              }}
+            >
+              {isSpeakerOn
+                ? <Volume2  style={{ width: 15, height: 15, color: 'white' }} />
+                : <VolumeX  style={{ width: 15, height: 15, color: 'white' }} />}
             </button>
 
             {/* End */}
