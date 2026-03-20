@@ -1,8 +1,8 @@
 /**
  * CallContext — global voice call state.
  *
- * This is a direct port of the original working call code from CollaborationPage.
- * No extra sessionId checks. Keep it simple — it worked before.
+ * Lives at the App level so calls persist across page navigation.
+ * WebRTC peer connection + audio stream survive route changes.
  */
 import {
   createContext, useContext, useRef, useState, useEffect, useCallback,
@@ -65,7 +65,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [callDuration,    setCallDuration]    = useState(0);
   const [callBarPos,      setCallBarPos]      = useState({ x: 0, y: 0 });
 
-  // ── Refs (same as original CollaborationPage) ─────────────────────────────
+  // ── Refs ──────────────────────────────────────────────────────────────────
   const pcRef               = useRef<RTCPeerConnection | null>(null);
   const localStreamRef      = useRef<MediaStream | null>(null);
   const callTimerRef        = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -75,7 +75,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const ringIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStatusRef       = useRef<CallStatus>('idle');
   const callSessionIdRef    = useRef<string | null>(null);
-  // AudioContext — resumed during user gesture to unlock audio on iOS/mobile
   const audioCtxRef         = useRef<AudioContext | null>(null);
 
   // Keep ref mirrors in sync
@@ -89,13 +88,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       el = document.createElement('audio');
       el.id = 'pairon-call-audio';
       el.setAttribute('autoplay', '');
-      el.setAttribute('playsinline', ''); // iOS requires the content attribute, not JS property
+      el.setAttribute('playsinline', '');
       document.body.appendChild(el);
     }
     return el;
   };
 
-  // Unlock audio playback on mobile — MUST be called synchronously inside a user gesture
+  // Unlock audio playback on mobile
   const unlockAudio = () => {
     try {
       if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
@@ -103,18 +102,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
       audioCtxRef.current.resume().catch(() => {});
     } catch (_) {}
-    // Also touch the audio element to unlock it on iOS
     const audio = getRemoteAudio();
-    // play() on empty element will fail but touch unlocks autoplay permission
     audio.load();
   };
 
-  // Speaker toggle — uses setSinkId on desktop, informs user on iOS
+  // Speaker toggle
   const toggleSpeaker = useCallback(async () => {
     const audio = document.getElementById('pairon-call-audio') as any;
     if (!audio) return;
     if (typeof audio.setSinkId !== 'function') {
-      // iOS Safari does not support setSinkId
       alert('Speaker switching is not supported on this browser. Use your device volume controls.');
       return;
     }
@@ -157,6 +153,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pendingOfferRef.current = null;
 
     setCallStatus('idle');
+    callStatusRef.current = 'idle';
     setCallDuration(0);
     setIsMuted(false);
     setIsSpeakerOn(false);
@@ -165,7 +162,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCallBarPos({ x: 0, y: 0 });
   }, []);
 
-  // ── createPC — exact copy from original ──────────────────────────────────
+  // ── createPC ─────────────────────────────────────────────────────────────
   const createPC = useCallback((): RTCPeerConnection => {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
@@ -178,7 +175,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (e) => {
-      // Exact same approach as original working code
       const audio = getRemoteAudio();
       if (e.streams && e.streams[0]) {
         audio.srcObject = e.streams[0];
@@ -186,7 +182,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
         audio.srcObject = new MediaStream([e.track]);
       }
       audio.play().catch(() => {
-        // Proactive retry — caller's gesture may have expired by the time ontrack fires
         let attempts = 0;
         const retryTimer = setInterval(() => {
           attempts++;
@@ -209,27 +204,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return pc;
   }, [endCall]);
 
-  // ── startCall — exact copy from original ─────────────────────────────────
+  // ── startCall ────────────────────────────────────────────────────────────
   const startCall = useCallback(async (sessionId: string, partnerName: string, callerName: string) => {
     if (callStatusRef.current !== 'idle') return;
-    unlockAudio(); // Unlock audio context within user gesture — required on iOS/mobile
+    unlockAudio();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
       const pc = createPC();
-      // Use addTrack — same as original working code
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-      // ⚡ Set ref synchronously BEFORE setLocalDescription
-      // ICE gathering starts inside setLocalDescription and onicecandidate
-      // reads callSessionIdRef.current — if it's null the candidate is dropped
       callSessionIdRef.current = sessionId;
       setCallSessionId(sessionId);
       setCallPartnerName(partnerName);
 
       const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer); // ← ICE gathering starts, ref already set ✅
+      await pc.setLocalDescription(offer);
 
       socketService.getSocket()?.emit('call:offer', { sessionId, offer, callerName });
       setCallStatus('calling');
@@ -247,10 +238,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [createPC]);
 
-  // ── acceptCall — exact copy from original ────────────────────────────────
+  // ── acceptCall ───────────────────────────────────────────────────────────
   const acceptCall = useCallback(async () => {
-    if (!pendingOfferRef.current) return;
-    unlockAudio(); // Unlock audio context within user gesture — required on iOS/mobile
+    if (!pendingOfferRef.current || callStatusRef.current !== 'ringing') return;
+    unlockAudio();
     const { offer, sessionId } = pendingOfferRef.current;
     pendingOfferRef.current = null;
 
@@ -258,12 +249,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
       const pc = createPC();
-      // Use addTrack — same as original working code
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
-      // Drain queued ICE candidates
       for (const c of iceCandidateQueueRef.current) {
         try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
       }
@@ -271,12 +260,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       const answer = await pc.createAnswer();
 
-      // ⚡ Set ref synchronously BEFORE setLocalDescription so outgoing
-      // ICE candidates (onicecandidate) have a valid sessionId
       callSessionIdRef.current = sessionId;
       setCallSessionId(sessionId);
 
-      await pc.setLocalDescription(answer); // ← ICE gathering, ref already set ✅
+      await pc.setLocalDescription(answer);
 
       socketService.getSocket()?.emit('call:answer', { sessionId, answer });
 
@@ -292,10 +279,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [createPC]);
 
-  // ── declineCall ───────────────────────────────────────────────────────────
+  // ── declineCall ──────────────────────────────────────────────────────────
   const declineCall = useCallback(() => {
     const sessionId = pendingOfferRef.current?.sessionId ?? callSessionIdRef.current;
     pendingOfferRef.current = null;
+    iceCandidateQueueRef.current = [];
     if (sessionId)
       socketService.getSocket()?.emit('call:end', { sessionId });
     setCallStatus('idle');
@@ -305,7 +293,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     callSessionIdRef.current = null;
   }, []);
 
-  // ── toggleMute ────────────────────────────────────────────────────────────
+  // ── toggleMute ───────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
     const track = localStreamRef.current?.getAudioTracks()[0];
     if (track) { track.enabled = !track.enabled; setIsMuted(!track.enabled); }
@@ -315,8 +303,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    // Pre-create audio element NOW (same as original JSX <audio autoPlay playsInline>
-    // existed in the DOM from page load). Browsers need this registered early.
     getRemoteAudio();
 
     let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -327,14 +313,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       // Incoming call offer
       socket.on('call:offer', (data: { sessionId: string; offer: RTCSessionDescriptionInit; callerName: string }) => {
-        // Already on a call — auto-decline
         if (callStatusRef.current !== 'idle') {
           socket.emit('call:end', { sessionId: data.sessionId });
           return;
         }
-        // ⚡ Store {offer, sessionId} together so acceptCall can use sessionId directly
         pendingOfferRef.current = { offer: data.offer, sessionId: data.sessionId };
-        // Also set callSessionIdRef synchronously for immediate availability
         callSessionIdRef.current = data.sessionId;
         setCallSessionId(data.sessionId);
         setCallPartnerName(data.callerName);
@@ -342,25 +325,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
         callStatusRef.current = 'ringing';
       });
 
-      // Caller gets the answer — exact copy from original
+      // Caller gets the answer
       socket.on('call:answer', async (data: { answer: RTCSessionDescriptionInit }) => {
         try {
-          if (pcRef.current) {
+          if (pcRef.current && callStatusRef.current === 'calling') {
             await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-            // Drain queued ICE candidates
             for (const c of iceCandidateQueueRef.current) {
               try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
             }
             iceCandidateQueueRef.current = [];
             setCallStatus('connected');
+            callStatusRef.current = 'connected';
             callStartRef.current = Date.now();
             callTimerRef.current = setInterval(
               () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
           }
-        } catch (_) {}
+        } catch (err) { console.error('[Call] Error handling answer:', err); }
       });
 
-      // ICE candidates — exact copy from original
+      // ICE candidates
       socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
         try {
           if (pcRef.current?.remoteDescription)
@@ -380,9 +363,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (audio) { audio.srcObject = null; audio.remove(); }
         if (callTimerRef.current) clearInterval(callTimerRef.current);
         callTimerRef.current = null;
+        iceCandidateQueueRef.current = [];
+        pendingOfferRef.current = null;
         setCallStatus('idle');
+        callStatusRef.current = 'idle';
         setCallDuration(0);
         setIsMuted(false);
+        setIsSpeakerOn(false);
         setCallSessionId(null);
         setCallPartnerName(null);
       });
@@ -409,33 +396,77 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // ── Ring / dial tones ─────────────────────────────────────────────────────
+  // ── Ring / dial tones — distinctive "abc abc" style ──────────────────────
   useEffect(() => {
     const stopRing = () => {
       if (ringIntervalRef.current) { clearInterval(ringIntervalRef.current); ringIntervalRef.current = null; }
     };
-    const beep = (freqs: number[], dur: number, vol = 0.08) => {
+
+    // Play a melodic multi-note tone
+    const playTone = (notes: { freq: number; start: number; dur: number }[], vol = 0.1) => {
       try {
         const ctx = new AudioContext();
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(vol, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-        gain.connect(ctx.destination);
-        freqs.forEach(f => {
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(vol, ctx.currentTime);
+        master.connect(ctx.destination);
+
+        const totalDur = Math.max(...notes.map(n => n.start + n.dur));
+
+        notes.forEach(({ freq, start, dur }) => {
           const osc = ctx.createOscillator();
-          osc.frequency.value = f;
-          osc.connect(gain);
-          osc.start();
-          osc.stop(ctx.currentTime + dur);
+          const env = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          env.gain.setValueAtTime(0, ctx.currentTime + start);
+          env.gain.linearRampToValueAtTime(1, ctx.currentTime + start + 0.03);
+          env.gain.setValueAtTime(1, ctx.currentTime + start + dur - 0.05);
+          env.gain.linearRampToValueAtTime(0, ctx.currentTime + start + dur);
+          osc.connect(env);
+          env.connect(master);
+          osc.start(ctx.currentTime + start);
+          osc.stop(ctx.currentTime + start + dur);
         });
-        setTimeout(() => ctx.close(), (dur + 0.1) * 1000);
+
+        setTimeout(() => ctx.close(), (totalDur + 0.2) * 1000);
       } catch (_) {}
     };
 
-    if (callStatus === 'ringing')        { beep([480, 440], 0.4); ringIntervalRef.current = setInterval(() => beep([480, 440], 0.4), 3000); }
-    else if (callStatus === 'calling')   { beep([350, 440], 0.6, 0.05); ringIntervalRef.current = setInterval(() => beep([350, 440], 0.6, 0.05), 3000); }
-    else if (callStatus === 'connected') { beep([880], 0.15, 0.06); stopRing(); }
-    else                                 { stopRing(); }
+    // Ringing (incoming) — cheerful ascending "doo-doo-doo  doo-doo-doo" pattern
+    const ringTone = () => playTone([
+      { freq: 587, start: 0,    dur: 0.12 },  // D5
+      { freq: 659, start: 0.14, dur: 0.12 },  // E5
+      { freq: 784, start: 0.28, dur: 0.18 },  // G5
+      { freq: 587, start: 0.55, dur: 0.12 },  // D5
+      { freq: 659, start: 0.69, dur: 0.12 },  // E5
+      { freq: 784, start: 0.83, dur: 0.18 },  // G5
+    ], 0.12);
+
+    // Calling (outgoing) — gentle pulsing dial tone
+    const dialTone = () => playTone([
+      { freq: 440, start: 0,    dur: 0.35 },  // A4
+      { freq: 523, start: 0.4,  dur: 0.35 },  // C5
+    ], 0.06);
+
+    // Connected — short bright confirmation chime
+    const connectedTone = () => playTone([
+      { freq: 523, start: 0,    dur: 0.1 },   // C5
+      { freq: 659, start: 0.08, dur: 0.1 },   // E5
+      { freq: 784, start: 0.16, dur: 0.15 },  // G5
+      { freq: 1047,start: 0.26, dur: 0.2 },   // C6
+    ], 0.08);
+
+    if (callStatus === 'ringing') {
+      ringTone();
+      ringIntervalRef.current = setInterval(ringTone, 2400);
+    } else if (callStatus === 'calling') {
+      dialTone();
+      ringIntervalRef.current = setInterval(dialTone, 2400);
+    } else if (callStatus === 'connected') {
+      connectedTone();
+      stopRing();
+    } else {
+      stopRing();
+    }
 
     return stopRing;
   }, [callStatus]);

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { AuthProvider, ThemeProvider, MatchingProvider } from '@/context';
+import { AuthProvider, ThemeProvider, MatchingProvider, CallProvider } from '@/context';
+import { GlobalCallUI } from '@/components/GlobalCallUI';
 import {
   LandingPage,
   LoginPage,
@@ -221,6 +222,7 @@ function AppRoutes() {
   return (
     <>
       <GlobalNotifier />
+      <GlobalCallUI />
       <Routes>
         <Route path="/" element={<PublicRoute><LandingPage /></PublicRoute>} />
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
@@ -249,11 +251,13 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <MatchingProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </MatchingProvider>
+        <CallProvider>
+          <MatchingProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </MatchingProvider>
+        </CallProvider>
       </AuthProvider>
     </ThemeProvider>
   );

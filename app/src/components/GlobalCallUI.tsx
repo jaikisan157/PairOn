@@ -42,6 +42,8 @@ export function GlobalCallUI() {
     window.addEventListener('touchend', onUp);
   }, [callBarPos, setCallBarPos]);
 
+  if (callStatus === 'idle') return null;
+
   return (
     <>
       {/* ── Incoming call modal ─────────────────────────────────────────── */}
@@ -133,6 +135,66 @@ export function GlobalCallUI() {
                 </button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Calling (outgoing, waiting for pickup) ──────────────────────── */}
+      <AnimatePresence>
+        {callStatus === 'calling' && (
+          <motion.div
+            key="outgoing-call"
+            initial={{ opacity: 0, scale: 0.7, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.7, y: 20 }}
+            style={{
+              position: 'fixed',
+              bottom: '2rem',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 99998,
+              display: 'flex', alignItems: 'center', gap: 12,
+              background: 'rgba(10,15,26,0.97)',
+              backdropFilter: 'blur(14px)',
+              color: 'white',
+              borderRadius: 999,
+              padding: '12px 20px',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.07)',
+              fontFamily: 'Inter, system-ui, sans-serif',
+              minWidth: 220,
+            }}
+          >
+            {/* Pulsing phone icon */}
+            <div style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'linear-gradient(135deg,#10b981,#059669)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              animation: 'callPulse 1.5s ease infinite',
+            }}>
+              <Phone style={{ width: 18, height: 18, color: 'white' }} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                Calling {callPartnerName ?? '…'}
+              </span>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Waiting for answer...</span>
+            </div>
+
+            {/* Cancel */}
+            <button
+              onClick={() => endCall(true)}
+              title="Cancel call"
+              style={{
+                width: 36, height: 36, borderRadius: '50%',
+                background: '#ef4444', border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                marginLeft: 8,
+                transition: 'background 0.2s',
+              }}
+            >
+              <PhoneOff style={{ width: 16, height: 16, color: 'white' }} />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -256,7 +318,8 @@ export function GlobalCallUI() {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0.4; }
         }
-      `}</style>
+      `}
+      </style>
     </>
   );
 }

@@ -21,13 +21,11 @@ import {
   Check,
   Phone,
   PhoneOff,
-  PhoneIncoming,
-  Mic,
-  MicOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
+import { useCall } from '@/context/CallContext';
 import { formatTime } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
 import { playMessageSound, playSendSound } from '@/lib/audio';
@@ -169,31 +167,13 @@ export function CollaborationPage() {
   const lastActivityRef = useRef<number>(Date.now());
   const idleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Voice call state
-  const [callStatus,   setCallStatus]   = useState<'idle'|'calling'|'ringing'|'connected'>('idle');
-  const [isMuted,      setIsMuted]      = useState(false);
-  const [callDuration, setCallDuration] = useState(0);
-  const [callBarPos,   setCallBarPos]   = useState({ x: 0, y: 0 });
-  const pcRef                = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef       = useRef<MediaStream | null>(null);
-  const remoteAudioRef       = useRef<HTMLAudioElement | null>(null);
-  const callTimerRef         = useRef<ReturnType<typeof setInterval> | null>(null);
-  const callStartRef         = useRef<number>(0);
-  const pendingOfferRef      = useRef<RTCSessionDescriptionInit | null>(null);
-  const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
-  const ringIntervalRef      = useRef<ReturnType<typeof setInterval> | null>(null);
-  const dragStartRef         = useRef<{mx:number;my:number;px:number;py:number}|null>(null);
-  const callStatusRef        = useRef<'idle'|'calling'|'ringing'|'connected'>('idle');
+  // Voice call (global — from CallContext)
+  const { callStatus, startCall: globalStartCall, endCall: globalEndCall } = useCall();
 
   // Keep sessionRef in sync
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
-
-  // Keep callStatusRef in sync
-  useEffect(() => {
-    callStatusRef.current = callStatus;
-  }, [callStatus]);
 
   // ===== SOCKET LISTENERS (like QuickConnectPage) =====
   useEffect(() => {
@@ -437,55 +417,8 @@ export function CollaborationPage() {
       setSession(prev => prev ? { ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) } : prev);
     });
 
-    // ── Voice call socket listeners (SINGLE registration to prevent duplicates) ──
-    socket.on('call:offer', (data: { offer: RTCSessionDescriptionInit; callerName?: string }) => {
-      // Ignore if already on a call
-      if (callStatusRef.current !== 'idle') return;
-      pendingOfferRef.current = data.offer;
-      setCallStatus('ringing');
-      callStatusRef.current = 'ringing';
-    });
-    socket.on('call:answer', async (data: { answer: RTCSessionDescriptionInit }) => {
-      try {
-        if (pcRef.current && callStatusRef.current === 'calling') {
-          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-          // Drain queued ICE candidates
-          for (const c of iceCandidateQueueRef.current) {
-            try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
-          }
-          iceCandidateQueueRef.current = [];
-          setCallStatus('connected');
-          callStatusRef.current = 'connected';
-          callStartRef.current = Date.now();
-          callTimerRef.current = setInterval(
-            () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
-        }
-      } catch (err) { console.error('[Call] Error handling answer:', err); }
-    });
-    socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
-      try {
-        if (pcRef.current?.remoteDescription)
-          await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-        else
-          iceCandidateQueueRef.current.push(data.candidate);
-      } catch (_) {}
-    });
-    socket.on('call:end', () => {
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
-      localStreamRef.current = null;
-      pcRef.current?.close();
-      pcRef.current = null;
-      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
-      if (callTimerRef.current) clearInterval(callTimerRef.current);
-      callTimerRef.current = null;
-      iceCandidateQueueRef.current = [];
-      pendingOfferRef.current = null;
-      setCallStatus('idle');
-      callStatusRef.current = 'idle';
-      setCallDuration(0);
-      setIsMuted(false);
-    });
-    // ── End voice call socket listeners ──
+    // Call socket listeners are handled globally by CallContext.
+    // Do NOT register call:offer/answer/ice-candidate/end here.
 
     return true;
   }
@@ -531,185 +464,12 @@ export function CollaborationPage() {
         s.removeAllListeners('challenge:task-deleted');
         s.removeAllListeners('challenge:partner-typing');
         s.removeAllListeners('challenge:partner-stop-typing');
-        s.removeAllListeners('call:offer');
-        s.removeAllListeners('call:answer');
-        s.removeAllListeners('call:ice-candidate');
-        s.removeAllListeners('call:end');
       }
       if (timerRef.current) clearInterval(timerRef.current);
       if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     };
   }, []);
-
-  // ICE servers
-  const ICE_SERVERS: RTCIceServer[] = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  ];
-
-  const formatCallDuration = (s: number) =>
-    `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
-
-  const createPC = useCallback((): RTCPeerConnection => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    pc.onicecandidate = (e) => {
-      if (e.candidate && sessionRef.current)
-        socketService.getSocket()?.emit('call:ice-candidate', {
-          sessionId: sessionRef.current.sessionId, candidate: e.candidate });
-    };
-    pc.ontrack = (e) => {
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = e.streams[0] ?? new MediaStream([e.track]);
-        remoteAudioRef.current.play().catch(() => {
-          let n = 0;
-          const t = setInterval(() => {
-            n++;
-            remoteAudioRef.current?.play().then(() => clearInterval(t)).catch(() => { if (n > 20) clearInterval(t); });
-          }, 500);
-        });
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') endCall(false);
-    };
-    pcRef.current = pc;
-    return pc;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const endCall = useCallback((notify = true) => {
-    if (notify && sessionRef.current)
-      socketService.getSocket()?.emit('call:end', { sessionId: sessionRef.current.sessionId });
-    localStreamRef.current?.getTracks().forEach(t => t.stop());
-    localStreamRef.current = null;
-    pcRef.current?.close(); pcRef.current = null;
-    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
-    if (callTimerRef.current) clearInterval(callTimerRef.current);
-    callTimerRef.current = null;
-    iceCandidateQueueRef.current = [];
-    pendingOfferRef.current = null;
-    setCallStatus('idle');
-    callStatusRef.current = 'idle';
-    setCallDuration(0); setIsMuted(false); setCallBarPos({ x: 0, y: 0 });
-  }, []);
-
-  const startCall = useCallback(async () => {
-    if (!sessionRef.current || callStatusRef.current !== 'idle') return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = stream;
-      const pc = createPC();
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socketService.getSocket()?.emit('call:offer', {
-        sessionId: sessionRef.current.sessionId, offer, callerName: user?.name ?? 'Partner' });
-      setCallStatus('calling');
-      callStatusRef.current = 'calling';
-    } catch (err: any) {
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
-      localStreamRef.current = null;
-      pcRef.current?.close(); pcRef.current = null;
-      if (err.name === 'NotAllowedError')
-        alert('Microphone blocked. Allow microphone access in your browser and try again.');
-      else alert('Could not start call: ' + err.message);
-    }
-  }, [createPC, user?.name]);
-
-  const acceptCall = useCallback(async () => {
-    if (!sessionRef.current || !pendingOfferRef.current || callStatusRef.current !== 'ringing') return;
-    const offer = pendingOfferRef.current;
-    pendingOfferRef.current = null;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = stream;
-      const pc = createPC();
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      for (const c of iceCandidateQueueRef.current) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
-      }
-      iceCandidateQueueRef.current = [];
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socketService.getSocket()?.emit('call:answer', {
-        sessionId: sessionRef.current.sessionId, answer });
-      setCallStatus('connected');
-      callStatusRef.current = 'connected';
-      callStartRef.current = Date.now();
-      callTimerRef.current = setInterval(
-        () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
-    } catch (err: any) {
-      alert('Could not answer call: ' + err.message);
-      setCallStatus('idle');
-      callStatusRef.current = 'idle';
-    }
-  }, [createPC]);
-
-  const declineCall = useCallback(() => {
-    pendingOfferRef.current = null;
-    iceCandidateQueueRef.current = [];
-    if (sessionRef.current)
-      socketService.getSocket()?.emit('call:end', { sessionId: sessionRef.current.sessionId });
-    setCallStatus('idle');
-    callStatusRef.current = 'idle';
-  }, []);
-
-  const toggleMute = useCallback(() => {
-    const track = localStreamRef.current?.getAudioTracks()[0];
-    if (track) { track.enabled = !track.enabled; setIsMuted(!track.enabled); }
-  }, []);
-
-  useEffect(() => () => { endCall(false); }, [endCall]);
-
-  // NOTE: Call socket listeners are registered in the main useEffect above (single registration).
-  // DO NOT add a separate useEffect for call listeners — duplicate listeners cause race conditions.
-
-  // Ring / dial tones
-  useEffect(() => {
-    const stopRing = () => { if (ringIntervalRef.current) { clearInterval(ringIntervalRef.current); ringIntervalRef.current = null; } };
-    const beep = (freqs: number[], dur: number, vol = 0.08) => {
-      try {
-        const ctx = new AudioContext();
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(vol, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-        gain.connect(ctx.destination);
-        freqs.forEach(f => { const o = ctx.createOscillator(); o.frequency.value = f; o.connect(gain); o.start(); o.stop(ctx.currentTime + dur); });
-        setTimeout(() => ctx.close(), (dur + 0.1) * 1000);
-      } catch (_) {}
-    };
-    if (callStatus === 'ringing')        { beep([480,440],0.4);      ringIntervalRef.current = setInterval(() => beep([480,440],0.4), 3000); }
-    else if (callStatus === 'calling')   { beep([350,440],0.6,0.05); ringIntervalRef.current = setInterval(() => beep([350,440],0.6,0.05), 3000); }
-    else if (callStatus === 'connected') { beep([880],0.15,0.06); stopRing(); }
-    else stopRing();
-    return stopRing;
-  }, [callStatus]);
-
-  // Drag handler for call bar
-  const onCallBarDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const cx = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const cy = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    dragStartRef.current = { mx: cx, my: cy, px: callBarPos.x, py: callBarPos.y };
-    const onMove = (ev: MouseEvent | TouchEvent) => {
-      if (!dragStartRef.current) return;
-      const x = 'touches' in ev ? (ev as TouchEvent).touches[0].clientX : (ev as MouseEvent).clientX;
-      const y = 'touches' in ev ? (ev as TouchEvent).touches[0].clientY : (ev as MouseEvent).clientY;
-      setCallBarPos({ x: dragStartRef.current.px+(x-dragStartRef.current.mx), y: dragStartRef.current.py+(y-dragStartRef.current.my) });
-    };
-    const onUp = () => {
-      dragStartRef.current = null;
-      window.removeEventListener('mousemove', onMove); window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('mouseup', onUp);    window.removeEventListener('touchend', onUp);
-    };
-    window.addEventListener('mousemove', onMove); window.addEventListener('touchmove', onMove);
-    window.addEventListener('mouseup', onUp);    window.addEventListener('touchend', onUp);
-  }, [callBarPos]);
 
   // ===== Load session from localStorage (set by Dashboard) or rejoin on refresh =====
   useEffect(() => {
@@ -1195,20 +955,20 @@ export function CollaborationPage() {
                 </Button>
               )}
 
-              {/* Voice Call Button */}
+              {/* Voice Call Button — calls are handled globally by CallContext */}
               {session && (
                 callStatus === 'idle' ? (
-                  <button onClick={startCall} title="Start voice call"
+                  <button onClick={() => globalStartCall(session.sessionId, session.partnerName, user?.name ?? 'Partner')} title="Start voice call"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-all shadow-sm active:scale-95">
                     <Phone className="w-3.5 h-3.5" /> Call
                   </button>
                 ) : callStatus === 'calling' ? (
-                  <button onClick={() => endCall(true)} title="Cancel call"
+                  <button onClick={() => globalEndCall(true)} title="Cancel call"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-400 hover:bg-red-500 text-white text-xs font-semibold transition-all animate-pulse">
                     <PhoneOff className="w-3.5 h-3.5" /> Calling...
                   </button>
                 ) : callStatus === 'connected' ? (
-                  <button onClick={() => endCall(true)} title="End call"
+                  <button onClick={() => globalEndCall(true)} title="End call"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold transition-all">
                     <PhoneOff className="w-3.5 h-3.5" /> On call
                   </button>
@@ -1222,90 +982,7 @@ export function CollaborationPage() {
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
 
-        {/* Hidden audio element for remote voice — MUST be JSX so React sets autoPlay + playsInline attributes correctly */}
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-
-        {/* Incoming call modal */}
-        <AnimatePresence>
-          {callStatus === 'ringing' && (
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            >
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-5 min-w-[280px]">
-                <div className="relative">
-                  <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-30 animate-ping" />
-                  <div className="relative w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center">
-                    <PhoneIncoming className="w-8 h-8 text-white" />
-                  </div>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-gray-900 dark:text-white">
-                    {session?.partnerName ?? 'Your partner'} is calling...
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">Voice call</p>
-                </div>
-                <div className="flex gap-4">
-                  <button onClick={declineCall} className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-all active:scale-95 shadow-lg" title="Decline">
-                    <PhoneOff className="w-6 h-6 text-white" />
-                  </button>
-                  <button onClick={acceptCall} className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center transition-all active:scale-95 shadow-lg" title="Accept">
-                    <Phone className="w-6 h-6 text-white" />
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Draggable active call bar */}
-        <AnimatePresence>
-          {callStatus === 'connected' && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              onMouseDown={onCallBarDragStart}
-              onTouchStart={onCallBarDragStart}
-              style={{
-                position: 'fixed',
-                bottom: `calc(1.5rem - ${callBarPos.y}px)`,
-                left: `calc(50% + ${callBarPos.x}px)`,
-                transform: 'translateX(-50%)',
-                zIndex: 40,
-                cursor: dragStartRef.current ? 'grabbing' : 'grab',
-                userSelect: 'none',
-                touchAction: 'none',
-              }}
-              className="flex items-center gap-3 bg-gray-900/95 backdrop-blur-md text-white rounded-full px-5 py-3 shadow-2xl border border-white/10"
-            >
-              <div className="flex flex-col gap-0.5 opacity-30 mr-1">
-                <div className="w-3 h-px bg-white" /><div className="w-3 h-px bg-white" /><div className="w-3 h-px bg-white" />
-              </div>
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-sm font-semibold font-mono">{formatCallDuration(callDuration)}</span>
-              <span className="text-gray-400 text-xs">{session?.partnerName}</span>
-              <div className="w-px h-4 bg-white/20" />
-              <button
-                onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
-                onClick={toggleMute} title={isMuted ? 'Unmute' : 'Mute'}
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95 ${isMuted ? 'bg-red-500 hover:bg-red-600' : 'bg-white/10 hover:bg-white/20'}`}
-              >
-                {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
-              <button
-                onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
-                onClick={() => endCall(true)} title="End call"
-                className="w-9 h-9 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-all active:scale-95"
-              >
-                <PhoneOff className="w-4 h-4" />
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Call UI (ringing modal, active call bar, calling indicator) is now global — rendered by GlobalCallUI in App.tsx */}
 
         {/* IDE — always mounted so WebContainer/sockets/polling stay alive.
             Hidden with CSS when in chat view so it doesn't re-boot on tab switch. */}
