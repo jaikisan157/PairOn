@@ -668,15 +668,40 @@ export function setupSocketHandlers(io: Server) {
     });
 
     // ── Voice call signaling (WebRTC) ──────────────────────────────────────
-    // Backend is ONLY a relay — actual audio travels peer-to-peer, zero server cost
-    socket.on('call:offer',         (data: { sessionId: string; offer: any }) =>
-      socket.to(`session:${data.sessionId}`).emit('call:offer', data));
+    // Backend relays via BOTH session room AND user rooms for reliability.
+    // Using Socket.IO's multi-room `.to(r1).to(r2).emit()` which auto-
+    // deduplicates — each target socket receives the event exactly ONCE
+    // even if it's in both rooms.
+
+    const relayCallEvent = async (eventName: string, data: { sessionId: string; [key: string]: any }) => {
+      // Start with session room
+      let broadcast = socket.to(`session:${data.sessionId}`);
+
+      // Also target partner's personal user room for guaranteed delivery
+      try {
+        const session = await CollaborationSession.findById(data.sessionId).select('participants').lean();
+        if (session) {
+          const partnerId = (session.participants as string[]).find(p => p !== userId);
+          if (partnerId) {
+            broadcast = broadcast.to(`user:${partnerId}`);
+          }
+        }
+      } catch (err) {
+        console.error('[Call relay] Error looking up session:', err);
+      }
+
+      // Single emit with deduplication across rooms
+      broadcast.emit(eventName, data);
+    };
+
+    socket.on('call:offer',         (data: { sessionId: string; offer: any; callerName?: string }) =>
+      relayCallEvent('call:offer', data));
     socket.on('call:answer',        (data: { sessionId: string; answer: any }) =>
-      socket.to(`session:${data.sessionId}`).emit('call:answer', data));
+      relayCallEvent('call:answer', data));
     socket.on('call:ice-candidate', (data: { sessionId: string; candidate: any }) =>
-      socket.to(`session:${data.sessionId}`).emit('call:ice-candidate', data));
+      relayCallEvent('call:ice-candidate', data));
     socket.on('call:end',           (data: { sessionId: string }) =>
-      socket.to(`session:${data.sessionId}`).emit('call:end', data));
+      relayCallEvent('call:end', data));
     // ── End voice call signaling ───────────────────────────────────────────
 
     // Inline code comment

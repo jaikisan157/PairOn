@@ -183,11 +183,17 @@ export function CollaborationPage() {
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const ringIntervalRef      = useRef<ReturnType<typeof setInterval> | null>(null);
   const dragStartRef         = useRef<{mx:number;my:number;px:number;py:number}|null>(null);
+  const callStatusRef        = useRef<'idle'|'calling'|'ringing'|'connected'>('idle');
 
   // Keep sessionRef in sync
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  // Keep callStatusRef in sync
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
 
   // ===== SOCKET LISTENERS (like QuickConnectPage) =====
   useEffect(() => {
@@ -431,6 +437,56 @@ export function CollaborationPage() {
       setSession(prev => prev ? { ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) } : prev);
     });
 
+    // ── Voice call socket listeners (SINGLE registration to prevent duplicates) ──
+    socket.on('call:offer', (data: { offer: RTCSessionDescriptionInit; callerName?: string }) => {
+      // Ignore if already on a call
+      if (callStatusRef.current !== 'idle') return;
+      pendingOfferRef.current = data.offer;
+      setCallStatus('ringing');
+      callStatusRef.current = 'ringing';
+    });
+    socket.on('call:answer', async (data: { answer: RTCSessionDescriptionInit }) => {
+      try {
+        if (pcRef.current && callStatusRef.current === 'calling') {
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          // Drain queued ICE candidates
+          for (const c of iceCandidateQueueRef.current) {
+            try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+          }
+          iceCandidateQueueRef.current = [];
+          setCallStatus('connected');
+          callStatusRef.current = 'connected';
+          callStartRef.current = Date.now();
+          callTimerRef.current = setInterval(
+            () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
+        }
+      } catch (err) { console.error('[Call] Error handling answer:', err); }
+    });
+    socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
+      try {
+        if (pcRef.current?.remoteDescription)
+          await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        else
+          iceCandidateQueueRef.current.push(data.candidate);
+      } catch (_) {}
+    });
+    socket.on('call:end', () => {
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+      pcRef.current?.close();
+      pcRef.current = null;
+      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+      iceCandidateQueueRef.current = [];
+      pendingOfferRef.current = null;
+      setCallStatus('idle');
+      callStatusRef.current = 'idle';
+      setCallDuration(0);
+      setIsMuted(false);
+    });
+    // ── End voice call socket listeners ──
+
     return true;
   }
 
@@ -537,11 +593,13 @@ export function CollaborationPage() {
     callTimerRef.current = null;
     iceCandidateQueueRef.current = [];
     pendingOfferRef.current = null;
-    setCallStatus('idle'); setCallDuration(0); setIsMuted(false); setCallBarPos({ x: 0, y: 0 });
+    setCallStatus('idle');
+    callStatusRef.current = 'idle';
+    setCallDuration(0); setIsMuted(false); setCallBarPos({ x: 0, y: 0 });
   }, []);
 
   const startCall = useCallback(async () => {
-    if (!sessionRef.current) return;
+    if (!sessionRef.current || callStatusRef.current !== 'idle') return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
@@ -552,6 +610,7 @@ export function CollaborationPage() {
       socketService.getSocket()?.emit('call:offer', {
         sessionId: sessionRef.current.sessionId, offer, callerName: user?.name ?? 'Partner' });
       setCallStatus('calling');
+      callStatusRef.current = 'calling';
     } catch (err: any) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
@@ -563,7 +622,7 @@ export function CollaborationPage() {
   }, [createPC, user?.name]);
 
   const acceptCall = useCallback(async () => {
-    if (!sessionRef.current || !pendingOfferRef.current) return;
+    if (!sessionRef.current || !pendingOfferRef.current || callStatusRef.current !== 'ringing') return;
     const offer = pendingOfferRef.current;
     pendingOfferRef.current = null;
     try {
@@ -581,19 +640,24 @@ export function CollaborationPage() {
       socketService.getSocket()?.emit('call:answer', {
         sessionId: sessionRef.current.sessionId, answer });
       setCallStatus('connected');
+      callStatusRef.current = 'connected';
       callStartRef.current = Date.now();
       callTimerRef.current = setInterval(
         () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
     } catch (err: any) {
-      alert('Could not answer call: ' + err.message); setCallStatus('idle');
+      alert('Could not answer call: ' + err.message);
+      setCallStatus('idle');
+      callStatusRef.current = 'idle';
     }
   }, [createPC]);
 
   const declineCall = useCallback(() => {
     pendingOfferRef.current = null;
+    iceCandidateQueueRef.current = [];
     if (sessionRef.current)
       socketService.getSocket()?.emit('call:end', { sessionId: sessionRef.current.sessionId });
     setCallStatus('idle');
+    callStatusRef.current = 'idle';
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -603,61 +667,8 @@ export function CollaborationPage() {
 
   useEffect(() => () => { endCall(false); }, [endCall]);
 
-  // Call socket listeners
-  useEffect(() => {
-    let cleanedUp = false;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    function attach() {
-      const socket = socketService.getSocket();
-      if (!socket || cleanedUp) return false;
-      socket.on('call:offer', (data: { offer: RTCSessionDescriptionInit }) => {
-        pendingOfferRef.current = data.offer;
-        setCallStatus('ringing');
-      });
-      socket.on('call:answer', async (data: { answer: RTCSessionDescriptionInit }) => {
-        try {
-          if (pcRef.current) {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-            for (const c of iceCandidateQueueRef.current) {
-              try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
-            }
-            iceCandidateQueueRef.current = [];
-            setCallStatus('connected');
-            callStartRef.current = Date.now();
-            callTimerRef.current = setInterval(
-              () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
-          }
-        } catch (_) {}
-      });
-      socket.on('call:ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
-        try {
-          if (pcRef.current?.remoteDescription)
-            await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-          else iceCandidateQueueRef.current.push(data.candidate);
-        } catch (_) {}
-      });
-      socket.on('call:end', () => {
-        localStreamRef.current?.getTracks().forEach(t => t.stop()); localStreamRef.current = null;
-        pcRef.current?.close(); pcRef.current = null;
-        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
-        if (callTimerRef.current) clearInterval(callTimerRef.current); callTimerRef.current = null;
-        setCallStatus('idle'); setCallDuration(0); setIsMuted(false);
-      });
-      return true;
-    }
-    if (!attach()) {
-      pollTimer = setInterval(() => { if (attach()) { clearInterval(pollTimer!); pollTimer = null; } }, 300);
-    }
-    return () => {
-      cleanedUp = true;
-      if (pollTimer) clearInterval(pollTimer);
-      const s = socketService.getSocket();
-      if (s) {
-        s.removeAllListeners('call:offer'); s.removeAllListeners('call:answer');
-        s.removeAllListeners('call:ice-candidate'); s.removeAllListeners('call:end');
-      }
-    };
-  }, []);
+  // NOTE: Call socket listeners are registered in the main useEffect above (single registration).
+  // DO NOT add a separate useEffect for call listeners — duplicate listeners cause race conditions.
 
   // Ring / dial tones
   useEffect(() => {
