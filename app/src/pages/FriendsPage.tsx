@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, UserPlus, Check, X, Trash2, Clock, ArrowLeft, Loader2, MessageCircle, Handshake } from 'lucide-react';
+import { Users, UserPlus, Check, X, Trash2, Clock, ArrowLeft, Loader2, MessageCircle, Handshake, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
@@ -29,23 +29,44 @@ interface PendingRequest {
     createdAt: string;
 }
 
+interface SearchResult {
+    id: string;
+    name: string;
+    email: string;
+    avatar?: string;
+    isOnline: boolean;
+    reputation: number;
+    experienceLevel: string;
+}
+
 export function FriendsPage() {
     const navigate = useNavigate();
     const [friends, setFriends] = useState<Friend[]>([]);
     const [pending, setPending] = useState<PendingRequest[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'friends' | 'requests'>('friends');
+    const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'search'>('friends');
+
+    // Search state
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+    const [searching, setSearching] = useState(false);
+    const [sendingReqTo, setSendingReqTo] = useState<string | null>(null);
+    const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
+    const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Collab proposal state
     const [proposingToFriend, setProposingToFriend] = useState<Friend | null>(null);
     const [friendProposalMode, setFriendProposalMode] = useState<'sprint' | 'challenge' | 'build'>('sprint');
     const [friendProjectTitle, setFriendProjectTitle] = useState('');
     const [friendProjectDescription, setFriendProjectDescription] = useState('');
     const [friendProposalMessage, setFriendProposalMessage] = useState('');
     const [friendProposalSent, setFriendProposalSent] = useState<string | null>(null);
+    const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-    // Per-friend unread DM counts: { [friendId]: count }
+    // Per-friend unread DM counts
     const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
-    // Fetch unread counts from DM threads
+    // Fetch unread counts
     useEffect(() => {
         const token = localStorage.getItem('pairon_token') || '';
         const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -55,16 +76,13 @@ export function FriendsPage() {
                 if (Array.isArray(data)) {
                     const counts: Record<string, number> = {};
                     data.forEach((t: any) => {
-                        if (t.partner?.id && t.unreadCount > 0) {
-                            counts[t.partner.id] = t.unreadCount;
-                        }
+                        if (t.partner?.id && t.unreadCount > 0) counts[t.partner.id] = t.unreadCount;
                     });
                     setUnreadCounts(counts);
                 }
             })
             .catch(() => {});
 
-        // Real-time: increment badge when new message arrives
         const sock = socketService.getSocket();
         if (sock) {
             const handler = (data: { fromId: string }) => {
@@ -91,6 +109,37 @@ export function FriendsPage() {
     }, []);
 
     useEffect(() => { loadData(); }, [loadData]);
+
+    // ── Debounced search ──
+    useEffect(() => {
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        if (searchQuery.trim().length < 2) {
+            setSearchResults([]);
+            setSearching(false);
+            return;
+        }
+        setSearching(true);
+        searchTimerRef.current = setTimeout(async () => {
+            try {
+                const res = await api.searchUsers(searchQuery.trim());
+                setSearchResults(res.users || []);
+            } catch { setSearchResults([]); }
+            setSearching(false);
+        }, 400);
+        return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    }, [searchQuery]);
+
+    const handleSendFriendRequest = async (userId: string) => {
+        setSendingReqTo(userId);
+        try {
+            await api.sendFriendRequest(userId);
+            setSentRequests(prev => new Set(prev).add(userId));
+            showToast('Friend request sent!');
+        } catch (err: any) {
+            showToast(err.message || 'Failed to send request');
+        }
+        setSendingReqTo(null);
+    };
 
     const handleAccept = async (friendshipId: string) => {
         try {
@@ -129,6 +178,7 @@ export function FriendsPage() {
         setFriendProjectTitle('');
         setFriendProjectDescription('');
         setFriendProposalMessage('');
+        showToast(`Collaboration proposal sent to ${proposingToFriend.name}!`);
     }, [proposingToFriend, friendProposalMode, friendProjectTitle, friendProjectDescription, friendProposalMessage]);
 
     const handleRemove = async (friendshipId: string) => {
@@ -139,6 +189,19 @@ export function FriendsPage() {
         } catch (error) {
             console.error('Failed to remove:', error);
         }
+    };
+
+    const showToast = (msg: string) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(null), 4000);
+    };
+
+    // Check if a search result is already a friend or has a pending request
+    const getRelationStatus = (userId: string): 'friend' | 'pending' | 'sent' | 'none' => {
+        if (friends.some(f => f.id === userId)) return 'friend';
+        if (pending.some(p => p.requesterId === userId)) return 'pending';
+        if (sentRequests.has(userId)) return 'sent';
+        return 'none';
     };
 
     if (loading) {
@@ -198,7 +261,111 @@ export function FriendsPage() {
                             </span>
                         )}
                     </button>
+                    <button
+                        onClick={() => setActiveTab('search')}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeTab === 'search'
+                            ? 'bg-pairon-accent text-white shadow-md'
+                            : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                    >
+                        <Search className="w-4 h-4 inline mr-1.5" />
+                        Find People
+                    </button>
                 </div>
+
+                {/* ── SEARCH TAB ── */}
+                {activeTab === 'search' && (
+                    <div className="space-y-4">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <Input
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                placeholder="Search by name or email..."
+                                className="pl-10 rounded-xl bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                                autoFocus
+                            />
+                            {searching && (
+                                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-pairon-accent" />
+                            )}
+                        </div>
+
+                        {searchQuery.trim().length < 2 && (
+                            <div className="text-center py-12 text-gray-400 dark:text-gray-500">
+                                <Search className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                                <p className="font-medium">Search for people</p>
+                                <p className="text-sm mt-1">Type at least 2 characters to search by name or email</p>
+                            </div>
+                        )}
+
+                        {searchQuery.trim().length >= 2 && !searching && searchResults.length === 0 && (
+                            <div className="text-center py-12 text-gray-400 dark:text-gray-500">
+                                <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                                <p className="font-medium">No users found</p>
+                                <p className="text-sm mt-1">Try a different name or email</p>
+                            </div>
+                        )}
+
+                        {searchResults.map((user, i) => {
+                            const status = getRelationStatus(user.id);
+                            return (
+                                <motion.div
+                                    key={user.id}
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: i * 0.04 }}
+                                    className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="relative">
+                                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-pairon-accent to-emerald-600 flex items-center justify-center text-white font-bold text-sm">
+                                                {user.avatar ? (
+                                                    <img src={user.avatar} alt="" className="w-full h-full rounded-full object-cover" />
+                                                ) : (
+                                                    user.name.charAt(0).toUpperCase()
+                                                )}
+                                            </div>
+                                            <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-gray-900 dark:text-white text-sm">{user.name}</p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                {user.email} · ⭐ {user.reputation} · <span className="capitalize">{user.experienceLevel}</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        {status === 'friend' && (
+                                            <span className="text-xs text-pairon-accent font-medium px-3 py-1.5 bg-pairon-accent/10 rounded-full">Already friends</span>
+                                        )}
+                                        {status === 'pending' && (
+                                            <span className="text-xs text-yellow-600 font-medium px-3 py-1.5 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">Pending</span>
+                                        )}
+                                        {status === 'sent' && (
+                                            <span className="text-xs text-emerald-600 font-medium px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center gap-1">
+                                                <Check className="w-3 h-3" /> Sent
+                                            </span>
+                                        )}
+                                        {status === 'none' && (
+                                            <Button
+                                                size="sm"
+                                                onClick={() => handleSendFriendRequest(user.id)}
+                                                disabled={sendingReqTo === user.id}
+                                                className="bg-pairon-accent hover:bg-pairon-accent/90 text-white h-8 rounded-xl"
+                                            >
+                                                {sendingReqTo === user.id ? (
+                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                ) : (
+                                                    <><UserPlus className="w-3.5 h-3.5 mr-1" /> Add Friend</>
+                                                )}
+                                            </Button>
+                                        )}
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
+                    </div>
+                )}
 
                 {/* Friends List */}
                 {activeTab === 'friends' && (
@@ -212,8 +379,15 @@ export function FriendsPage() {
                                 <Users className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
                                 <p className="text-gray-500 dark:text-gray-400 font-medium">No friends yet</p>
                                 <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                                    Connect with people during Quick Chat or Collaboration!
+                                    Use the "Find People" tab to search and add friends!
                                 </p>
+                                <Button
+                                    onClick={() => setActiveTab('search')}
+                                    variant="outline"
+                                    className="mt-4"
+                                >
+                                    <Search className="w-4 h-4 mr-2" /> Find People
+                                </Button>
                             </motion.div>
                         ) : (
                             [...friends]
@@ -416,7 +590,6 @@ export function FriendsPage() {
                                 </div>
                             </div>
 
-                            {/* Project Title */}
                             <div className="mb-3">
                                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Project Idea *</p>
                                 <Input
@@ -427,7 +600,6 @@ export function FriendsPage() {
                                 />
                             </div>
 
-                            {/* Description */}
                             <div className="mb-3">
                                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description <span className="text-gray-400">(optional)</span></p>
                                 <Input
@@ -438,7 +610,6 @@ export function FriendsPage() {
                                 />
                             </div>
 
-                            {/* Message */}
                             <div className="mb-5">
                                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Message <span className="text-gray-400">(optional)</span></p>
                                 <Input
@@ -458,6 +629,21 @@ export function FriendsPage() {
                                 Send Proposal
                             </Button>
                         </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Toast notification */}
+            <AnimatePresence>
+                {toastMsg && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 40 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 40 }}
+                        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2"
+                    >
+                        <Check className="w-4 h-4 text-emerald-400" />
+                        {toastMsg}
                     </motion.div>
                 )}
             </AnimatePresence>

@@ -73,7 +73,7 @@ interface FriendNotif {
 
 interface Toast {
   id: string;
-  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm';
+  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info';
   title: string;
   body: string;
   data?: any;
@@ -103,7 +103,7 @@ function GlobalNotifier() {
       addToast({ type: 'friend-request', title: `${data.requesterName} sent you a friend request`, body: `⭐ ${data.requesterReputation} reputation`, data });
     });
 
-    // Friend request accepted — you sent a request and they accepted
+    // Friend request accepted
     socket.on('friend:request-accepted', (data: { accepterName: string }) => {
       addToast({ type: 'friend-accepted', title: `${data.accepterName} accepted your friend request!`, body: '🎉 You are now friends' });
     });
@@ -111,6 +111,42 @@ function GlobalNotifier() {
     // Friend request declined
     socket.on('friend:request-declined', () => {
       addToast({ type: 'friend-declined', title: 'Friend request was declined', body: '' });
+    });
+
+    // ── Collab Proposal received (works on ANY page) ──
+    socket.on('collab:proposal-received', (proposal: any) => {
+      // Skip if this is our own sent proposal (isSent flag)
+      if (proposal.isSent) {
+        addToast({ type: 'info', title: '✅ Proposal sent!', body: `Sent to ${proposal.recipient?.name || 'your partner'}. Waiting for response...` });
+        return;
+      }
+      // Skip if we're on QuickConnect page (it handles its own proposals)
+      if (window.location.pathname === '/quick-connect') return;
+
+      addToast({
+        type: 'collab-proposal',
+        title: `🤝 ${proposal.proposer?.name || 'Someone'} wants to collaborate!`,
+        body: `${proposal.projectIdea?.title || 'Project'} · ${proposal.mode}`,
+        data: proposal,
+      });
+    });
+
+    // Collab proposal declined
+    socket.on('collab:proposal-declined', () => {
+      // Skip if QuickConnect page handles its own
+      if (window.location.pathname === '/quick-connect') return;
+      addToast({ type: 'collab-declined', title: 'Collaboration proposal declined', body: 'The other person declined your proposal.' });
+    });
+
+    // ── challenge:matched — navigate to /collaborate (handles friend collab accept) ──
+    socket.on('challenge:matched', (data: any) => {
+      if (data.sessionId) {
+        localStorage.setItem('challenge_session', JSON.stringify(data));
+        // Navigate to collaborate if not already there
+        if (window.location.pathname !== '/collaborate') {
+          window.location.href = '/collaborate';
+        }
+      }
     });
 
     // New DM message (when not on messages page)
@@ -130,6 +166,9 @@ function GlobalNotifier() {
       socket.off('friend:request-received');
       socket.off('friend:request-accepted');
       socket.off('friend:request-declined');
+      socket.off('collab:proposal-received');
+      socket.off('collab:proposal-declined');
+      socket.off('challenge:matched');
       socket.off('dm:new-message');
     };
   }, [isAuthenticated]);
@@ -149,6 +188,17 @@ function GlobalNotifier() {
     removeToast(toastId);
   };
 
+  const respondToProposal = (proposalId: string, action: 'accept' | 'decline', toastId: string) => {
+    const socket = socketService.getSocket();
+    if (!socket) return;
+    if (action === 'accept') {
+      socket.emit('collab:accept', proposalId);
+    } else {
+      socket.emit('collab:decline', proposalId);
+    }
+    removeToast(toastId);
+  };
+
   return (
     <>
       {/* Toast stack */}
@@ -157,7 +207,7 @@ function GlobalNotifier() {
           <div
             key={toast.id}
             style={{
-              background: '#1e2030', border: `1px solid ${toast.type === 'friend-request' ? 'rgba(99,102,241,0.4)' : toast.type === 'friend-accepted' ? 'rgba(16,185,129,0.4)' : toast.type === 'friend-declined' ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.3)'}`,
+              background: '#1e2030', border: `1px solid ${toast.type === 'friend-request' ? 'rgba(99,102,241,0.4)' : toast.type === 'friend-accepted' ? 'rgba(16,185,129,0.4)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.3)' : toast.type === 'collab-proposal' ? 'rgba(16,185,129,0.4)' : toast.type === 'info' ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.3)'}`,
               borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
               padding: '14px 16px', width: '100%', pointerEvents: 'all',
               animation: 'slideUp 0.3s ease',
@@ -174,10 +224,10 @@ function GlobalNotifier() {
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
               {/* Icon */}
               <div style={{
-                width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
-                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' ? 'rgba(239,68,68,0.2)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
+                width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: 'white',
+                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.2)' : toast.type === 'collab-proposal' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'info' ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
               }}>
-                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' ? '✓' : toast.type === 'friend-declined' ? '✗' : '💬'}
+                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' || toast.type === 'info' ? '✓' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? '✗' : toast.type === 'collab-proposal' ? '🤝' : '💬'}
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -197,6 +247,24 @@ function GlobalNotifier() {
                     <button
                       onClick={() => respond(toast.data.friendshipId, 'decline', toast.id)}
                       disabled={responding === toast.data.friendshipId}
+                      style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      ✗ Decline
+                    </button>
+                  </div>
+                )}
+
+                {/* Actions for collab proposal */}
+                {toast.type === 'collab-proposal' && toast.data && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => respondToProposal(toast.data.id, 'accept', toast.id)}
+                      style={{ padding: '5px 14px', background: '#10b981', color: 'white', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      ✓ Accept
+                    </button>
+                    <button
+                      onClick={() => respondToProposal(toast.data.id, 'decline', toast.id)}
                       style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
                     >
                       ✗ Decline

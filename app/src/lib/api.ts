@@ -252,6 +252,14 @@ class ApiService {
         });
         return this.handleResponse<{ status: string; friendshipId?: string; isRequester?: boolean }>(response);
     }
+
+    async searchUsers(query: string) {
+        const response = await fetch(`${this.baseUrl}/api/users/find?q=${encodeURIComponent(query)}`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ users: any[] }>(response);
+    }
 }
 
 export const api = new ApiService();

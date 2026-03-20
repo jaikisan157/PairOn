@@ -116,6 +116,46 @@ router.get('/stats', authMiddleware, async (req: any, res: any) => {
   }
 });
 
+// Search users — ANY authenticated user (for adding friends)
+router.get('/find', authMiddleware, async (req: any, res: any) => {
+  try {
+    const { q } = req.query;
+    const userId = req.user?.userId;
+
+    if (!q || typeof q !== 'string' || q.trim().length < 2) {
+      return res.status(400).json({ message: 'Search query must be at least 2 characters' });
+    }
+
+    const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const users = await User.find({
+      _id: { $ne: userId }, // exclude self
+      $or: [
+        { name: { $regex: escaped, $options: 'i' } },
+        { email: { $regex: escaped, $options: 'i' } },
+      ],
+    })
+      .select('name email avatar isOnline reputation experienceLevel')
+      .limit(15)
+      .lean();
+
+    res.json({
+      users: users.map((u: any) => ({
+        id: u._id.toString(),
+        name: u.name,
+        email: u.email,
+        avatar: u.avatar,
+        isOnline: u.isOnline,
+        reputation: u.reputation || 0,
+        experienceLevel: u.experienceLevel || 'beginner',
+      })),
+    });
+  } catch (error) {
+    console.error('Find users error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Search users — admin only
 router.get('/search', authMiddleware, adminMiddleware, async (req: any, res: any) => {
   try {

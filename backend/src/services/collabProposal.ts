@@ -37,6 +37,17 @@ export function setupProposalHandlers(io: Server, socket: Socket) {
                 return;
             }
 
+            // Check if either user is already in an active collaboration session
+            const activeSession = await CollaborationSession.findOne({
+                participants: { $in: [userId, recipientId] },
+                status: 'active',
+            });
+            if (activeSession) {
+                const inSession = activeSession.participants.includes(recipientId) ? 'They are' : 'You are';
+                socket.emit('quickchat:blocked', `${inSession} already in an active collaboration session.`);
+                return;
+            }
+
             // Get both users
             const proposer = await User.findById(userId);
             const recipient = await User.findById(recipientId);
@@ -127,6 +138,16 @@ export function setupProposalHandlers(io: Server, socket: Socket) {
                 proposal.status = 'expired';
                 await proposal.save();
                 socket.emit('quickchat:blocked', 'This proposal has expired.');
+                return;
+            }
+
+            // Check if either user is already in an active session
+            const activeSession = await CollaborationSession.findOne({
+                participants: { $in: [userId, proposal.proposerId] },
+                status: 'active',
+            });
+            if (activeSession) {
+                socket.emit('quickchat:blocked', 'Cannot accept — one of you is already in an active session.');
                 return;
             }
 

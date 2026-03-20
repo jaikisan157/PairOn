@@ -16,7 +16,6 @@ function getToken() {
     return localStorage.getItem('pairon_token') || '';
 }
 
-// Decode the userId from the JWT stored in localStorage
 function getMyUserId(): string {
     try {
         const token = getToken();
@@ -39,7 +38,6 @@ export function MessagesPage() {
     const friendId   = searchParams.get('friendId') || '';
     const friendName = searchParams.get('friendName') || 'Chat';
 
-    // Decode my own userId directly from JWT — reliable, no AuthContext timing issues
     const myId = getMyUserId();
 
     const [messages, setMessages] = useState<Msg[]>([]);
@@ -74,7 +72,6 @@ export function MessagesPage() {
         const sock = socketService.getSocket();
         if (!sock || !friendId) return;
         const handler = (data: { message: Msg; fromId: string }) => {
-            // Only append if the message is from the person we're currently chatting with
             if (data.fromId === friendId) {
                 setMessages(prev => [...prev, data.message]);
             }
@@ -93,11 +90,10 @@ export function MessagesPage() {
         setSending(true);
         setError('');
 
-        // Show optimistically on the right side immediately
         const tmpId = `tmp-${Date.now()}`;
         const tmpMsg: Msg = {
             id: tmpId,
-            senderId: myId,          // use the decoded userId so left/right is correct
+            senderId: myId,
             content,
             timestamp: new Date().toISOString(),
         };
@@ -111,11 +107,8 @@ export function MessagesPage() {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-            // Replace tmp with the server-confirmed message
             setMessages(prev => prev.map(m => m.id === tmpId ? data.message : m));
         } catch (err: any) {
-            // Remove the failed optimistic message and restore text
             setMessages(prev => prev.filter(m => m.id !== tmpId));
             setText(content);
             setError('Failed to send: ' + err.message);
@@ -126,98 +119,64 @@ export function MessagesPage() {
     };
 
     const avatarLetter = friendName.charAt(0).toUpperCase();
-    const avatarColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'];
-    const avatarColor  = avatarColors[friendName.charCodeAt(0) % avatarColors.length];
 
     return (
-        <div style={{
-            display: 'flex', flexDirection: 'column', height: '100vh',
-            background: '#0a0b14', color: 'white', fontFamily: 'Inter, system-ui, sans-serif',
-        }}>
+        <div className="flex flex-col h-screen bg-pairon-bg dark:bg-gray-900 text-gray-900 dark:text-white font-sans">
             {/* ── Header ── */}
-            <div style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.07)',
-                background: '#0d0e1a', flexShrink: 0,
-            }}>
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-white/7 bg-white dark:bg-gray-900 shrink-0">
                 <button
                     onClick={() => navigate(-1)}
-                    style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', display: 'flex', padding: 6, borderRadius: 8 }}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
                 >
                     <ArrowLeft size={20} />
                 </button>
-                <div style={{
-                    width: 38, height: 38, borderRadius: '50%',
-                    background: `linear-gradient(135deg, ${avatarColor}, ${avatarColor}99)`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 700, fontSize: 16, flexShrink: 0,
-                }}>
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pairon-accent to-emerald-600 flex items-center justify-center text-white font-bold text-base shrink-0">
                     {avatarLetter}
                 </div>
                 <div>
-                    <div style={{ fontWeight: 600, fontSize: 15 }}>{friendName}</div>
-                    <div style={{ fontSize: 11, color: '#6b7280' }}>Direct Message</div>
+                    <div className="font-semibold text-sm text-gray-900 dark:text-white">{friendName}</div>
+                    <div className="text-[11px] text-gray-400 dark:text-gray-500">Direct Message</div>
                 </div>
             </div>
 
             {/* ── Error banner ── */}
             {error && (
-                <div style={{
-                    background: '#450a0a', color: '#fca5a5',
-                    padding: '8px 16px', fontSize: 13, flexShrink: 0,
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}>
+                <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300 px-4 py-2 text-sm shrink-0 flex justify-between items-center border-b border-red-100 dark:border-red-900/50">
                     <span>{error}</span>
-                    <button onClick={() => setError('')} style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                    <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 dark:hover:text-red-200 font-bold text-lg leading-none">✕</button>
                 </div>
             )}
 
             {/* ── Messages ── */}
-            <div style={{
-                flex: 1, overflowY: 'auto', padding: '16px 16px 8px',
-                display: 'flex', flexDirection: 'column', gap: 4,
-            }}>
+            <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2 flex flex-col gap-1 scroll-smooth">
                 {messages.length === 0 && (
-                    <div style={{ margin: 'auto', textAlign: 'center', color: '#4b5563' }}>
-                        <div style={{ fontSize: 36, marginBottom: 10 }}>👋</div>
-                        <div style={{ fontWeight: 600, color: '#6b7280' }}>{friendName}</div>
-                        <div style={{ fontSize: 13, marginTop: 4 }}>Start the conversation!</div>
+                    <div className="m-auto text-center text-gray-400 dark:text-gray-500">
+                        <div className="text-4xl mb-2">👋</div>
+                        <div className="font-semibold text-gray-500 dark:text-gray-400">{friendName}</div>
+                        <div className="text-sm mt-1">Start the conversation!</div>
                     </div>
                 )}
 
                 {messages.map((msg, i) => {
                     const mine = msg.senderId === myId;
                     const prev = messages[i - 1];
-                    // Group consecutive messages from the same sender
                     const showMeta = !prev || prev.senderId !== msg.senderId;
 
                     return (
-                        <div key={msg.id} style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: mine ? 'flex-end' : 'flex-start',
-                            marginTop: showMeta ? 12 : 2,
-                        }}>
-                            {/* Sender label (only on first in group, for partner only) */}
+                        <div key={msg.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'} ${showMeta ? 'mt-3' : 'mt-0.5'}`}>
                             {!mine && showMeta && (
-                                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2, paddingLeft: 4 }}>
-                                    {friendName}
-                                </div>
+                                <div className="text-[11px] text-gray-400 dark:text-gray-500 mb-0.5 pl-1">{friendName}</div>
                             )}
-                            <div style={{
-                                maxWidth: '70%',
-                                padding: '9px 14px',
-                                borderRadius: mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                                background: mine ? '#6366f1' : '#1e2030',
-                                border: mine ? 'none' : '1px solid rgba(255,255,255,0.06)',
-                                color: 'white',
-                                fontSize: 14,
-                                lineHeight: 1.55,
-                                wordBreak: 'break-word',
-                            }}>
+                            <div
+                                className={`max-w-[70%] px-3.5 py-2.5 text-sm leading-relaxed break-words ${
+                                    mine
+                                        ? 'bg-pairon-accent text-white rounded-[18px_18px_4px_18px]'
+                                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/6 text-gray-900 dark:text-white rounded-[18px_18px_18px_4px]'
+                                }`}
+                            >
                                 {msg.content}
                             </div>
-                            <div style={{ fontSize: 10, color: '#4b5563', marginTop: 2, paddingInline: 4 }}>
+                            <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 px-1">
                                 {fmt(msg.timestamp)}
                             </div>
                         </div>
@@ -229,11 +188,7 @@ export function MessagesPage() {
             {/* ── Input ── */}
             <form
                 onSubmit={send}
-                style={{
-                    display: 'flex', gap: 8, padding: '10px 16px 14px',
-                    borderTop: '1px solid rgba(255,255,255,0.07)',
-                    background: '#0d0e1a', flexShrink: 0,
-                }}
+                className="flex gap-2 px-4 py-3 border-t border-gray-200 dark:border-white/7 bg-white dark:bg-gray-900 shrink-0"
             >
                 <input
                     ref={inputRef}
@@ -243,40 +198,23 @@ export function MessagesPage() {
                     placeholder={`Message ${friendName}...`}
                     autoComplete="off"
                     disabled={sending}
-                    style={{
-                        flex: 1, background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
-                        padding: '10px 16px', color: 'white', fontSize: 14, outline: 'none',
-                        transition: 'border-color 0.2s',
-                    }}
-                    onFocus={e => (e.target.style.borderColor = 'rgba(99,102,241,0.7)')}
-                    onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
+                    className="flex-1 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-full px-4 py-2.5 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:border-pairon-accent dark:focus:border-pairon-accent transition-colors"
                 />
                 <button
                     type="submit"
                     disabled={!text.trim() || sending}
-                    style={{
-                        width: 42, height: 42, borderRadius: '50%',
-                        background: text.trim() && !sending ? '#6366f1' : '#374151',
-                        border: 'none', color: 'white',
-                        cursor: text.trim() && !sending ? 'pointer' : 'not-allowed',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0, transition: 'background 0.2s',
-                    }}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                        text.trim() && !sending
+                            ? 'bg-pairon-accent hover:bg-pairon-accent/90 text-white cursor-pointer'
+                            : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                    }`}
                 >
                     {sending
-                        ? <div style={{ width: 16, height: 16, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+                        ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         : <Send size={16} />
                     }
                 </button>
             </form>
-
-            <style>{`
-                @keyframes spin { to { transform: rotate(360deg); } }
-                ::-webkit-scrollbar { width: 4px; }
-                ::-webkit-scrollbar-track { background: transparent; }
-                ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
-            `}</style>
         </div>
     );
 }
