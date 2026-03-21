@@ -108,6 +108,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const callTimerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef       = useRef<number>(0);
   const ringingTimeoutRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ringingBeepRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const callingTimeoutRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pending incoming call
@@ -133,7 +134,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
       const ctx = new AudioContext({ sampleRate: 48000 });
       audioCtxRef.current = ctx;
-      // Create a gain node for volume/speaker control
       const gain = ctx.createGain();
       gain.gain.value = 1.0;
       gain.connect(ctx.destination);
@@ -143,27 +143,65 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return audioCtxRef.current;
   }, []);
 
+  // ── Pre-unlock AudioContext (MUST be called from a user gesture) ──────────
+  // Browsers block AudioContext until a button click. We unlock it here so
+  // playback works when audio chunks arrive later via socket events.
+  const unlockAudioContext = useCallback(() => {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(() => console.log('[Call] 🔓 AudioContext unlocked')).catch(() => {});
+    }
+  }, [getAudioContext]);
+
+  // ── Ring beep (incoming call sound) ──────────────────────────────────────
+  const startRingBeep = useCallback(() => {
+    const beep = () => {
+      try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 440;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } catch {}
+    };
+    beep();
+    ringingBeepRef.current = setInterval(beep, 1500);
+  }, [getAudioContext]);
+
+  const stopRingBeep = useCallback(() => {
+    if (ringingBeepRef.current) { clearInterval(ringingBeepRef.current); ringingBeepRef.current = null; }
+  }, []);
+
   // ── Play received audio chunk ─────────────────────────────────────────────
   const playAudioChunk = useCallback(async (chunk: ArrayBuffer) => {
     try {
-      const ctx = getAudioContext();
-      if (ctx.state === 'suspended') await ctx.resume();
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        console.warn('[Call] AudioContext not ready — chunk dropped');
+        return;
+      }
+      const ctx = audioCtxRef.current;
+      // Resume if suspended (best-effort; only works if AudioContext was pre-unlocked)
+      if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
 
-      // decodeAudioData consumes the buffer — slice to avoid detached errors
       const decoded = await ctx.decodeAudioData(chunk.slice(0));
       const source = ctx.createBufferSource();
       source.buffer = decoded;
       source.connect(gainNodeRef.current ?? ctx.destination);
 
-      // Schedule playback to avoid gaps/overlaps (jitter buffer)
       const startTime = Math.max(nextPlayTimeRef.current, ctx.currentTime + 0.05);
       source.start(startTime);
       nextPlayTimeRef.current = startTime + decoded.duration;
     } catch (err) {
-      // Silently ignore decode errors (can happen with first/last partial chunk)
-      console.warn('[Call] Audio decode error (normal at start/end):', (err as Error).message);
+      console.warn('[Call] Audio decode error:', (err as Error).message);
     }
-  }, [getAudioContext]);
+  }, []);
 
   // ── Start recording and streaming ────────────────────────────────────────
   const startAudioStream = useCallback((stream: MediaStream, sessionId: string) => {
@@ -199,6 +237,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   // ── Full cleanup ──────────────────────────────────────────────────────────
   const fullCleanup = useCallback(() => {
+    stopRingBeep();
     // Stop recording
     if (mediaRecorderRef.current) {
       try { mediaRecorderRef.current.stop(); } catch {}
@@ -220,7 +259,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (callingTimeoutRef.current) clearTimeout(callingTimeoutRef.current);
     callingTimeoutRef.current = null;
     pendingOfferRef.current = null;
-  }, []);
+  }, [stopRingBeep]);
 
   // ── endCall ───────────────────────────────────────────────────────────────
   const endCall = useCallback((notify = true) => {
@@ -260,6 +299,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     callerNameRef.current = callerName;
     partnerNameRef.current = partnerName;
 
+    // Pre-unlock AudioContext NOW (user gesture context — button click)
+    unlockAudioContext();
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
@@ -292,7 +334,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!pendingOfferRef.current || callStatusRef.current !== 'ringing') return;
     const { sessionId } = pendingOfferRef.current;
     pendingOfferRef.current = null;
+    stopRingBeep();
     if (ringingTimeoutRef.current) { clearTimeout(ringingTimeoutRef.current); ringingTimeoutRef.current = null; }
+
+    // Pre-unlock AudioContext NOW (user gesture — Accept button click)
+    unlockAudioContext();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -305,22 +351,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setCallStatus('connected'); callStatusRef.current = 'connected';
       startCallTimer();
 
-      // Unlock AudioContext (browser autoplay policy)
-      const ctx = getAudioContext();
-      ctx.resume().catch(() => {});
-
-      // Start streaming audio to partner
+      // AudioContext already unlocked above — start streaming
       startAudioStream(stream, sessionId);
+      console.log('[Call] ✅ Accepted — audio streaming started');
     } catch (err: any) {
       alert('Could not answer call: ' + err.message);
       setCallStatus('idle'); callStatusRef.current = 'idle';
     }
-  }, [startCallTimer, getAudioContext, startAudioStream]);
+  }, [startCallTimer, startAudioStream, unlockAudioContext, stopRingBeep]);
 
   // ── declineCall ───────────────────────────────────────────────────────────
   const declineCall = useCallback(() => {
     const sessionId = pendingOfferRef.current?.sessionId ?? callSessionIdRef.current;
     pendingOfferRef.current = null;
+    stopRingBeep();
     if (ringingTimeoutRef.current) { clearTimeout(ringingTimeoutRef.current); ringingTimeoutRef.current = null; }
     if (sessionId) socketService.getSocket()?.emit('call:end', { sessionId });
     setCallStatus('idle'); callStatusRef.current = 'idle';
@@ -334,30 +378,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const socket = socketService.getSocket();
       if (!socket) return false;
 
-      // ── Incoming call (ringing) ──
+      // Incoming call (ringing)
       socket.on('call:offer', (data: { sessionId: string; callerName: string; isReconnect?: boolean }) => {
-        // Reconnect offer from partner after refresh — just start streaming again
         if (data.isReconnect) {
           setCallStatus('reconnecting'); callStatusRef.current = 'reconnecting';
           return;
         }
-
-        if (callStatusRef.current !== 'idle') return; // already in a call
+        if (callStatusRef.current !== 'idle') return;
 
         pendingOfferRef.current = { sessionId: data.sessionId, callerName: data.callerName };
         setCallSessionId(data.sessionId); callSessionIdRef.current = data.sessionId;
         setCallPartnerName(data.callerName);
         setCallStatus('ringing'); callStatusRef.current = 'ringing';
-
+        // Play ring beep sound
+        startRingBeep();
         if (ringingTimeoutRef.current) clearTimeout(ringingTimeoutRef.current);
-        ringingTimeoutRef.current = setTimeout(() => {
-          if (callStatusRef.current === 'ringing') {
-            // Auto-decline on timeout (let caller's own timeout handle it)
-          }
-        }, RINGING_TIMEOUT_MS);
+        ringingTimeoutRef.current = setTimeout(() => {}, RINGING_TIMEOUT_MS);
       });
 
-      // ── Caller: partner accepted ──
+      // Caller: partner accepted
       socket.on('call:answer', async (_data: { sessionId: string }) => {
         if (callStatusRef.current !== 'calling' && callStatusRef.current !== 'reconnecting') return;
         if (callingTimeoutRef.current) { clearTimeout(callingTimeoutRef.current); callingTimeoutRef.current = null; }
@@ -365,9 +404,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setCallStatus('connected'); callStatusRef.current = 'connected';
         startCallTimer();
 
-        // Unlock AudioContext
-        const ctx = getAudioContext();
-        await ctx.resume().catch(() => {});
+        // AudioContext was pre-unlocked in startCall (user gesture) — safe to use now
+        if (audioCtxRef.current?.state === 'suspended') {
+          audioCtxRef.current.resume().catch(() => {});
+        }
 
         // Start streaming our audio
         if (localStreamRef.current) {
@@ -376,7 +416,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         console.log('[Call] ✅ Connected via WebSocket relay');
       });
 
-      // ── Receive audio chunk from partner ──
+      // Receive audio chunk from partner
       socket.on('call:audio-chunk', async (data: { chunk: ArrayBuffer }) => {
         if (callStatusRef.current !== 'connected' && callStatusRef.current !== 'reconnecting') return;
         await playAudioChunk(data.chunk);

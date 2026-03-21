@@ -745,9 +745,9 @@ export function setupSocketHandlers(io: Server) {
       relayCallEvent('call:ice-candidate', data));
 
     // ── call:audio-chunk — relay binary audio from one peer to the other ──
-    socket.on('call:audio-chunk', (data: { sessionId: string; chunk: ArrayBuffer }) => {
-      // Forward raw audio chunk directly to session partner
-      socket.to(`session:${data.sessionId}`).emit('call:audio-chunk', { chunk: data.chunk });
+    // Use relayCallEvent to ensure delivery via both session room + user room
+    socket.on('call:audio-chunk', (data: { sessionId: string; chunk: Buffer }) => {
+      relayCallEvent('call:audio-chunk', data);
     });
 
     // ── call:end — user explicitly ended the call ──
