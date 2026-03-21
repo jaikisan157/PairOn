@@ -66,7 +66,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ── State — restore from sessionStorage if page was refreshed during a call ──
   const [callStatus,      setCallStatus]      = useState<CallStatus>(() => {
     const saved = sessionStorage.getItem('pairon_call');
-    if (saved) { try { const s = JSON.parse(saved); if (s.status === 'connected') return 'reconnecting'; } catch {} }
+    if (saved) {
+      try {
+        const s = JSON.parse(saved);
+        if (s.status === 'connected' || s.status === 'reconnecting') return 'reconnecting';
+      } catch {}
+    }
     return 'idle';
   });
   const [callSessionId,   setCallSessionId]   = useState<string | null>(() => {
@@ -90,8 +95,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const pendingOfferRef     = useRef<{ offer: RTCSessionDescriptionInit; sessionId: string } | null>(null);
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const ringIntervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
-  const callStatusRef       = useRef<CallStatus>('idle');
-  const callSessionIdRef    = useRef<string | null>(null);
+  const callStatusRef       = useRef<CallStatus>(callStatus); // sync with initial restored state
+  const callSessionIdRef    = useRef<string | null>(callSessionId);
   const audioCtxRef         = useRef<AudioContext | null>(null);
   const reconnectAttemptsRef = useRef<number>(0);
   const reconnectTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);

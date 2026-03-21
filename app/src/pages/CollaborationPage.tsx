@@ -984,6 +984,11 @@ export function CollaborationPage() {
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-400 hover:bg-red-500 text-white text-xs font-semibold transition-all animate-pulse">
                     <PhoneOff className="w-3.5 h-3.5" /> Calling...
                   </button>
+                ) : callStatus === 'reconnecting' ? (
+                  <button disabled title="Call reconnecting..."
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500 text-white text-xs font-semibold transition-all animate-pulse cursor-not-allowed opacity-80">
+                    <Phone className="w-3.5 h-3.5" /> Reconnecting...
+                  </button>
                 ) : callStatus === 'connected' ? (
                   <button onClick={() => globalEndCall(true)} title="End call"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold transition-all">
