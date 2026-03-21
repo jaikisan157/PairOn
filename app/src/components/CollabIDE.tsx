@@ -263,6 +263,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // Line authorship: Map<filePath, Map<lineNumber, 'local' | 'partner'>>
     const lineAuthorsRef = useRef<Map<string, Map<number, string>>>(new Map());
     const decorationsRef = useRef<string[]>([]);
+    // Debounce timers for heavy operations inside onDidChangeModelContent
+    const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);    // socket emit debounce
+    const fsWriteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null); // webcontainer FS write
+    const stateDebounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);  // setFiles React state
     // File import
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
@@ -469,11 +473,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             if (suppressSyncRef.current) return;
             const currentModel = editor.getModel();
             if (!currentModel) return;
-            const path = currentModel.uri.path.slice(1); // Remove leading /
-            const value = currentModel.getValue();
-            // Mark this file as locally edited RIGHT NOW
+            const path = currentModel.uri.path.slice(1);
+
+            // ── Mark locally editing (ref only — no re-render) ──
             locallyEditingRef.current = { path, time: Date.now() };
-            // Track line authorship for typing indicator
+
+            // ── Track line authorship (ref only — no re-render) ──
             for (const change of e.changes) {
                 if (!lineAuthorsRef.current.has(path)) lineAuthorsRef.current.set(path, new Map());
                 const authors = lineAuthorsRef.current.get(path)!;
@@ -484,15 +489,34 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 }
             }
             updateLineDecorations(editor, path);
-            // Update files state
-            setFiles(prev => { const next = { ...prev, [path]: value }; autosave(next); return next; });
-            // Sync to WebContainer
-            if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(path, value).catch(() => { });
-            // Sync to partner
-            const socket = socketService.getSocket();
-            socket?.emit('code:file-change', { sessionId, path, content: value, senderId: socket.id });
-            // Lock file
-            lockFile(path);
+
+            // ── DEBOUNCED: React state update (100ms) ──
+            // Avoid per-keystroke re-renders which cause cursor jumps at fast typing speeds
+            if (stateDebounceRef.current) clearTimeout(stateDebounceRef.current);
+            stateDebounceRef.current = setTimeout(() => {
+                const val = currentModel.isDisposed() ? undefined : currentModel.getValue();
+                if (val !== undefined) {
+                    setFiles(prev => { const next = { ...prev, [path]: val }; autosave(next); return next; });
+                }
+            }, 100);
+
+            // ── DEBOUNCED: WebContainer FS write (200ms) ──
+            if (fsWriteDebounceRef.current) clearTimeout(fsWriteDebounceRef.current);
+            fsWriteDebounceRef.current = setTimeout(() => {
+                if (!currentModel.isDisposed() && webcontainerRef.current) {
+                    webcontainerRef.current.fs.writeFile(path, currentModel.getValue()).catch(() => {});
+                }
+            }, 200);
+
+            // ── DEBOUNCED: Socket sync to partner (150ms) ──
+            if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+            syncDebounceRef.current = setTimeout(() => {
+                if (currentModel.isDisposed()) return;
+                const value = currentModel.getValue();
+                const socket = socketService.getSocket();
+                socket?.emit('code:file-change', { sessionId, path, content: value, senderId: socket.id });
+                lockFile(path);
+            }, 150);
         });
 
         // Add "Comment on Line" action to editor context menu

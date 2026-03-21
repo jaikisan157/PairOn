@@ -150,36 +150,43 @@ export function CallProvider({ children }: { children: ReactNode }) {
     audio.load();
   };
 
-  // ── Speaker toggle (with mobile fallback) ─────────────────────────────────
+  // ── Speaker toggle ────────────────────────────────────────────────────────
   const toggleSpeaker = useCallback(async () => {
     const audio = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
     if (!audio) return;
 
-    // Mobile fallback: setSinkId not supported on most mobile browsers
-    if (typeof (audio as any).setSinkId !== 'function') {
-      // On mobile, toggling "speaker" is not possible via Web API.
-      // Instead, we toggle volume as a workaround indicator.
-      // The actual speaker routing is controlled by the OS.
-      setIsSpeakerOn(prev => !prev);
-      return;
-    }
+    const next = !isSpeakerOn;
 
-    try {
-      if (isSpeakerOn) {
-        await (audio as any).setSinkId('default');
-        setIsSpeakerOn(false);
-      } else {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const speaker = devices.find(
-          d => d.kind === 'audiooutput' &&
-          (d.label.toLowerCase().includes('speaker') || d.label.toLowerCase().includes('external'))
-        );
-        await (audio as any).setSinkId(speaker?.deviceId ?? 'default');
-        setIsSpeakerOn(true);
+    // setSinkId is supported on Chrome/Edge desktop
+    if (typeof (audio as any).setSinkId === 'function') {
+      try {
+        if (next) {
+          // Speaker ON: route to default communications output (speakerphone)
+          // '' = browser default output = system speaker on most platforms
+          await (audio as any).setSinkId('');
+          audio.volume = 1.0;
+        } else {
+          // Speaker OFF: try to find a non-speaker output (earpiece / headset)
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const earpiece = devices.find(
+            d => d.kind === 'audiooutput' &&
+            (d.label.toLowerCase().includes('ear') ||
+             d.label.toLowerCase().includes('handset') ||
+             d.label.toLowerCase().includes('built-in'))
+          );
+          await (audio as any).setSinkId(earpiece?.deviceId ?? 'default');
+          audio.volume = 0.9;
+        }
+        setIsSpeakerOn(next);
+      } catch (err) {
+        console.warn('[Call] setSinkId failed:', err);
+        setIsSpeakerOn(next);
       }
-    } catch (_) {
-      // Silently fail — speaker routing is OS-level on mobile
-      setIsSpeakerOn(prev => !prev);
+    } else {
+      // Mobile (iOS/Android): setSinkId not supported
+      // The user must use OS volume buttons. Just toggle the UI state.
+      audio.volume = next ? 1.0 : 0.8;
+      setIsSpeakerOn(next);
     }
   }, [isSpeakerOn]);
 
