@@ -1,11 +1,15 @@
 /**
  * CallContext — global voice call state.
  *
- * v4 — WebSocket Audio Relay with MediaSource Extension (MSE) playback.
- * - Audio captured with MediaRecorder (100ms chunks, webm/opus)
- * - Chunks relayed through Socket.IO (no TURN/WebRTC needed)
- * - Played back via MediaSource → <audio> element (proper streaming)
- *   decodeAudioData CANNOT handle partial webm chunks — MSE is the right API.
+ * v5 — Raw PCM streaming via AudioContext / ScriptProcessorNode.
+ * No MediaRecorder, no MSE, no blob URLs, no codec containers.
+ * Works in Edge, Firefox, sandboxed iframes, all networks.
+ *
+ * Flow:
+ *   Sender :  MediaStream → AudioContext(16kHz) → ScriptProcessorNode
+ *             → Float32→Int16 conversion → socket.emit('call:audio-chunk')
+ *   Receiver: socket.on('call:audio-chunk') → Int16→Float32 conversion
+ *             → AudioContext.createBuffer → BufferSourceNode (scheduled)
  */
 import {
   createContext, useContext, useRef, useState, useEffect, useCallback,
@@ -44,21 +48,8 @@ export function useCall(): CallContextType {
 
 const RINGING_TIMEOUT_MS = 45_000;
 const CALLING_TIMEOUT_MS = 45_000;
-const CHUNK_INTERVAL_MS  = 100;
-
-function getSupportedMimeType(): string {
-  const types = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/ogg',
-    'audio/mp4',
-  ];
-  for (const t of types) {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
-  }
-  return '';
-}
+const PCM_SAMPLE_RATE    = 16000;  // 16kHz — good for voice, ~32KB/s
+const PCM_BUFFER_SIZE    = 2048;   // ~128ms chunks at 16kHz
 
 // ─────────────────────────────────────────────────────────────────────────────
 export function CallProvider({ children }: { children: ReactNode }) {
@@ -90,20 +81,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const callSessionIdRef = useRef<string | null>(callSessionId);
   const callerNameRef    = useRef<string>('');
 
-  // Recording
+  // Sender — ScriptProcessor captures PCM from mic
   const localStreamRef   = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mimeTypeRef      = useRef<string>('');
+  const senderCtxRef     = useRef<AudioContext | null>(null);
+  const scriptNodeRef    = useRef<ScriptProcessorNode | null>(null);
+  const muteRef          = useRef<boolean>(false);  // checked in onaudioprocess
 
-  // Playback — MediaSource Extension (MSE) feeds an <audio> element
-  const audioElRef       = useRef<HTMLAudioElement | null>(null);
-  const mediaSourceRef   = useRef<MediaSource | null>(null);
-  const sourceBufferRef  = useRef<SourceBuffer | null>(null);
-  const chunkQueueRef    = useRef<ArrayBuffer[]>([]);
-  const mseReadyRef      = useRef<boolean>(false);
-  const volumeRef        = useRef<number>(1.0);
+  // Receiver — AudioContext scheduled playback of raw PCM
+  const receiverCtxRef   = useRef<AudioContext | null>(null);
+  const receiverGainRef  = useRef<GainNode | null>(null);
+  const nextPlayTimeRef  = useRef<number>(0);
+  const pendingChunksRef = useRef<Int16Array[]>([]);  // queued before ctx unlocks
 
-  // Ring beep (oscillator-based, no AudioContext autoplay issues)
+  // Ring beep (separate AudioContext)
   const ringCtxRef       = useRef<AudioContext | null>(null);
   const ringingBeepRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -133,18 +123,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const startRingBeep = useCallback(() => {
     const beep = () => {
       try {
-        if (!ringCtxRef.current || ringCtxRef.current.state === 'closed') {
+        if (!ringCtxRef.current || ringCtxRef.current.state === 'closed')
           ringCtxRef.current = new AudioContext();
-        }
         const ctx = ringCtxRef.current;
         if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-        const osc  = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.value = 440;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-        osc.connect(gain); gain.connect(ctx.destination);
+        const osc = ctx.createOscillator();
+        const g   = ctx.createGain();
+        osc.frequency.value = 440; osc.type = 'sine';
+        g.gain.setValueAtTime(0.3, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.connect(g); g.connect(ctx.destination);
         osc.start(); osc.stop(ctx.currentTime + 0.4);
       } catch {}
     };
@@ -154,91 +142,117 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const stopRingBeep = useCallback(() => {
     if (ringingBeepRef.current) { clearInterval(ringingBeepRef.current); ringingBeepRef.current = null; }
-    ringCtxRef.current?.close().catch(() => {}); ringCtxRef.current = null;
+    try { ringCtxRef.current?.close(); } catch {} ringCtxRef.current = null;
   }, []);
 
-  // ── MSE playback ──────────────────────────────────────────────────────────
-  const flushMSEQueue = useCallback(() => {
-    const sb = sourceBufferRef.current;
-    if (!sb || sb.updating || chunkQueueRef.current.length === 0) return;
-    const chunk = chunkQueueRef.current.shift()!;
-    try { sb.appendBuffer(chunk); } catch (e) {
-      console.warn('[Call] MSE appendBuffer error:', e);
+  // ── Receiver AudioContext ─────────────────────────────────────────────────
+  /** Create/get receiver AudioContext — call from user gesture to pre-unlock */
+  const getReceiverCtx = useCallback(() => {
+    if (!receiverCtxRef.current || receiverCtxRef.current.state === 'closed') {
+      const ctx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+      const gain = ctx.createGain();
+      gain.gain.value = 1.0;
+      gain.connect(ctx.destination);
+      receiverCtxRef.current = ctx;
+      receiverGainRef.current = gain;
+      nextPlayTimeRef.current = 0;
     }
+    return receiverCtxRef.current;
   }, []);
 
-  /** Must be called from a user-gesture context (button click) so audio.play() is allowed */
-  const initMSEPlayback = useCallback((mimeType: string) => {
-    // Tear down any previous instance
-    if (audioElRef.current) { audioElRef.current.pause(); audioElRef.current.src = ''; audioElRef.current = null; }
-    if (mediaSourceRef.current?.readyState === 'open') { try { mediaSourceRef.current.endOfStream(); } catch {} }
-    mediaSourceRef.current = null; sourceBufferRef.current = null;
-    chunkQueueRef.current = []; mseReadyRef.current = false;
+  const unlockReceiverCtx = useCallback(() => {
+    const ctx = getReceiverCtx();
+    if (ctx.state === 'suspended') {
+      ctx.resume()
+        .then(() => {
+          console.log('[Call] 🔓 Receiver AudioContext unlocked');
+          // Flush any chunks that arrived while suspended
+          const chunks = pendingChunksRef.current.splice(0);
+          for (const int16 of chunks) scheduleChunk(int16, ctx);
+        })
+        .catch(() => {});
+    }
+  }, [getReceiverCtx]); // eslint-disable-line
 
-    const safeMime = MediaSource.isTypeSupported(mimeType) ? mimeType
-                   : MediaSource.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
-                   : 'audio/webm';
+  /** Schedule a decoded Int16Array chunk for playback */
+  const scheduleChunk = (int16: Int16Array, ctx: AudioContext) => {
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+    const buf = ctx.createBuffer(1, float32.length, PCM_SAMPLE_RATE);
+    buf.copyToChannel(float32, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(receiverGainRef.current ?? ctx.destination);
+    const t = Math.max(nextPlayTimeRef.current, ctx.currentTime + 0.05);
+    src.start(t);
+    nextPlayTimeRef.current = t + buf.duration;
+  };
 
-    const ms = new MediaSource();
-    mediaSourceRef.current = ms;
-
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(ms);
-    audio.volume = volumeRef.current;
-    audioElRef.current = audio;
-
-    ms.addEventListener('sourceopen', () => {
-      try {
-        const sb = ms.addSourceBuffer(safeMime);
-        sourceBufferRef.current = sb;
-        sb.mode = 'sequence'; // play chunks in arrival order, ignore timestamps
-        sb.addEventListener('updateend', flushMSEQueue);
-        mseReadyRef.current = true;
-        console.log('[Call] 🚀 MSE ready, mimeType:', safeMime);
-        flushMSEQueue();
-      } catch (e) { console.error('[Call] MSE init error:', e); }
-    }, { once: true });
-
-    audio.play().catch(e => console.warn('[Call] audio.play() blocked:', e.message));
-  }, [flushMSEQueue]);
-
-  /** Queue a received chunk for MSE playback */
+  /** Play a received PCM chunk (called from socket event) */
   const playAudioChunk = useCallback((raw: unknown) => {
-    let buffer: ArrayBuffer;
-    if (raw instanceof ArrayBuffer) {
-      buffer = raw;
-    } else if (ArrayBuffer.isView(raw)) {
+    // Binary conversion (Socket.IO may deliver as Uint8Array)
+    let ab: ArrayBuffer;
+    if (raw instanceof ArrayBuffer) { ab = raw; }
+    else if (ArrayBuffer.isView(raw)) {
       const v = raw as Uint8Array;
-      buffer = v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) as ArrayBuffer;
-    } else {
-      console.warn('[Call] Unknown chunk type:', typeof raw);
+      ab = v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) as ArrayBuffer;
+    } else { console.warn('[Call] Unknown chunk type:', typeof raw); return; }
+
+    const int16 = new Int16Array(ab);
+    const ctx = receiverCtxRef.current;
+
+    if (!ctx || ctx.state === 'closed') {
+      pendingChunksRef.current.push(int16);
       return;
     }
-    chunkQueueRef.current.push(buffer);
-    if (mseReadyRef.current) flushMSEQueue();
-  }, [flushMSEQueue]);
+    if (ctx.state === 'suspended') {
+      // Queue and try to resume
+      pendingChunksRef.current.push(int16);
+      ctx.resume().then(() => {
+        const chunks = pendingChunksRef.current.splice(0);
+        for (const c of chunks) scheduleChunk(c, ctx);
+      }).catch(() => {});
+      return;
+    }
+    scheduleChunk(int16, ctx);
+  }, []); // eslint-disable-line
 
-  // ── Start recording mic and streaming to server ───────────────────────────
+  // ── Start PCM streaming (sender) ──────────────────────────────────────────
   const startAudioStream = useCallback((stream: MediaStream, sessionId: string) => {
-    if (mediaRecorderRef.current) { try { mediaRecorderRef.current.stop(); } catch {} }
-    const mimeType = getSupportedMimeType();
-    mimeTypeRef.current = mimeType;
-    const options: MediaRecorderOptions = { audioBitsPerSecond: 32000 };
-    if (mimeType) options.mimeType = mimeType;
+    // Tear down any previous sender
+    if (scriptNodeRef.current) { try { scriptNodeRef.current.disconnect(); } catch {} scriptNodeRef.current = null; }
+    if (senderCtxRef.current) { try { senderCtxRef.current.close(); } catch {} senderCtxRef.current = null; }
 
-    const recorder = new MediaRecorder(stream, options);
-    recorder.ondataavailable = async (e) => {
-      if (e.data.size < 1) return;
+    const ctx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(PCM_BUFFER_SIZE, 1, 1);
+
+    // Silent output node (processor must connect to something to fire)
+    const silent = ctx.createGain();
+    silent.gain.value = 0;
+    silent.connect(ctx.destination);
+
+    processor.onaudioprocess = (e) => {
       if (callStatusRef.current !== 'connected' && callStatusRef.current !== 'reconnecting') return;
+      if (muteRef.current) return;
       const socket = socketService.getSocket();
       if (!socket?.connected) return;
-      const buffer = await e.data.arrayBuffer();
-      console.log('[Call] 📤 chunk', buffer.byteLength, 'bytes');
-      socket.emit('call:audio-chunk', { sessionId, chunk: buffer });
+
+      const samples = e.inputBuffer.getChannelData(0);
+      // Float32 → Int16 (halves bandwidth to ~32KB/s)
+      const int16 = new Int16Array(samples.length);
+      for (let i = 0; i < samples.length; i++)
+        int16[i] = Math.max(-32768, Math.min(32767, samples[i] * 32768));
+
+      socket.emit('call:audio-chunk', { sessionId, chunk: int16.buffer });
     };
-    recorder.start(CHUNK_INTERVAL_MS);
-    mediaRecorderRef.current = recorder;
-    console.log('[Call] 🎙️ Recording started, mimeType:', mimeType || 'browser default');
+
+    source.connect(processor);
+    processor.connect(silent);
+
+    senderCtxRef.current = ctx;
+    scriptNodeRef.current = processor;
+    console.log('[Call] 🎙️ PCM streaming started at', PCM_SAMPLE_RATE, 'Hz');
   }, []);
 
   // ── Timer ─────────────────────────────────────────────────────────────────
@@ -252,13 +266,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ── Full cleanup ──────────────────────────────────────────────────────────
   const fullCleanup = useCallback(() => {
     stopRingBeep();
-    if (mediaRecorderRef.current) { try { mediaRecorderRef.current.stop(); } catch {} mediaRecorderRef.current = null; }
+    // Sender
+    if (scriptNodeRef.current) { try { scriptNodeRef.current.disconnect(); } catch {} scriptNodeRef.current = null; }
+    if (senderCtxRef.current) { try { senderCtxRef.current.close(); } catch {} senderCtxRef.current = null; }
     localStreamRef.current?.getTracks().forEach(t => t.stop()); localStreamRef.current = null;
-    // MSE teardown
-    if (audioElRef.current) { audioElRef.current.pause(); audioElRef.current.src = ''; audioElRef.current = null; }
-    if (mediaSourceRef.current?.readyState === 'open') { try { mediaSourceRef.current.endOfStream(); } catch {} }
-    mediaSourceRef.current = null; sourceBufferRef.current = null;
-    chunkQueueRef.current = []; mseReadyRef.current = false;
+    // Receiver
+    if (receiverCtxRef.current) { try { receiverCtxRef.current.close(); } catch {} receiverCtxRef.current = null; }
+    receiverGainRef.current = null; nextPlayTimeRef.current = 0;
+    pendingChunksRef.current = [];
     // Timers
     if (callTimerRef.current) clearInterval(callTimerRef.current); callTimerRef.current = null;
     if (ringingTimeoutRef.current) clearTimeout(ringingTimeoutRef.current); ringingTimeoutRef.current = null;
@@ -280,15 +295,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   // ── toggleMute ────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
+    muteRef.current = !muteRef.current;
     const track = localStreamRef.current?.getAudioTracks()[0];
-    if (track) { track.enabled = !track.enabled; setIsMuted(!track.enabled); }
+    if (track) track.enabled = !muteRef.current;
+    setIsMuted(muteRef.current);
   }, []);
 
   // ── toggleSpeaker ─────────────────────────────────────────────────────────
   const toggleSpeaker = useCallback(() => {
     const next = !isSpeakerOn;
-    volumeRef.current = next ? 1.8 : 1.0;
-    if (audioElRef.current) audioElRef.current.volume = volumeRef.current;
+    if (receiverGainRef.current)
+      receiverGainRef.current.gain.setTargetAtTime(next ? 1.8 : 1.0,
+        receiverCtxRef.current?.currentTime ?? 0, 0.05);
     setIsSpeakerOn(next);
   }, [isSpeakerOn]);
 
@@ -297,8 +315,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (callStatusRef.current !== 'idle') return;
     callerNameRef.current = callerName;
 
-    // Init MSE NOW — user gesture required for audio.play() to work
-    initMSEPlayback(getSupportedMimeType());
+    // Pre-create & unlock receiver AudioContext from this user gesture
+    unlockReceiverCtx();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -313,10 +331,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }, CALLING_TIMEOUT_MS);
     } catch (err: any) {
       localStreamRef.current?.getTracks().forEach(t => t.stop()); localStreamRef.current = null;
-      if (err.name === 'NotAllowedError') alert('Microphone blocked. Allow access in browser settings.');
+      if (err.name === 'NotAllowedError') alert('Microphone access blocked. Please allow it in browser settings.');
       else alert('Could not start call: ' + err.message);
     }
-  }, [endCall, initMSEPlayback]);
+  }, [endCall, unlockReceiverCtx]);
 
   // ── acceptCall ────────────────────────────────────────────────────────────
   const acceptCall = useCallback(async () => {
@@ -326,8 +344,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     stopRingBeep();
     if (ringingTimeoutRef.current) { clearTimeout(ringingTimeoutRef.current); ringingTimeoutRef.current = null; }
 
-    // Init MSE NOW — user gesture required for audio.play()
-    initMSEPlayback(getSupportedMimeType());
+    // Pre-unlock receiver AudioContext from this user gesture (Accept button click)
+    unlockReceiverCtx();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -337,12 +355,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setCallStatus('connected'); callStatusRef.current = 'connected';
       startCallTimer();
       startAudioStream(stream, sessionId);
-      console.log('[Call] ✅ Accepted — audio streaming started');
+      console.log('[Call] ✅ Accepted — PCM stream started');
     } catch (err: any) {
       alert('Could not answer call: ' + err.message);
       setCallStatus('idle'); callStatusRef.current = 'idle';
     }
-  }, [stopRingBeep, initMSEPlayback, startCallTimer, startAudioStream]);
+  }, [stopRingBeep, unlockReceiverCtx, startCallTimer, startAudioStream]);
 
   // ── declineCall ───────────────────────────────────────────────────────────
   const declineCall = useCallback(() => {
@@ -355,6 +373,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCallPartnerName(null); setCallSessionId(null); callSessionIdRef.current = null;
   }, [stopRingBeep]);
 
+  // ── Global click → unlock AudioContext (needed for rejoin after refresh) ──
+  useEffect(() => {
+    const unlock = () => {
+      if (receiverCtxRef.current?.state === 'suspended') {
+        receiverCtxRef.current.resume().then(() => {
+          const chunks = pendingChunksRef.current.splice(0);
+          const ctx = receiverCtxRef.current!;
+          for (const c of chunks) scheduleChunk(c, ctx);
+        }).catch(() => {});
+      }
+    };
+    document.addEventListener('click',      unlock, { passive: true });
+    document.addEventListener('touchstart', unlock, { passive: true });
+    return () => {
+      document.removeEventListener('click',      unlock);
+      document.removeEventListener('touchstart', unlock);
+    };
+  }, []); // eslint-disable-line
+
   // ── Socket listeners ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -363,7 +400,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const socket = socketService.getSocket();
       if (!socket) return;
 
-      // Incoming call
       socket.on('call:offer', (data: { sessionId: string; callerName: string; isReconnect?: boolean }) => {
         if (data.isReconnect) { setCallStatus('reconnecting'); callStatusRef.current = 'reconnecting'; return; }
         if (callStatusRef.current !== 'idle') return;
@@ -376,60 +412,58 @@ export function CallProvider({ children }: { children: ReactNode }) {
         ringingTimeoutRef.current = setTimeout(() => {}, RINGING_TIMEOUT_MS);
       });
 
-      // Caller: partner accepted
       socket.on('call:answer', (_data: { sessionId: string }) => {
         if (callStatusRef.current !== 'calling' && callStatusRef.current !== 'reconnecting') return;
         if (callingTimeoutRef.current) { clearTimeout(callingTimeoutRef.current); callingTimeoutRef.current = null; }
         setCallStatus('connected'); callStatusRef.current = 'connected';
         startCallTimer();
         if (localStreamRef.current) startAudioStream(localStreamRef.current, callSessionIdRef.current!);
-        console.log('[Call] ✅ Connected via WebSocket relay');
+        console.log('[Call] ✅ Connected — PCM relay active');
       });
 
-      // Receive audio chunk from partner → feed into MSE
       socket.on('call:audio-chunk', (data: { chunk: unknown }) => {
         if (callStatusRef.current !== 'connected' && callStatusRef.current !== 'reconnecting') return;
-        console.log('[Call] 📥 chunk received, MSE ready:', mseReadyRef.current);
         playAudioChunk(data.chunk);
       });
 
-      // Partner disconnected (grace period)
-      socket.on('call:partner-reconnecting', (_data: { sessionId: string; startTimestamp: number }) => {
+      socket.on('call:partner-reconnecting', (_data: unknown) => {
         if (callStatusRef.current === 'connected' || callStatusRef.current === 'reconnecting') {
           setCallStatus('reconnecting'); callStatusRef.current = 'reconnecting';
-          if (mediaRecorderRef.current?.state === 'recording') { try { mediaRecorderRef.current.pause(); } catch {} }
+          // Pause PCM output while partner reconnects
+          if (scriptNodeRef.current && senderCtxRef.current) {
+            // Just let onaudioprocess drop packets via callStatusRef check
+          }
         }
       });
 
-      // Partner reconnected
       socket.on('call:partner-reconnected', (data: { sessionId: string; startTimestamp: number }) => {
         if (callStatusRef.current !== 'reconnecting') return;
         setCallStatus('connected'); callStatusRef.current = 'connected';
-        if (mediaRecorderRef.current?.state === 'paused') { try { mediaRecorderRef.current.resume(); } catch {} }
         startCallTimer(data.startTimestamp);
+        console.log('[Call] ✅ Partner reconnected');
       });
 
-      // Our own rejoin after page refresh
       socket.on('call:rejoin-success', async (data: { sessionId: string; startTimestamp: number }) => {
-        console.log('[Call] Rejoin confirmed');
+        console.log('[Call] Rejoin confirmed — restarting PCM stream');
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
           localStreamRef.current = stream;
           callSessionIdRef.current = data.sessionId;
+          // Pre-create receiver ctx — will unlock on first user click if still suspended
+          getReceiverCtx();
           setCallStatus('connected'); callStatusRef.current = 'connected';
           startCallTimer(data.startTimestamp);
-          initMSEPlayback(getSupportedMimeType());
           startAudioStream(stream, data.sessionId);
           socket.emit('call:offer', { sessionId: data.sessionId, callerName: callerNameRef.current, isReconnect: true });
         } catch (err) {
-          console.error('[Call] Failed to restart audio after rejoin:', err);
+          console.error('[Call] Rejoin failed:', err);
           endCall(false);
         }
       });
 
-      socket.on('call:rejoin-failed',     () => endCall(false));
-      socket.on('call:end',               () => endCall(false));
-      socket.on('call:ended-by-server',   () => endCall(false));
+      socket.on('call:rejoin-failed',   () => endCall(false));
+      socket.on('call:end',             () => endCall(false));
+      socket.on('call:ended-by-server', () => endCall(false));
     };
 
     const checkRejoin = () => {
@@ -461,7 +495,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       s?.off('call:end'); s?.off('call:partner-reconnecting'); s?.off('call:partner-reconnected');
       s?.off('call:rejoin-success'); s?.off('call:rejoin-failed'); s?.off('call:ended-by-server');
     };
-  }, [isAuthenticated, endCall, startCallTimer, playAudioChunk, startAudioStream, initMSEPlayback, startRingBeep]);
+  }, [isAuthenticated, endCall, startCallTimer, playAudioChunk, startAudioStream,
+      startRingBeep, getReceiverCtx]);
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
