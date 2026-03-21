@@ -260,6 +260,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const envOwnerRef = useRef<string>('');
     // File import
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const folderInputRef = useRef<HTMLInputElement>(null);
     const [importWarnings, setImportWarnings] = useState<string[]>([]);
     const [showImportWarning, setShowImportWarning] = useState(false);
     const [importedCount, setImportedCount] = useState(0);
@@ -1724,10 +1725,13 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         setActiveTermTab('shell');
 
         if (runnableAsHtml.includes(ext)) {
-            // For HTML files — serve them with a simple static server
-            const cmd = `npx -y serve . -l 3000 --single\n`;
+            // For HTML files — start a static server and show preview
+            setIsRunning(true);
+            // Determine the directory containing the HTML file
+            const dir = filePath.includes('/') ? filePath.split('/').slice(0, -1).join('/') : '.';
+            const cmd = `npx -y serve ${dir} -l 3000 --no-clipboard\n`;
             shellWriterRef.current.write(cmd);
-            addToast(`🌐 Serving project — open preview to see ${filePath}`, 'info');
+            addToast(`🌐 Starting server for ${filePath}... Preview will appear shortly`, 'info');
         } else {
             // For JS/TS files — run with node (tsx for TS)
             const isTs = ext === 'ts' || ext === 'mts';
@@ -1990,14 +1994,27 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         className="p-1.5 text-gray-400 hover:text-cyan-400 hover:bg-cyan-400/10 rounded transition-colors" title="Import Files">
                         <Upload className="w-3.5 h-3.5" />
                     </button>
+                    <button onClick={() => folderInputRef.current?.click()}
+                        className="p-1.5 text-gray-400 hover:text-cyan-400 hover:bg-cyan-400/10 rounded transition-colors" title="Import Folder">
+                        <FolderOpen className="w-3.5 h-3.5" />
+                    </button>
                     <input
                         ref={fileInputRef}
                         type="file"
                         multiple
                         className="hidden"
                         onChange={handleImportFiles}
-                        // Accept common web dev files
                         accept=".js,.jsx,.ts,.tsx,.css,.scss,.less,.html,.htm,.json,.md,.yml,.yaml,.toml,.env,.sh,.txt,.svg,.xml,.graphql,.gql,.vue,.svelte,.astro,.mjs,.cjs,.mts,.cts,.py,.java,.go,.rs,.c,.cpp,.h,.rb,.php,.swift,.kt,.cs,.dart,.lua"
+                    />
+                    <input
+                        ref={folderInputRef}
+                        type="file"
+                        // @ts-ignore webkitdirectory is a non-standard but widely-supported attribute
+                        webkitdirectory=""
+                        directory=""
+                        multiple
+                        className="hidden"
+                        onChange={handleImportFiles}
                     />
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
                     <button
