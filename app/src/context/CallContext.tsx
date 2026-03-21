@@ -49,10 +49,12 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
-  { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
+  // Free relay TURN servers (metered.ca open relay project)
+  { urls: 'turn:standard.relay.metered.ca:80',               username: 'e19c76b62dfa42c8c0adb455', credential: '2yl3txCfWQW+MCUD' },
+  { urls: 'turn:standard.relay.metered.ca:80?transport=tcp',  username: 'e19c76b62dfa42c8c0adb455', credential: '2yl3txCfWQW+MCUD' },
+  { urls: 'turn:standard.relay.metered.ca:443',              username: 'e19c76b62dfa42c8c0adb455', credential: '2yl3txCfWQW+MCUD' },
+  { urls: 'turn:standard.relay.metered.ca:443?transport=tcp', username: 'e19c76b62dfa42c8c0adb455', credential: '2yl3txCfWQW+MCUD' },
+  { urls: 'turns:standard.relay.metered.ca:443?transport=tcp', username: 'e19c76b62dfa42c8c0adb455', credential: '2yl3txCfWQW+MCUD' },
 ];
 
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -128,10 +130,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!el) {
       el = document.createElement('audio');
       el.id = 'pairon-call-audio';
-      el.setAttribute('autoplay', '');
+      el.autoplay = true;
       el.setAttribute('playsinline', '');
-      // Mobile: ensure audio plays through earpiece first, loudspeaker on toggle
-      (el as any).mozAudioChannelType = 'telephony';
+      el.volume = 1.0;
+      el.muted = false;
       document.body.appendChild(el);
     }
     return el;
@@ -242,20 +244,36 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   // ── setupRemoteAudioPlayback — reliably play remote stream ────────────────
   const setupRemoteAudioPlayback = useCallback((stream: MediaStream) => {
+    console.log('[Call] Setting up remote audio playback. Tracks:', stream.getAudioTracks().length);
+    stream.getAudioTracks().forEach(t => {
+      console.log('[Call] Remote audio track:', t.id, 'enabled:', t.enabled, 'muted:', t.muted, 'readyState:', t.readyState);
+      // Ensure the track is enabled
+      t.enabled = true;
+    });
+
     const audio = getRemoteAudio();
     audio.srcObject = stream;
-    audio.play().catch(() => {
-      let attempts = 0;
-      const retryTimer = setInterval(() => {
-        attempts++;
-        audio.play()
-          .then(() => clearInterval(retryTimer))
-          .catch(() => { if (attempts > 30) clearInterval(retryTimer); });
-      }, 500);
-      const resume = () => { audio.play().catch(() => {}); clearInterval(retryTimer); };
-      document.addEventListener('click',      resume, { once: true });
-      document.addEventListener('touchstart', resume, { once: true });
-    });
+    audio.volume = 1.0;
+    audio.muted = false;
+
+    const tryPlay = () => {
+      audio.play()
+        .then(() => console.log('[Call] ✅ Remote audio playing'))
+        .catch((err) => {
+          console.warn('[Call] ⚠️ Audio play failed:', err.message, '— will retry');
+          let attempts = 0;
+          const retryTimer = setInterval(() => {
+            attempts++;
+            audio.play()
+              .then(() => { console.log('[Call] ✅ Audio playing after retry', attempts); clearInterval(retryTimer); })
+              .catch(() => { if (attempts > 30) clearInterval(retryTimer); });
+          }, 500);
+          const resume = () => { audio.play().catch(() => {}); clearInterval(retryTimer); };
+          document.addEventListener('click',      resume, { once: true });
+          document.addEventListener('touchstart', resume, { once: true });
+        });
+    };
+    tryPlay();
   }, []);
 
   // ── startCallTimer ────────────────────────────────────────────────────────
@@ -274,14 +292,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
     });
 
     pc.onicecandidate = (e) => {
-      if (e.candidate && callSessionIdRef.current)
+      if (e.candidate && callSessionIdRef.current) {
+        console.log('[Call] Sending ICE candidate:', e.candidate.type, e.candidate.protocol);
         socketService.getSocket()?.emit('call:ice-candidate', {
           sessionId: callSessionIdRef.current,
           candidate: e.candidate,
         });
+      }
     };
 
     pc.ontrack = (e) => {
+      console.log('[Call] 🎵 ontrack fired! kind:', e.track.kind, 'streams:', e.streams?.length);
       if (e.streams && e.streams[0]) {
         setupRemoteAudioPlayback(e.streams[0]);
       } else {
