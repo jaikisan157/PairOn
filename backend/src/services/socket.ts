@@ -740,9 +740,15 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
-    // ── call:ice-candidate ──
+    // ── call:ice-candidate (kept for legacy compatibility) ──
     socket.on('call:ice-candidate', (data: { sessionId: string; candidate: any }) =>
       relayCallEvent('call:ice-candidate', data));
+
+    // ── call:audio-chunk — relay binary audio from one peer to the other ──
+    socket.on('call:audio-chunk', (data: { sessionId: string; chunk: ArrayBuffer }) => {
+      // Forward raw audio chunk directly to session partner
+      socket.to(`session:${data.sessionId}`).emit('call:audio-chunk', { chunk: data.chunk });
+    });
 
     // ── call:end — user explicitly ended the call ──
     socket.on('call:end', (data: { sessionId: string }) => {
