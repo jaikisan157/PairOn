@@ -194,8 +194,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const fullCleanup = useCallback(() => {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
-    pcRef.current?.close();
-    pcRef.current = null;
+    // Detach event handlers before closing to prevent 'closed' from re-triggering cleanup
+    if (pcRef.current) {
+      pcRef.current.oniceconnectionstatechange = null;
+      pcRef.current.onicecandidate = null;
+      pcRef.current.ontrack = null;
+      pcRef.current.close();
+      pcRef.current = null;
+    }
 
     const audio = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
     if (audio) { audio.srcObject = null; audio.remove(); }
@@ -523,8 +529,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
               setCallPartnerName(data.callerName);
               partnerNameRef.current = data.callerName;
 
-              // Clean up old PC if it exists
-              if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+              // Unlock audio for mobile browsers
+              unlockAudio();
+
+              // Clean up old PC safely (detach handlers to prevent 'closed' from calling endCall)
+              if (pcRef.current) {
+                pcRef.current.oniceconnectionstatechange = null;
+                pcRef.current.onicecandidate = null;
+                pcRef.current.ontrack = null;
+                pcRef.current.close();
+                pcRef.current = null;
+              }
 
               // Get fresh audio stream
               const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -595,10 +610,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
               callStatusRef.current = 'connected';
               startCallTimer();
             } else if (callStatusRef.current === 'reconnecting') {
-              // Reconnect answer received — ICE will handle the rest
+              // Reconnect answer received
               reconnectAttemptsRef.current = 0;
               setCallStatus('connected');
               callStatusRef.current = 'connected';
+              // Resume the timer if it's not running
+              if (!callTimerRef.current && callStartRef.current) {
+                callTimerRef.current = setInterval(
+                  () => setCallDuration(Math.floor((Date.now() - callStartRef.current) / 1000)), 1000);
+              }
             }
           }
         } catch (err) { console.error('[Call] Error handling answer:', err); }
@@ -674,11 +694,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
             setCallDuration(Math.floor((Date.now() - data.startTimestamp) / 1000));
           }, 1000);
 
+          // Unlock audio for mobile browsers
+          unlockAudio();
+
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
           localStreamRef.current = stream;
 
-          // Clean up old PC
-          if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+          // Clean up old PC safely (detach handlers to prevent 'closed' from calling endCall)
+          if (pcRef.current) {
+            pcRef.current.oniceconnectionstatechange = null;
+            pcRef.current.onicecandidate = null;
+            pcRef.current.ontrack = null;
+            pcRef.current.close();
+            pcRef.current = null;
+          }
           const pc = createPC();
           stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
