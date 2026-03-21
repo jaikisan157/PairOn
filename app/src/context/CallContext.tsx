@@ -622,11 +622,85 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setCallPartnerName(null);
       });
 
-      // Handle socket reconnect — re-join rooms so call:* events reach us
-      socket.on('reconnect', () => {
-        console.log('[Call] Socket reconnected');
-        // If we were in a call, the WebRTC peer connection might still be alive
-        // The ICE connection state handler will manage reconnection
+      // ── Server-managed call reconnection events ──
+      // Partner disconnected (refreshed) — server tells us to show reconnecting
+      socket.on('call:partner-reconnecting', (data: { sessionId: string; startTimestamp: number }) => {
+        console.log('[Call] Partner is reconnecting (server-managed)...');
+        if (callSessionIdRef.current === data.sessionId || callStatusRef.current === 'connected') {
+          setCallStatus('reconnecting');
+          callStatusRef.current = 'reconnecting';
+          // Keep the call bar visible, keep the timer running from the original start
+          callStartRef.current = data.startTimestamp;
+        }
+      });
+
+      // Partner reconnected — server tells us they're back, create fresh WebRTC
+      socket.on('call:partner-reconnected', async (data: { sessionId: string; startTimestamp: number }) => {
+        console.log('[Call] Partner reconnected — waiting for their offer...');
+        // The rejoining user will send a fresh call:offer with isReconnect=true
+        // We'll handle it in the call:offer handler
+        callStartRef.current = data.startTimestamp;
+        setCallStatus('reconnecting');
+        callStatusRef.current = 'reconnecting';
+      });
+
+      // Grace period expired — partner didn't come back in 30s
+      socket.on('call:ended-by-server', (_data: { sessionId: string }) => {
+        console.log('[Call] Server ended call — partner did not reconnect in time');
+        fullCleanup();
+        sessionStorage.removeItem('pairon_call');
+        setCallStatus('idle');
+        callStatusRef.current = 'idle';
+        setCallDuration(0);
+        setIsMuted(false);
+        setIsSpeakerOn(false);
+        setCallSessionId(null);
+        setCallPartnerName(null);
+      });
+
+      // Server confirmed our rejoin — we're the initiator, create WebRTC offer
+      socket.on('call:rejoin-success', async (data: { sessionId: string; startTimestamp: number }) => {
+        console.log('[Call] Rejoin confirmed by server — creating WebRTC offer...');
+        try {
+          callStartRef.current = data.startTimestamp;
+          // Restart the timer from the saved start
+          if (callTimerRef.current) clearInterval(callTimerRef.current);
+          callTimerRef.current = setInterval(() => {
+            setCallDuration(Math.floor((Date.now() - data.startTimestamp) / 1000));
+          }, 1000);
+
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          localStreamRef.current = stream;
+
+          // Clean up old PC
+          if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+          const pc = createPC();
+          stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit('call:offer', {
+            sessionId: data.sessionId,
+            offer,
+            callerName: callPartnerName || 'Partner',
+            isReconnect: true,
+          });
+        } catch (err) {
+          console.error('[Call] Error creating reconnect offer:', err);
+          endCall(false);
+        }
+      });
+
+      // Rejoin failed — no active call on server
+      socket.on('call:rejoin-failed', () => {
+        console.log('[Call] Rejoin failed — no active call on server');
+        fullCleanup();
+        sessionStorage.removeItem('pairon_call');
+        setCallStatus('idle');
+        callStatusRef.current = 'idle';
+        setCallDuration(0);
+        setCallSessionId(null);
+        setCallPartnerName(null);
       });
 
       return true;
@@ -646,13 +720,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
         s.removeAllListeners('call:answer');
         s.removeAllListeners('call:ice-candidate');
         s.removeAllListeners('call:end');
+        s.removeAllListeners('call:partner-reconnecting');
+        s.removeAllListeners('call:partner-reconnected');
+        s.removeAllListeners('call:ended-by-server');
+        s.removeAllListeners('call:rejoin-success');
+        s.removeAllListeners('call:rejoin-failed');
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // ── Reconnect after page refresh ──────────────────────────────────────────
-  // If we restored 'reconnecting' state from sessionStorage, auto-start a new call
+  // ── Reconnect after page refresh (server-managed) ──────────────────────
+  // If we restored 'reconnecting' state from sessionStorage, ask the server to rejoin
   useEffect(() => {
     if (callStatusRef.current !== 'reconnecting' || !callSessionIdRef.current) return;
 
@@ -661,19 +740,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const saved = savedStr ? JSON.parse(savedStr) : null;
     if (!saved) { setCallStatus('idle'); return; }
 
-    // Restore the call timer from when it originally started
+    // Restore the call timer immediately so the UI shows continued duration
     if (saved.startTimestamp) {
       callStartRef.current = saved.startTimestamp;
       setCallDuration(Math.floor((Date.now() - saved.startTimestamp) / 1000));
-      // Start the timer interval immediately
       if (callTimerRef.current) clearInterval(callTimerRef.current);
       callTimerRef.current = setInterval(() => {
         setCallDuration(Math.floor((Date.now() - saved.startTimestamp) / 1000));
       }, 1000);
     }
 
-    const tryReconnect = async () => {
-      // Wait for socket
+    const doRejoin = async () => {
+      // Wait for socket to connect
       let socket = socketService.getSocket();
       let attempts = 0;
       while (!socket && attempts < 20 && !cancelled) {
@@ -681,40 +759,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
         socket = socketService.getSocket();
         attempts++;
       }
-      if (!socket || cancelled) { setCallStatus('idle'); sessionStorage.removeItem('pairon_call'); return; }
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
-        localStreamRef.current = stream;
-        const pc = createPC();
-        stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        callerNameRef.current = saved.partnerName || 'Reconnecting';
-        socket.emit('call:offer', {
-          sessionId: saved.sessionId,
-          offer,
-          callerName: saved.partnerName || 'Partner',
-          isReconnect: true, // Partner won't see a new ringing notification
-        });
-
-        // If no answer after 10s, give up
-        setTimeout(() => {
-          if (callStatusRef.current === 'reconnecting') {
-            console.log('[Call] Reconnect timeout — ending');
-            endCall(false);
-          }
-        }, 10_000);
-      } catch (err) {
-        console.error('[Call] Reconnect failed:', err);
-        if (!cancelled) { setCallStatus('idle'); sessionStorage.removeItem('pairon_call'); }
+      if (!socket || cancelled) {
+        setCallStatus('idle'); sessionStorage.removeItem('pairon_call');
+        return;
       }
+
+      // Simply tell the server "I'm back, reconnect me"
+      // The server will:
+      // 1. Validate the call still exists
+      // 2. Notify the partner via call:partner-reconnected
+      // 3. Tell us to create a WebRTC offer via call:rejoin-success
+      // 4. If no call exists, tell us via call:rejoin-failed
+      console.log('[Call] Emitting call:rejoin to server for session:', saved.sessionId);
+      socket.emit('call:rejoin', { sessionId: saved.sessionId });
     };
 
-    tryReconnect();
+    doRejoin();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
