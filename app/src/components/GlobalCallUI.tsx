@@ -201,7 +201,7 @@ export function GlobalCallUI() {
 
       {/* ── Active call — draggable floating pill ───────────────────────── */}
       <AnimatePresence>
-        {callStatus === 'connected' && (
+        {(callStatus === 'connected' || callStatus === 'reconnecting') && (
           <motion.div
             key="active-call"
             initial={{ opacity: 0, scale: 0.7, y: 20 }}
@@ -235,8 +235,10 @@ export function GlobalCallUI() {
             </div>
 
             {/* Live indicator */}
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', flexShrink: 0,
-              boxShadow: '0 0 6px #10b981', animation: 'callPulse 2s ease infinite' }} />
+            <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              background: callStatus === 'reconnecting' ? '#f59e0b' : '#10b981',
+              boxShadow: callStatus === 'reconnecting' ? '0 0 6px #f59e0b' : '0 0 6px #10b981',
+              animation: 'callPulse 2s ease infinite' }} />
 
             {/* Duration */}
             <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
@@ -244,10 +246,10 @@ export function GlobalCallUI() {
               {fmt(callDuration)}
             </span>
 
-            {/* Partner name */}
-            <span style={{ fontSize: 12, color: '#9ca3af', maxWidth: 100,
+            {/* Partner name or reconnecting label */}
+            <span style={{ fontSize: 12, color: callStatus === 'reconnecting' ? '#f59e0b' : '#9ca3af', maxWidth: 120,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {callPartnerName}
+              {callStatus === 'reconnecting' ? 'Reconnecting…' : callPartnerName}
             </span>
 
             <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.12)', flexShrink: 0 }} />

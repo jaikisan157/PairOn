@@ -8,7 +8,7 @@ import {
     FolderOpen, Folder, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
     Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer, Info,
-    MoreVertical, Search, Package, Settings2, RotateCcw,
+    MoreVertical, Search, Package, Settings2, RotateCcw, Upload,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
@@ -258,6 +258,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Track who owns .env (socket.id of the person who last saved it)
     const envOwnerRef = useRef<string>('');
+    // File import
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [importWarnings, setImportWarnings] = useState<string[]>([]);
+    const [showImportWarning, setShowImportWarning] = useState(false);
+    const [importedCount, setImportedCount] = useState(0);
 
     // Inline comments
     const [comments, setComments] = useState<Record<string, { id: string; line: number; text: string; userId: string; userName: string; timestamp: number }[]>>({});
@@ -581,13 +586,50 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             // Update files state (no autosave — we are the receiver, not sender)
             setFiles(prev => ({ ...prev, [data.path]: data.content }));
             filesRef.current = { ...filesRef.current, [data.path]: data.content };
-            // Update Monaco model using executeEdits to PRESERVE cursor position
-            // (setValue() resets cursor to 0 causing the "retyping" glitch)
+            // Update Monaco model using LINE-LEVEL DIFF to preserve cursor position.
+            // (Full-range pushEditOperations moves cursor to end of replacement)
             const model = modelsRef.current.get(data.path);
             if (model && !model.isDisposed() && model.getValue() !== data.content) {
                 suppressSyncRef.current = true;
-                const fullRange = model.getFullModelRange();
-                model.pushEditOperations([], [{ range: fullRange, text: data.content }], () => null);
+                const oldLines = model.getLinesContent();
+                const newLines = data.content.split('\n');
+                const edits: MonacoTypes.editor.IIdentifiedSingleEditOperation[] = [];
+                const monacoInst = monacoRef.current;
+                if (monacoInst) {
+                    // Find first and last differing lines
+                    let firstDiff = 0;
+                    while (firstDiff < oldLines.length && firstDiff < newLines.length && oldLines[firstDiff] === newLines[firstDiff]) {
+                        firstDiff++;
+                    }
+                    let oldEnd = oldLines.length - 1;
+                    let newEnd = newLines.length - 1;
+                    while (oldEnd > firstDiff && newEnd > firstDiff && oldLines[oldEnd] === newLines[newEnd]) {
+                        oldEnd--;
+                        newEnd--;
+                    }
+                    // Only apply edits if there are actual differences
+                    if (firstDiff <= oldEnd || firstDiff <= newEnd || oldLines.length !== newLines.length) {
+                        const startLine = firstDiff + 1; // Monaco is 1-indexed
+                        const endLine = Math.min(oldEnd + 1, oldLines.length);
+                        const endCol = endLine <= oldLines.length ? (oldLines[endLine - 1]?.length ?? 0) + 1 : 1;
+                        const replacementText = newLines.slice(firstDiff, newEnd + 1).join('\n');
+                        if (endLine >= startLine) {
+                            edits.push({
+                                range: new monacoInst.Range(startLine, 1, endLine, endCol),
+                                text: replacementText,
+                                forceMoveMarkers: false,
+                            });
+                        } else {
+                            // All new lines are insertions (old file was shorter or lines removed from middle)
+                            edits.push({
+                                range: new monacoInst.Range(startLine, 1, startLine, 1),
+                                text: replacementText + '\n',
+                                forceMoveMarkers: false,
+                            });
+                        }
+                        model.pushEditOperations([], edits, () => null);
+                    }
+                }
                 suppressSyncRef.current = false;
             }
             if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(data.path, data.content).catch(() => { });
@@ -1311,6 +1353,118 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         addToast('Project downloaded as ZIP (⚠️ .env excluded for security)', 'success');
     }, [files, projectTitle, addToast]);
 
+    // ===== Import Files =====
+    const handleImportFiles = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const input = e.target;
+        const fileList = input.files;
+        if (!fileList || fileList.length === 0) return;
+
+        const MAX_FILES = 50;
+        const MAX_FILE_SIZE = 512 * 1024; // 500KB per file
+        const UNSUPPORTED_EXTS = new Set(['py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'cs', 'rb', 'php', 'swift', 'kt', 'scala', 'ex', 'exs', 'r', 'dart', 'lua', 'pl', 'class', 'o', 'exe', 'dll', 'so', 'dylib']);
+        const BINARY_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'mp3', 'mp4', 'wav', 'ogg', 'flac', 'avi', 'mov', 'woff', 'woff2', 'ttf', 'otf', 'eot', 'zip', 'gz', 'tar', 'rar', '7z', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']);
+
+        const warnings: string[] = [];
+        const importable: { path: string; content: string }[] = [];
+        const totalFiles = Object.keys(filesRef.current).length;
+
+        // Check total file limit
+        if (totalFiles + fileList.length > MAX_FILES) {
+            warnings.push(`⚠️ Total file limit is ${MAX_FILES}. You have ${totalFiles} files and selected ${fileList.length}. Only importing the first ${MAX_FILES - totalFiles}.`);
+        }
+
+        const filesToProcess = Array.from(fileList).slice(0, Math.max(0, MAX_FILES - totalFiles));
+
+        for (const file of filesToProcess) {
+            const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
+            // Skip binary files
+            if (BINARY_EXTS.has(ext)) {
+                warnings.push(`🚫 ${file.name} — Binary files are not supported in the IDE`);
+                continue;
+            }
+
+            // Warn about unsupported language files but still import them (read-only reference)
+            if (UNSUPPORTED_EXTS.has(ext)) {
+                warnings.push(`⚠️ ${file.name} — This file type (.${ext}) is not executable in this IDE (only JS/TS/Node.js supported). Imported as read-only reference.`);
+            }
+
+            // Check file size
+            if (file.size > MAX_FILE_SIZE) {
+                warnings.push(`⚠️ ${file.name} — File too large (${(file.size / 1024).toFixed(0)}KB > 500KB limit). Skipped.`);
+                continue;
+            }
+
+            // Read file as text
+            try {
+                const content = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result as string);
+                    reader.onerror = () => reject(new Error('Failed to read file'));
+                    reader.readAsText(file);
+                });
+
+                // Use relative path (strip any leading slashes)
+                let path = file.webkitRelativePath || file.name;
+                path = path.replace(/^\/+/, '');
+
+                importable.push({ path, content });
+            } catch {
+                warnings.push(`❌ ${file.name} — Could not read file`);
+            }
+        }
+
+        // Import the files
+        if (importable.length > 0) {
+            const socket = socketService.getSocket();
+            const newFiles: Record<string, string> = {};
+
+            for (const { path, content } of importable) {
+                newFiles[path] = content;
+
+                // Sync to WebContainer
+                if (webcontainerRef.current) {
+                    const dir = path.split('/').slice(0, -1).join('/');
+                    if (dir) await webcontainerRef.current.fs.mkdir(dir, { recursive: true }).catch(() => {});
+                    await webcontainerRef.current.fs.writeFile(path, content).catch(() => {});
+                }
+
+                // Sync to partner
+                socket?.emit('code:file-create', { sessionId, path, content, senderId: socket.id });
+
+                // Create Monaco model
+                getOrCreateModel(path, content);
+
+                // Track folder
+                const segs = path.split('/');
+                for (let i = 1; i < segs.length; i++) {
+                    const dir = segs.slice(0, i).join('/');
+                    setFolders(prev => { const next = new Set(prev); next.add(dir); return next; });
+                    setExpandedDirs(prev => { const next = new Set(prev); next.add(dir); return next; });
+                }
+            }
+
+            setFiles(prev => {
+                const next = { ...prev, ...newFiles };
+                autosave(next);
+                return next;
+            });
+
+            setImportedCount(importable.length);
+        }
+
+        // Show warnings if any
+        if (warnings.length > 0) {
+            setImportWarnings(warnings);
+            setShowImportWarning(true);
+        } else if (importable.length > 0) {
+            addToast(`✅ Imported ${importable.length} file${importable.length > 1 ? 's' : ''} successfully`, 'success');
+        }
+
+        // Reset file input so the same files can be selected again
+        input.value = '';
+    }, [sessionId, autosave, addToast, getOrCreateModel]);
+
     // Push to GitHub
     const pushToGitHub = useCallback(async () => {
         if (!githubRepoName.trim()) {
@@ -1818,6 +1972,20 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     </button>
                     {/* Separator */}
                     <div className="w-px h-4 bg-gray-700 mx-0.5" />
+                    {/* Import Files */}
+                    <button onClick={() => fileInputRef.current?.click()}
+                        className="p-1.5 text-gray-400 hover:text-cyan-400 hover:bg-cyan-400/10 rounded transition-colors" title="Import Files">
+                        <Upload className="w-3.5 h-3.5" />
+                    </button>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={handleImportFiles}
+                        // Accept common web dev files
+                        accept=".js,.jsx,.ts,.tsx,.css,.scss,.less,.html,.htm,.json,.md,.yml,.yaml,.toml,.env,.sh,.txt,.svg,.xml,.graphql,.gql,.vue,.svelte,.astro,.mjs,.cjs,.mts,.cts,.py,.java,.go,.rs,.c,.cpp,.h,.rb,.php,.swift,.kt,.cs,.dart,.lua"
+                    />
                     <button onClick={downloadZip} className="p-1.5 text-gray-400 hover:text-white rounded" title="Download ZIP"><Download className="w-3.5 h-3.5" /></button>
                     <button
                         onClick={async () => {
@@ -2591,6 +2759,36 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 </button>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ===== Import Warning Modal ===== */}
+            {showImportWarning && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-[#161b22] border border-gray-700 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-5">
+                        <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                            <Upload className="w-4 h-4 text-cyan-400" />
+                            Import Results
+                        </h3>
+                        {importedCount > 0 && (
+                            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-2.5 mb-3">
+                                <p className="text-xs text-green-400">✅ Successfully imported {importedCount} file{importedCount > 1 ? 's' : ''}</p>
+                            </div>
+                        )}
+                        <div className="max-h-60 overflow-y-auto space-y-1.5 mb-4">
+                            {importWarnings.map((w, i) => (
+                                <div key={i} className="text-[11px] text-gray-300 bg-[#0d1117] rounded-lg px-3 py-2 border border-gray-800">
+                                    {w}
+                                </div>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => { setShowImportWarning(false); setImportWarnings([]); setImportedCount(0); }}
+                            className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg transition-colors"
+                        >
+                            OK
+                        </button>
                     </div>
                 </div>
             )}
