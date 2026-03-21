@@ -359,31 +359,13 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
         }
     });
 
-    // ===== Code file sync (Collaborative IDE) =====
-    socket.on('code:file-change', (data: { sessionId: string; path: string; content: string; senderId: string }) => {
-        // Broadcast to partner in the same challenge room
-        socket.to(`challenge:${data.sessionId}`).emit('code:file-change', data);
-    });
-
-    socket.on('code:file-create', (data: { sessionId: string; path: string; content: string; senderId: string }) => {
-        socket.to(`challenge:${data.sessionId}`).emit('code:file-create', data);
-    });
-
-    socket.on('code:file-delete', (data: { sessionId: string; path: string; senderId: string }) => {
-        socket.to(`challenge:${data.sessionId}`).emit('code:file-delete', data);
-    });
-
-    socket.on('code:file-lock', (data: { sessionId: string; path: string; userId: string; userName: string }) => {
-        socket.to(`challenge:${data.sessionId}`).emit('code:file-lock', data);
-    });
-
-    socket.on('code:file-unlock', (data: { sessionId: string; path: string; userId: string }) => {
-        socket.to(`challenge:${data.sessionId}`).emit('code:file-unlock', data);
-    });
-
-    socket.on('code:file-rename', (data: { sessionId: string; oldPath: string; newPath: string; senderId: string }) => {
-        socket.to(`challenge:${data.sessionId}`).emit('code:file-rename', data);
-    });
+    // ===== Code file sync =====
+    // NOTE: These events are intentionally NOT relayed here.
+    // socket.ts already relays code:file-change, code:file-create, code:file-delete,
+    // code:file-lock, code:file-unlock, code:file-rename, and code:comment
+    // via the `session:${id}` room. Since users join BOTH `session:` and `challenge:` rooms,
+    // relaying here too would cause DOUBLE DELIVERY — the root cause of
+    // the "letters disappearing" bug in the collaborative editor.
 
     socket.on('code:comment', (data: { sessionId: string; filePath: string; comment: any; senderId: string }) => {
         socket.to(`challenge:${data.sessionId}`).emit('code:comment', data);

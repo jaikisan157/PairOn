@@ -63,13 +63,23 @@ const CALLING_TIMEOUT_MS = 45_000; // 45 seconds before auto-cancel outgoing
 export function CallProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
 
-  // ── State ─────────────────────────────────────────────────────────────────
-  const [callStatus,      setCallStatus]      = useState<CallStatus>('idle');
-  const [callSessionId,   setCallSessionId]   = useState<string | null>(null);
-  const [callPartnerName, setCallPartnerName] = useState<string | null>(null);
+  // ── State — restore from sessionStorage if page was refreshed during a call ──
+  const [callStatus,      setCallStatus]      = useState<CallStatus>(() => {
+    const saved = sessionStorage.getItem('pairon_call');
+    if (saved) { try { const s = JSON.parse(saved); if (s.status === 'connected') return 'reconnecting'; } catch {} }
+    return 'idle';
+  });
+  const [callSessionId,   setCallSessionId]   = useState<string | null>(() => {
+    try { return JSON.parse(sessionStorage.getItem('pairon_call') || 'null')?.sessionId ?? null; } catch { return null; }
+  });
+  const [callPartnerName, setCallPartnerName] = useState<string | null>(() => {
+    try { return JSON.parse(sessionStorage.getItem('pairon_call') || 'null')?.partnerName ?? null; } catch { return null; }
+  });
   const [isMuted,         setIsMuted]         = useState(false);
   const [isSpeakerOn,     setIsSpeakerOn]     = useState(false);
-  const [callDuration,    setCallDuration]    = useState(0);
+  const [callDuration,    setCallDuration]    = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('pairon_call') || 'null')?.duration ?? 0; } catch { return 0; }
+  });
   const [callBarPos,      setCallBarPos]      = useState({ x: 0, y: 0 });
 
   // ── Refs ──────────────────────────────────────────────────────────────────
@@ -94,6 +104,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // Keep ref mirrors in sync
   useEffect(() => { callStatusRef.current    = callStatus;    }, [callStatus]);
   useEffect(() => { callSessionIdRef.current = callSessionId; }, [callSessionId]);
+
+  // Persist call state to sessionStorage so UI survives refresh
+  useEffect(() => {
+    if (callStatus === 'connected' || callStatus === 'reconnecting') {
+      sessionStorage.setItem('pairon_call', JSON.stringify({
+        status: callStatus, sessionId: callSessionId, partnerName: callPartnerName, duration: callDuration,
+      }));
+    } else if (callStatus === 'idle') {
+      sessionStorage.removeItem('pairon_call');
+    }
+  }, [callStatus, callSessionId, callPartnerName, callDuration]);
 
   // ── Audio element management ──────────────────────────────────────────────
   const getRemoteAudio = (): HTMLAudioElement => {
@@ -154,6 +175,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [isSpeakerOn]);
 
+  // ── Mobile volume-based speaker simulation ─────────────────────────────────
+  // On mobile, setSinkId doesn't work so we simulate earpiece/speaker via volume.
+  useEffect(() => {
+    const audio = document.getElementById('pairon-call-audio') as HTMLAudioElement | null;
+    if (audio) {
+      audio.volume = isSpeakerOn ? 1.0 : 0.3;
+    }
+  }, [isSpeakerOn]);
+
   // ── Cleanup all call resources ────────────────────────────────────────────
   const fullCleanup = useCallback(() => {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -186,6 +216,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       socketService.getSocket()?.emit('call:end', { sessionId: callSessionIdRef.current });
 
     fullCleanup();
+    sessionStorage.removeItem('pairon_call');
 
     setCallStatus('idle');
     callStatusRef.current = 'idle';
@@ -555,6 +586,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       // Partner ended call
       socket.on('call:end', () => {
         fullCleanup();
+        sessionStorage.removeItem('pairon_call');
         setCallStatus('idle');
         callStatusRef.current = 'idle';
         setCallDuration(0);
@@ -592,6 +624,63 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
+
+  // ── Reconnect after page refresh ──────────────────────────────────────────
+  // If we restored 'reconnecting' state from sessionStorage, auto-start a new call
+  useEffect(() => {
+    if (callStatusRef.current !== 'reconnecting' || !callSessionIdRef.current) return;
+
+    let cancelled = false;
+    const savedStr = sessionStorage.getItem('pairon_call');
+    const saved = savedStr ? JSON.parse(savedStr) : null;
+    if (!saved) { setCallStatus('idle'); return; }
+
+    const tryReconnect = async () => {
+      // Wait for socket
+      let socket = socketService.getSocket();
+      let attempts = 0;
+      while (!socket && attempts < 20 && !cancelled) {
+        await new Promise(r => setTimeout(r, 500));
+        socket = socketService.getSocket();
+        attempts++;
+      }
+      if (!socket || cancelled) { setCallStatus('idle'); sessionStorage.removeItem('pairon_call'); return; }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        localStreamRef.current = stream;
+        const pc = createPC();
+        stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        callerNameRef.current = saved.partnerName || 'Reconnecting';
+        socket.emit('call:offer', {
+          sessionId: saved.sessionId,
+          offer,
+          callerName: saved.partnerName || 'Partner',
+          isReconnect: true, // Partner won't see a new ringing notification
+        });
+
+        // If no answer after 10s, give up
+        setTimeout(() => {
+          if (callStatusRef.current === 'reconnecting') {
+            console.log('[Call] Reconnect timeout — ending');
+            endCall(false);
+          }
+        }, 10_000);
+      } catch (err) {
+        console.error('[Call] Reconnect failed:', err);
+        if (!cancelled) { setCallStatus('idle'); sessionStorage.removeItem('pairon_call'); }
+      }
+    };
+
+    tryReconnect();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Ring / dial tones — distinctive "abc abc" style ──────────────────────
   useEffect(() => {

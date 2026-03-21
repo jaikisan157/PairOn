@@ -812,6 +812,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const isLockedByPartner = useCallback((path: string) => { const l = fileLocks.get(path); return l && l.userId !== userId; }, [fileLocks, userId]);
     const getLockerName = useCallback((path: string) => fileLocks.get(path)?.userName || 'Partner', [fileLocks]);
 
+    // Dynamically update editor readOnly when lock status changes
+    // (The <Editor> options prop only applies on mount — this updates the live instance)
+    useEffect(() => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const locked = isLockedByPartner(activeFile);
+        editor.updateOptions({ readOnly: !!locked });
+    }, [activeFile, fileLocks, isLockedByPartner]);
+
     // ===== npm install progress parser =====
     const parseNpmOutput = useCallback((data: string, termId: string) => {
         const plain = data.replace(/\x1b\[[0-9;]*[mGKH]/g, '');
