@@ -744,10 +744,11 @@ export function setupSocketHandlers(io: Server) {
     socket.on('call:ice-candidate', (data: { sessionId: string; candidate: any }) =>
       relayCallEvent('call:ice-candidate', data));
 
-    // ── call:audio-chunk — relay binary audio from one peer to the other ──
-    // Use relayCallEvent to ensure delivery via both session room + user room
+    // ── call:audio-chunk — relay binary audio INSTANTLY (no DB lookup) ──
+    // Audio chunks arrive 10x/second — must be zero-latency. relayCallEvent
+    // does a MongoDB query which would bottleneck audio badly.
     socket.on('call:audio-chunk', (data: { sessionId: string; chunk: Buffer }) => {
-      relayCallEvent('call:audio-chunk', data);
+      socket.to(`session:${data.sessionId}`).emit('call:audio-chunk', { chunk: data.chunk });
     });
 
     // ── call:end — user explicitly ended the call ──
