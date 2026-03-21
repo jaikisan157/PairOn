@@ -244,12 +244,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   // ── setupRemoteAudioPlayback — reliably play remote stream ────────────────
   const setupRemoteAudioPlayback = useCallback((stream: MediaStream) => {
-    console.log('[Call] Setting up remote audio playback. Tracks:', stream.getAudioTracks().length);
-    stream.getAudioTracks().forEach(t => {
-      console.log('[Call] Remote audio track:', t.id, 'enabled:', t.enabled, 'muted:', t.muted, 'readyState:', t.readyState);
-      // Ensure the track is enabled
-      t.enabled = true;
-    });
+    const tracks = stream.getAudioTracks();
+    console.log('[Call] Setting up remote audio. Tracks:', tracks.length,
+      tracks.map(t => `${t.id.slice(0,8)} enabled:${t.enabled} muted:${t.muted}`).join(', '));
 
     const audio = getRemoteAudio();
     audio.srcObject = stream;
@@ -260,7 +257,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       audio.play()
         .then(() => console.log('[Call] ✅ Remote audio playing'))
         .catch((err) => {
-          console.warn('[Call] ⚠️ Audio play failed:', err.message, '— will retry');
+          console.warn('[Call] ⚠️ Audio play failed:', err.message);
           let attempts = 0;
           const retryTimer = setInterval(() => {
             attempts++;
@@ -273,6 +270,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
           document.addEventListener('touchstart', resume, { once: true });
         });
     };
+
+    // Listen for any track becoming active and retry play
+    tracks.forEach(track => {
+      if (track.muted) {
+        track.addEventListener('unmute', () => {
+          console.log('[Call] Track unmuted, retrying play');
+          tryPlay();
+        }, { once: true });
+      }
+    });
+
     tryPlay();
   }, []);
 
@@ -302,11 +310,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (e) => {
-      console.log('[Call] 🎵 ontrack fired! kind:', e.track.kind, 'streams:', e.streams?.length);
-      if (e.streams && e.streams[0]) {
-        setupRemoteAudioPlayback(e.streams[0]);
+      console.log('[Call] 🎵 ontrack fired! kind:', e.track.kind, 'muted:', e.track.muted, 'streams:', e.streams?.length);
+      const stream = (e.streams && e.streams[0]) ? e.streams[0] : new MediaStream([e.track]);
+
+      if (!e.track.muted) {
+        // Track already live — play immediately
+        setupRemoteAudioPlayback(stream);
       } else {
-        setupRemoteAudioPlayback(new MediaStream([e.track]));
+        // Track muted at this point (normal) — wait for unmute before playing
+        console.log('[Call] Track is muted, waiting for unmute...');
+        e.track.addEventListener('unmute', () => {
+          console.log('[Call] 🔊 Track unmuted — starting audio playback');
+          setupRemoteAudioPlayback(stream);
+        }, { once: true });
+        // Also set it up now so the srcObject is ready; play will succeed once data flows
+        setupRemoteAudioPlayback(stream);
       }
     };
 
