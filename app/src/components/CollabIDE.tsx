@@ -1618,20 +1618,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         addToast(code === 0 ? 'Build successful!' : 'Build failed', code === 0 ? 'success' : 'error');
     }, [addToast]);
 
-    // Run specific file in terminal
-    const runFile = useCallback(async (path: string) => {
-        if (!webcontainerRef.current) { addToast('Boot the dev environment first', 'error'); return; }
-        const term = xtermRef.current;
-        const ext = path.split('.').pop();
-        const cmd = ext === 'ts' ? 'npx' : 'node';
-        const args = ext === 'ts' ? ['tsx', path] : [path];
-        if (term) term.writeln(`\n\x1b[36m▶ Running ${path}...\x1b[0m`);
-        setOutputLines(prev => [...prev, `▶ Running ${path}...`]);
-        const proc = await webcontainerRef.current.spawn(cmd, args);
-        proc.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); setOutputLines(prev => [...prev, d]); } }));
-        setContextMenu(null);
-    }, [addToast]);
-
     // Prettier format
     const formatFile = useCallback(async () => {
         const content = files[activeFile];
