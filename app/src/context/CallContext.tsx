@@ -492,7 +492,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
 
         if (callStatusRef.current !== 'idle') {
-          socket.emit('call:end', { sessionId: data.sessionId });
+          // If we're already ringing or in a call for THIS session, just ignore the duplicate
+          if (callSessionIdRef.current === data.sessionId) return;
+          // For a DIFFERENT session, silently ignore (don't emit call:end which kills the original call)
           return;
         }
         pendingOfferRef.current = { offer: data.offer, sessionId: data.sessionId };

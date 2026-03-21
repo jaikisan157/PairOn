@@ -586,49 +586,22 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             // Update files state (no autosave — we are the receiver, not sender)
             setFiles(prev => ({ ...prev, [data.path]: data.content }));
             filesRef.current = { ...filesRef.current, [data.path]: data.content };
-            // Update Monaco model using LINE-LEVEL DIFF to preserve cursor position.
-            // (Full-range pushEditOperations moves cursor to end of replacement)
+            // Update Monaco model — save & restore cursor to avoid jumping
             const model = modelsRef.current.get(data.path);
             if (model && !model.isDisposed() && model.getValue() !== data.content) {
                 suppressSyncRef.current = true;
-                const oldLines = model.getLinesContent();
-                const newLines = data.content.split('\n');
-                const edits: MonacoTypes.editor.IIdentifiedSingleEditOperation[] = [];
-                const monacoInst = monacoRef.current;
-                if (monacoInst) {
-                    // Find first and last differing lines
-                    let firstDiff = 0;
-                    while (firstDiff < oldLines.length && firstDiff < newLines.length && oldLines[firstDiff] === newLines[firstDiff]) {
-                        firstDiff++;
-                    }
-                    let oldEnd = oldLines.length - 1;
-                    let newEnd = newLines.length - 1;
-                    while (oldEnd > firstDiff && newEnd > firstDiff && oldLines[oldEnd] === newLines[newEnd]) {
-                        oldEnd--;
-                        newEnd--;
-                    }
-                    // Only apply edits if there are actual differences
-                    if (firstDiff <= oldEnd || firstDiff <= newEnd || oldLines.length !== newLines.length) {
-                        const startLine = firstDiff + 1; // Monaco is 1-indexed
-                        const endLine = Math.min(oldEnd + 1, oldLines.length);
-                        const endCol = endLine <= oldLines.length ? (oldLines[endLine - 1]?.length ?? 0) + 1 : 1;
-                        const replacementText = newLines.slice(firstDiff, newEnd + 1).join('\n');
-                        if (endLine >= startLine) {
-                            edits.push({
-                                range: new monacoInst.Range(startLine, 1, endLine, endCol),
-                                text: replacementText,
-                                forceMoveMarkers: false,
-                            });
-                        } else {
-                            // All new lines are insertions (old file was shorter or lines removed from middle)
-                            edits.push({
-                                range: new monacoInst.Range(startLine, 1, startLine, 1),
-                                text: replacementText + '\n',
-                                forceMoveMarkers: false,
-                            });
-                        }
-                        model.pushEditOperations([], edits, () => null);
-                    }
+                const editor = editorRef.current;
+                const isActiveModel = editor?.getModel() === model;
+                // Save cursor + scroll state before edit
+                const savedPosition = isActiveModel ? editor?.getPosition() : null;
+                const savedScroll = isActiveModel ? editor?.getScrollTop() : null;
+                // Use full-range replace (reliable, preserves undo history)
+                const fullRange = model.getFullModelRange();
+                model.pushEditOperations([], [{ range: fullRange, text: data.content, forceMoveMarkers: false }], () => null);
+                // Restore cursor + scroll after edit
+                if (isActiveModel && editor) {
+                    if (savedPosition) editor.setPosition(savedPosition);
+                    if (savedScroll !== null) editor.setScrollTop(savedScroll);
                 }
                 suppressSyncRef.current = false;
             }
@@ -1733,6 +1706,43 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             setActiveTermTab('shell');
         }
     }, [bootWebContainer]);
+
+    // ===== Run a single file (JS/TS/HTML) =====
+    const runSingleFile = useCallback(async (filePath: string) => {
+        const ext = filePath.split('.').pop()?.toLowerCase() || '';
+        const runnableWithNode = ['js', 'mjs', 'cjs', 'ts', 'mts'];
+        const runnableAsHtml = ['html', 'htm'];
+
+        if (!runnableWithNode.includes(ext) && !runnableAsHtml.includes(ext)) {
+            addToast(`⚠️ Cannot run .${ext} files directly. Only JS/TS/HTML files can be run individually.`, 'error');
+            return;
+        }
+
+        if (!shellWriterRef.current) {
+            await bootWebContainer();
+        }
+        if (!shellWriterRef.current) {
+            addToast('❌ WebContainer not ready. Try again.', 'error');
+            return;
+        }
+
+        setActiveTermTab('shell');
+
+        if (runnableAsHtml.includes(ext)) {
+            // For HTML files — serve them with a simple static server
+            const cmd = `npx -y serve . -l 3000 --single\n`;
+            shellWriterRef.current.write(cmd);
+            addToast(`🌐 Serving project — open preview to see ${filePath}`, 'info');
+        } else {
+            // For JS/TS files — run with node (tsx for TS)
+            const isTs = ext === 'ts' || ext === 'mts';
+            const cmd = isTs
+                ? `npx -y tsx ${filePath}\n`
+                : `node ${filePath}\n`;
+            shellWriterRef.current.write(cmd);
+            addToast(`▶ Running ${filePath}...`, 'info');
+        }
+    }, [bootWebContainer, addToast]);
     const moveFile = useCallback((fromPath: string, toDir: string) => {
         const fileName = fromPath.split('/').pop()!;
         const newPath = toDir ? `${toDir}/${fileName}` : fileName;
@@ -1957,6 +1967,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <button onClick={buildProject} className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors" title="Build (npm run build)">
                         <Hammer className="w-3 h-3" /> Build
                     </button>
+                    {/* Run single file */}
+                    {/\.(js|jsx|ts|tsx|mjs|cjs|html|htm)$/.test(activeFile) && (
+                        <button onClick={() => runSingleFile(activeFile)}
+                            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-cyan-600 hover:bg-cyan-700 text-white rounded-md transition-colors"
+                            title={`Run ${activeFile.split('/').pop()} individually`}>
+                            <Play className="w-3 h-3" /> Run File
+                        </button>
+                    )}
                     {/* Separator */}
                     <div className="w-px h-4 bg-gray-700 mx-0.5" />
                     {/* Package Manager */}
@@ -2531,8 +2549,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 </button>
                             </>
                         )}
-                        {contextMenu.type === 'file' && /\.(js|ts|mjs)$/.test(contextMenu.path) && (
-                            <button onClick={() => runFile(contextMenu.path)}
+                        {contextMenu.type === 'file' && /\.(js|jsx|ts|tsx|mjs|cjs|html|htm)$/.test(contextMenu.path) && (
+                            <button onClick={() => { runSingleFile(contextMenu.path); setContextMenu(null); }}
                                 className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-green-400 hover:bg-green-500/10 transition-colors">
                                 <Play className="w-3 h-3" /> Run File
                             </button>
