@@ -163,3 +163,13 @@
     }
   }
 }
+
+/* Line authorship indicators for collaborative editing */
+.line-author-local {
+  border-left: 3px solid #3b82f6 !important;
+  margin-left: 2px;
+}
+.line-author-partner {
+  border-left: 3px solid #22c55e !important;
+  margin-left: 2px;
+}

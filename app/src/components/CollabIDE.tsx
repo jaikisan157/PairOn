@@ -258,6 +258,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Track who owns .env (socket.id of the person who last saved it)
     const envOwnerRef = useRef<string>('');
+    // Track when the local user last edited a file (to skip remote model updates during active typing)
+    const locallyEditingRef = useRef<{ path: string; time: number }>({ path: '', time: 0 });
+    // Line authorship: Map<filePath, Map<lineNumber, 'local' | 'partner'>>
+    const lineAuthorsRef = useRef<Map<string, Map<number, string>>>(new Map());
+    const decorationsRef = useRef<string[]>([]);
     // File import
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
@@ -360,6 +365,24 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (!openTabs.includes(path)) setOpenTabs(prev => [...prev, path]);
     }, [getOrCreateModel, openTabs]);
 
+    // ===== Line authorship decorations (typing indicator) =====
+    const updateLineDecorations = useCallback((editor: MonacoTypes.editor.IStandaloneCodeEditor, filePath: string) => {
+        const authors = lineAuthorsRef.current.get(filePath);
+        if (!authors || authors.size === 0) { decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []); return; }
+        const newDecorations: MonacoTypes.editor.IModelDeltaDecoration[] = [];
+        authors.forEach((author, line) => {
+            newDecorations.push({
+                range: { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: 1 },
+                options: {
+                    isWholeLine: true,
+                    linesDecorationsClassName: author === 'local' ? 'line-author-local' : 'line-author-partner',
+                    overviewRuler: { color: author === 'local' ? '#3b82f6' : '#22c55e', position: 1 },
+                },
+            });
+        });
+        decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+    }, []);
+
     // Handle editor mount — set up model system
     const handleEditorMount: OnMount = useCallback((editor, monaco) => {
         editorRef.current = editor;
@@ -442,12 +465,25 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (model) editor.setModel(model);
 
         // Listen for content changes
-        editor.onDidChangeModelContent(() => {
+        editor.onDidChangeModelContent((e) => {
             if (suppressSyncRef.current) return;
             const currentModel = editor.getModel();
             if (!currentModel) return;
             const path = currentModel.uri.path.slice(1); // Remove leading /
             const value = currentModel.getValue();
+            // Mark this file as locally edited RIGHT NOW
+            locallyEditingRef.current = { path, time: Date.now() };
+            // Track line authorship for typing indicator
+            for (const change of e.changes) {
+                if (!lineAuthorsRef.current.has(path)) lineAuthorsRef.current.set(path, new Map());
+                const authors = lineAuthorsRef.current.get(path)!;
+                const startLine = change.range.startLineNumber;
+                const newLineCount = (change.text.match(/\n/g) || []).length + 1;
+                for (let l = startLine; l < startLine + newLineCount; l++) {
+                    authors.set(l, 'local');
+                }
+            }
+            updateLineDecorations(editor, path);
             // Update files state
             setFiles(prev => { const next = { ...prev, [path]: value }; autosave(next); return next; });
             // Sync to WebContainer
@@ -584,25 +620,46 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
         const handleFileChange = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
-            // Update files state (no autosave — we are the receiver, not sender)
+            // Always update our internal state with partner's version
             setFiles(prev => ({ ...prev, [data.path]: data.content }));
             filesRef.current = { ...filesRef.current, [data.path]: data.content };
-            // Update Monaco model — save & restore cursor to avoid jumping
+
+            // *** CRITICAL: If the local user is actively typing this file,
+            // DO NOT touch the Monaco model — it would overwrite their in-progress edits.
+            // The partner's version is saved in filesRef for when the user switches away.
+            const recentEdit = locallyEditingRef.current;
+            if (recentEdit.path === data.path && (Date.now() - recentEdit.time) < 2000) {
+                // Skip model update — user is actively typing here
+                return;
+            }
+
+            // Track partner line authorship
             const model = modelsRef.current.get(data.path);
+            if (model && !model.isDisposed()) {
+                const oldLines = model.getLinesContent();
+                const newLines = data.content.split('\n');
+                if (!lineAuthorsRef.current.has(data.path)) lineAuthorsRef.current.set(data.path, new Map());
+                const authors = lineAuthorsRef.current.get(data.path)!;
+                for (let i = 0; i < newLines.length; i++) {
+                    if (i >= oldLines.length || oldLines[i] !== newLines[i]) {
+                        authors.set(i + 1, 'partner');
+                    }
+                }
+            }
+
+            // Safe to update model — file is not being locally edited
             if (model && !model.isDisposed() && model.getValue() !== data.content) {
                 suppressSyncRef.current = true;
                 const editor = editorRef.current;
                 const isActiveModel = editor?.getModel() === model;
-                // Save cursor + scroll state before edit
                 const savedPosition = isActiveModel ? editor?.getPosition() : null;
                 const savedScroll = isActiveModel ? editor?.getScrollTop() : null;
-                // Use full-range replace (reliable, preserves undo history)
                 const fullRange = model.getFullModelRange();
                 model.pushEditOperations([], [{ range: fullRange, text: data.content, forceMoveMarkers: false }], () => null);
-                // Restore cursor + scroll after edit
                 if (isActiveModel && editor) {
                     if (savedPosition) editor.setPosition(savedPosition);
                     if (savedScroll !== null) editor.setScrollTop(savedScroll);
+                    updateLineDecorations(editor, data.path);
                 }
                 suppressSyncRef.current = false;
             }

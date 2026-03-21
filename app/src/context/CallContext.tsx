@@ -109,7 +109,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (callStatus === 'connected' || callStatus === 'reconnecting') {
       sessionStorage.setItem('pairon_call', JSON.stringify({
-        status: callStatus, sessionId: callSessionId, partnerName: callPartnerName, duration: callDuration,
+        status: callStatus, sessionId: callSessionId, partnerName: callPartnerName,
+        duration: callDuration, startTimestamp: callStartRef.current || Date.now(),
       }));
     } else if (callStatus === 'idle') {
       sessionStorage.removeItem('pairon_call');
@@ -505,18 +506,43 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       // Incoming call offer
       socket.on('call:offer', (data: { sessionId: string; offer: RTCSessionDescriptionInit; callerName: string; isReconnect?: boolean }) => {
-        // If this is a reconnect offer for an active call, handle it in-place
-        if (data.isReconnect && callSessionIdRef.current === data.sessionId && pcRef.current) {
+        // ── Reconnect offer — handle silently (no ringing UI for partner) ──
+        if (data.isReconnect) {
           (async () => {
             try {
-              const pc = pcRef.current;
-              if (!pc) return;
+              // Set reconnecting state
+              setCallStatus('reconnecting');
+              callStatusRef.current = 'reconnecting';
+              setCallSessionId(data.sessionId);
+              callSessionIdRef.current = data.sessionId;
+              setCallPartnerName(data.callerName);
+              partnerNameRef.current = data.callerName;
+
+              // Clean up old PC if it exists
+              if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+
+              // Get fresh audio stream
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+              localStreamRef.current = stream;
+
+              // Create new peer connection and add tracks
+              const pc = createPC();
+              stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+              // Set the remote offer and create answer
               await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
               socket.emit('call:answer', { sessionId: data.sessionId, answer });
+
+              // Drain any queued ICE candidates
+              for (const c of iceCandidateQueueRef.current) {
+                await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+              }
+              iceCandidateQueueRef.current = [];
             } catch (err) {
               console.error('[Call] Error handling reconnect offer:', err);
+              endCall(false);
             }
           })();
           return;
@@ -634,6 +660,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const savedStr = sessionStorage.getItem('pairon_call');
     const saved = savedStr ? JSON.parse(savedStr) : null;
     if (!saved) { setCallStatus('idle'); return; }
+
+    // Restore the call timer from when it originally started
+    if (saved.startTimestamp) {
+      callStartRef.current = saved.startTimestamp;
+      setCallDuration(Math.floor((Date.now() - saved.startTimestamp) / 1000));
+      // Start the timer interval immediately
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(Math.floor((Date.now() - saved.startTimestamp) / 1000));
+      }, 1000);
+    }
 
     const tryReconnect = async () => {
       // Wait for socket
