@@ -218,16 +218,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []); // eslint-disable-line
 
   // ── Start PCM streaming (sender) ──────────────────────────────────────────
+  // senderCtxRef.current must be pre-created in a user gesture before this is called!
+  // AudioContext created in a socket event handler = starts SUSPENDED = onaudioprocess never fires.
   const startAudioStream = useCallback((stream: MediaStream, sessionId: string) => {
-    // Tear down any previous sender
     if (scriptNodeRef.current) { try { scriptNodeRef.current.disconnect(); } catch {} scriptNodeRef.current = null; }
-    if (senderCtxRef.current) { try { senderCtxRef.current.close(); } catch {} senderCtxRef.current = null; }
 
-    const ctx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+    // Reuse the pre-created (and already running) sender AudioContext
+    const ctx = senderCtxRef.current;
+    if (!ctx || ctx.state === 'closed') {
+      console.error('[Call] ❌ Sender AudioContext not ready — was it created in a user gesture?');
+      return;
+    }
+    if (ctx.state === 'suspended') {
+      console.warn('[Call] Sender ctx suspended — trying to resume...');
+      ctx.resume().catch(() => {});
+    }
+    console.log('[Call] Sender AudioContext state:', ctx.state);
+
     const source = ctx.createMediaStreamSource(stream);
     const processor = ctx.createScriptProcessor(PCM_BUFFER_SIZE, 1, 1);
-
-    // Silent output node (processor must connect to something to fire)
     const silent = ctx.createGain();
     silent.gain.value = 0;
     silent.connect(ctx.destination);
@@ -237,22 +246,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (muteRef.current) return;
       const socket = socketService.getSocket();
       if (!socket?.connected) return;
-
       const samples = e.inputBuffer.getChannelData(0);
-      // Float32 → Int16 (halves bandwidth to ~32KB/s)
       const int16 = new Int16Array(samples.length);
       for (let i = 0; i < samples.length; i++)
         int16[i] = Math.max(-32768, Math.min(32767, samples[i] * 32768));
-
       socket.emit('call:audio-chunk', { sessionId, chunk: int16.buffer });
     };
 
     source.connect(processor);
     processor.connect(silent);
-
-    senderCtxRef.current = ctx;
     scriptNodeRef.current = processor;
-    console.log('[Call] 🎙️ PCM streaming started at', PCM_SAMPLE_RATE, 'Hz');
+    console.log('[Call] 🎙️ PCM streaming started at', PCM_SAMPLE_RATE, 'Hz, ctx state:', ctx.state);
   }, []);
 
   // ── Timer ─────────────────────────────────────────────────────────────────
@@ -315,8 +319,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (callStatusRef.current !== 'idle') return;
     callerNameRef.current = callerName;
 
-    // Pre-create & unlock receiver AudioContext from this user gesture
+    // Pre-create & resume BOTH AudioContexts NOW in this user gesture (button click).
+    // If created later in a socket event handler they start SUSPENDED and onaudioprocess never fires.
     unlockReceiverCtx();
+    if (senderCtxRef.current) { try { senderCtxRef.current.close(); } catch {} }
+    const sCtx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+    await sCtx.resume().catch(() => {});
+    senderCtxRef.current = sCtx;
+    console.log('[Call] Sender ctx pre-created, state:', sCtx.state);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -344,8 +354,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     stopRingBeep();
     if (ringingTimeoutRef.current) { clearTimeout(ringingTimeoutRef.current); ringingTimeoutRef.current = null; }
 
-    // Pre-unlock receiver AudioContext from this user gesture (Accept button click)
+    // Pre-create & resume BOTH AudioContexts NOW in this user gesture (Accept button click).
     unlockReceiverCtx();
+    if (senderCtxRef.current) { try { senderCtxRef.current.close(); } catch {} }
+    const sCtx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+    await sCtx.resume().catch(() => {});
+    senderCtxRef.current = sCtx;
+    console.log('[Call] Sender ctx pre-created, state:', sCtx.state);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
