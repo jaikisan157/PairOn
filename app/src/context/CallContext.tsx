@@ -706,10 +706,35 @@ export function CallProvider({ children }: { children: ReactNode }) {
       return true;
     }
 
+    // After attaching listeners, check if we need to rejoin a call (page was refreshed)
+    function checkRejoin() {
+      if (callStatusRef.current !== 'reconnecting' || !callSessionIdRef.current) return;
+      const savedStr = sessionStorage.getItem('pairon_call');
+      const saved = savedStr ? JSON.parse(savedStr) : null;
+      if (!saved) { setCallStatus('idle'); return; }
+
+      // Show the frozen duration (don't start timer yet — it resumes on rejoin-success)
+      if (saved.startTimestamp) {
+        callStartRef.current = saved.startTimestamp;
+        setCallDuration(Math.floor((Date.now() - saved.startTimestamp) / 1000));
+      }
+
+      const socket = socketService.getSocket();
+      if (socket) {
+        console.log('[Call] Emitting call:rejoin to server for session:', saved.sessionId);
+        socket.emit('call:rejoin', { sessionId: saved.sessionId });
+      }
+    }
+
     if (!attach()) {
       pollTimer = setInterval(() => {
-        if (attach()) { clearInterval(pollTimer!); pollTimer = null; }
+        if (attach()) {
+          clearInterval(pollTimer!); pollTimer = null;
+          checkRejoin(); // listeners are now attached, safe to rejoin
+        }
       }, 300);
+    } else {
+      checkRejoin(); // listeners attached immediately, rejoin now
     }
 
     return () => {
@@ -730,54 +755,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  // ── Reconnect after page refresh (server-managed) ──────────────────────
-  // If we restored 'reconnecting' state from sessionStorage, ask the server to rejoin
-  useEffect(() => {
-    if (callStatusRef.current !== 'reconnecting' || !callSessionIdRef.current) return;
-
-    let cancelled = false;
-    const savedStr = sessionStorage.getItem('pairon_call');
-    const saved = savedStr ? JSON.parse(savedStr) : null;
-    if (!saved) { setCallStatus('idle'); return; }
-
-    // Restore the call timer immediately so the UI shows continued duration
-    if (saved.startTimestamp) {
-      callStartRef.current = saved.startTimestamp;
-      setCallDuration(Math.floor((Date.now() - saved.startTimestamp) / 1000));
-      if (callTimerRef.current) clearInterval(callTimerRef.current);
-      callTimerRef.current = setInterval(() => {
-        setCallDuration(Math.floor((Date.now() - saved.startTimestamp) / 1000));
-      }, 1000);
-    }
-
-    const doRejoin = async () => {
-      // Wait for socket to connect
-      let socket = socketService.getSocket();
-      let attempts = 0;
-      while (!socket && attempts < 20 && !cancelled) {
-        await new Promise(r => setTimeout(r, 500));
-        socket = socketService.getSocket();
-        attempts++;
-      }
-      if (!socket || cancelled) {
-        setCallStatus('idle'); sessionStorage.removeItem('pairon_call');
-        return;
-      }
-
-      // Simply tell the server "I'm back, reconnect me"
-      // The server will:
-      // 1. Validate the call still exists
-      // 2. Notify the partner via call:partner-reconnected
-      // 3. Tell us to create a WebRTC offer via call:rejoin-success
-      // 4. If no call exists, tell us via call:rejoin-failed
-      console.log('[Call] Emitting call:rejoin to server for session:', saved.sessionId);
-      socket.emit('call:rejoin', { sessionId: saved.sessionId });
-    };
-
-    doRejoin();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // NOTE: The old separate reconnect useEffect has been removed.
+  // call:rejoin is now emitted inside attach() above, AFTER all listeners are attached.
+  // This eliminates the race condition that caused rejoin to fail.
 
   // ── Ring / dial tones — distinctive "abc abc" style ──────────────────────
   useEffect(() => {
