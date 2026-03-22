@@ -19,11 +19,13 @@ import {
   Wand2,
   Edit3,
   Check,
+  Phone,
+  PhoneOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
-
+import { useCall } from '@/context/CallContext';
 import { formatTime } from '@/lib/utils';
 import { socketService } from '@/lib/socket';
 import { playMessageSound, playSendSound } from '@/lib/audio';
@@ -165,7 +167,8 @@ export function CollaborationPage() {
   const lastActivityRef = useRef<number>(Date.now());
   const idleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-
+  // Voice call (global — from CallContext, WebRTC P2P)
+  const { callStatus, startCall: globalStartCall, endCall: globalEndCall } = useCall();
 
   // Keep sessionRef in sync
   useEffect(() => {
@@ -630,7 +633,8 @@ export function CollaborationPage() {
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
     if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
     if (idleCheckRef.current) clearInterval(idleCheckRef.current);
-
+    // End any active call when session ends
+    try { globalEndCall(true); } catch { /* */ }
     const snap = sessionRef.current;
     setSession(null);
     setStatus('idle');
@@ -650,7 +654,8 @@ export function CollaborationPage() {
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
     if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
-
+    // End any active call
+    try { globalEndCall(true); } catch { /* */ }
     setSession(null);
     setStatus('idle');
     localStorage.removeItem('challenge_session');
@@ -734,7 +739,8 @@ export function CollaborationPage() {
 
   const handleForceQuit = useCallback(() => {
     if (!session) return;
-
+    // End any active call before quitting
+    try { globalEndCall(true); } catch { /* */ }
     socketService.getSocket()?.emit('challenge:force-quit', session.sessionId);
     setShowForceQuitConfirm(false);
     cleanupAndLeave();
@@ -965,6 +971,30 @@ export function CollaborationPage() {
                 </Button>
               )}
 
+              {/* Voice Call Button — WebRTC P2P, handled by CallContext */}
+              {session && (
+                callStatus === 'idle' ? (
+                  <button onClick={() => globalStartCall(session.sessionId, session.partnerName, user?.name ?? 'Partner')} title="Start voice call"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-all shadow-sm active:scale-95">
+                    <Phone className="w-3.5 h-3.5" /> Call
+                  </button>
+                ) : callStatus === 'calling' ? (
+                  <button onClick={() => globalEndCall(true)} title="Cancel call"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-400 hover:bg-red-500 text-white text-xs font-semibold transition-all animate-pulse">
+                    <PhoneOff className="w-3.5 h-3.5" /> Calling...
+                  </button>
+                ) : callStatus === 'reconnecting' ? (
+                  <button disabled title="Call reconnecting..."
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500 text-white text-xs font-semibold transition-all animate-pulse cursor-not-allowed opacity-80">
+                    <Phone className="w-3.5 h-3.5" /> Reconnecting...
+                  </button>
+                ) : callStatus === 'connected' ? (
+                  <button onClick={() => globalEndCall(true)} title="End call"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold transition-all">
+                    <PhoneOff className="w-3.5 h-3.5" /> On call
+                  </button>
+                ) : null
+              )}
 
             </div>
           </div>

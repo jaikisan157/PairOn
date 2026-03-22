@@ -17,6 +17,17 @@ const matchmakingQueue: Map<string, { userId: string; mode: MatchMode; socketId:
 // Active sessions with their timers
 const activeSessions: Map<string, { timer: NodeJS.Timeout }> = new Map();
 
+// ── Server-managed active calls (for reconnection on page refresh) ────────
+interface ActiveCall {
+  sessionId: string;
+  callerUserId: string;
+  callerSocketId: string;
+  receiverUserId: string;
+  receiverSocketId: string;
+  startTimestamp: number;
+  graceTimer: NodeJS.Timeout | null;
+}
+const activeCalls: Map<string, ActiveCall> = new Map();
 
 export function setupSocketHandlers(io: Server) {
   // Start quickchat inactivity checker (5 min timeout)
@@ -668,7 +679,94 @@ export function setupSocketHandlers(io: Server) {
       socket.to(`session:${data.sessionId}`).emit('code:file-unlock', { path: data.path });
     });
 
-    // ── End voice call signaling (removed) ───────────────────────────────────────
+    // ── WebRTC call signaling ──────────────────────────────────────────────
+    // Server only relays tiny SDP/ICE messages (~2KB). Audio flows P2P.
+
+    const relayCallEvent = async (eventName: string, data: { sessionId: string; [key: string]: any }) => {
+      // Relay via session room + partner's user room for guaranteed delivery
+      let broadcast = socket.to(`session:${data.sessionId}`);
+      try {
+        const session = await CollaborationSession.findById(data.sessionId).select('participants').lean();
+        if (session) {
+          const partnerId = (session.participants as string[]).find(p => p !== userId);
+          if (partnerId) broadcast = broadcast.to(`user:${partnerId}`);
+        }
+      } catch (err) {
+        console.error('[Call relay] Error looking up session:', err);
+      }
+      broadcast.emit(eventName, data);
+    };
+
+    // call:offer — relay SDP offer to partner
+    socket.on('call:offer', (data: { sessionId: string; offer: any; callerName?: string; isReconnect?: boolean; isRestart?: boolean }) => {
+      relayCallEvent('call:offer', data);
+      if (!data.isReconnect && !data.isRestart) {
+        const existing = activeCalls.get(data.sessionId);
+        if (!existing) {
+          activeCalls.set(data.sessionId, {
+            sessionId: data.sessionId,
+            callerUserId: userId,
+            callerSocketId: socket.id,
+            receiverUserId: '',
+            receiverSocketId: '',
+            startTimestamp: Date.now(),
+            graceTimer: null,
+          });
+        }
+      }
+    });
+
+    // call:answer — relay SDP answer, register call as active
+    socket.on('call:answer', (data: { sessionId: string; answer: any }) => {
+      relayCallEvent('call:answer', data);
+      const call = activeCalls.get(data.sessionId);
+      if (call) {
+        call.receiverUserId = userId;
+        call.receiverSocketId = socket.id;
+        call.startTimestamp = Date.now();
+        console.log(`[Call] Active: session=${data.sessionId}, caller=${call.callerUserId}, receiver=${userId}`);
+      }
+    });
+
+    // call:ice-candidate — relay ICE candidates
+    socket.on('call:ice-candidate', (data: { sessionId: string; candidate: any }) => {
+      relayCallEvent('call:ice-candidate', data);
+    });
+
+    // call:end — user ended the call
+    socket.on('call:end', (data: { sessionId: string }) => {
+      const call = activeCalls.get(data.sessionId);
+      if (call?.graceTimer) clearTimeout(call.graceTimer);
+      activeCalls.delete(data.sessionId);
+      console.log(`[Call] Ended: session=${data.sessionId}`);
+      relayCallEvent('call:end', data);
+    });
+
+    // call:rejoin — user refreshed page, reconnect the call
+    socket.on('call:rejoin', (data: { sessionId: string }) => {
+      const call = activeCalls.get(data.sessionId);
+      if (!call) { socket.emit('call:rejoin-failed'); return; }
+
+      if (call.graceTimer) { clearTimeout(call.graceTimer); call.graceTimer = null; }
+
+      const isCaller = call.callerUserId === userId;
+      if (isCaller) call.callerSocketId = socket.id;
+      else call.receiverSocketId = socket.id;
+
+      const partnerUserId = isCaller ? call.receiverUserId : call.callerUserId;
+      console.log(`[Call] Rejoin: user=${userId}, partner=${partnerUserId}`);
+
+      // Tell partner the user is back
+      io.to(`user:${partnerUserId}`).emit('call:partner-reconnected', {
+        sessionId: data.sessionId, startTimestamp: call.startTimestamp,
+      });
+
+      // Tell rejoining user to create new WebRTC offer
+      socket.emit('call:rejoin-success', {
+        sessionId: data.sessionId, partnerUserId, startTimestamp: call.startTimestamp,
+      });
+    });
+    // ── End WebRTC call signaling ──────────────────────────────────────────
 
     // Inline code comment
     socket.on('code:comment', (data: { sessionId: string; filePath: string; comment: any; senderId: string }) => {
@@ -740,7 +838,27 @@ export function setupSocketHandlers(io: Server) {
       // Remove from matchmaking queue
       matchmakingQueue.delete(userId);
 
+      // ── Handle active call graceful reconnection ──
+      for (const [sessionId, call] of activeCalls.entries()) {
+        const isInCall = call.callerUserId === userId || call.receiverUserId === userId;
+        if (!isInCall) continue;
 
+        const partnerUserId = call.callerUserId === userId ? call.receiverUserId : call.callerUserId;
+        console.log(`[Call] User ${userId} disconnected during call (session: ${sessionId}). 30s grace period.`);
+
+        io.to(`user:${partnerUserId}`).emit('call:partner-reconnecting', {
+          sessionId, startTimestamp: call.startTimestamp,
+        });
+
+        if (call.graceTimer) clearTimeout(call.graceTimer);
+        call.graceTimer = setTimeout(() => {
+          console.log(`[Call] Grace expired for session ${sessionId}. Ending call.`);
+          io.to(`user:${partnerUserId}`).emit('call:ended-by-server', { sessionId });
+          activeCalls.delete(sessionId);
+        }, 30_000);
+
+        break;
+      }
 
       // Update user offline status
       try {
