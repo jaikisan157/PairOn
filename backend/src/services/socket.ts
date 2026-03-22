@@ -17,17 +17,6 @@ const matchmakingQueue: Map<string, { userId: string; mode: MatchMode; socketId:
 // Active sessions with their timers
 const activeSessions: Map<string, { timer: NodeJS.Timeout }> = new Map();
 
-// ── Server-managed active calls (for reconnection on refresh) ─────────────
-interface ActiveCall {
-  sessionId: string;
-  callerUserId: string;
-  callerSocketId: string;
-  receiverUserId: string;
-  receiverSocketId: string;
-  startTimestamp: number;
-  graceTimer: NodeJS.Timeout | null;
-}
-const activeCalls: Map<string, ActiveCall> = new Map(); // sessionId -> call info
 
 export function setupSocketHandlers(io: Server) {
   // Start quickchat inactivity checker (5 min timeout)
@@ -679,124 +668,7 @@ export function setupSocketHandlers(io: Server) {
       socket.to(`session:${data.sessionId}`).emit('code:file-unlock', { path: data.path });
     });
 
-    // ── Voice call signaling (WebRTC) ──────────────────────────────────────
-    // Backend relays via BOTH session room AND user rooms for reliability.
-    // Using Socket.IO's multi-room `.to(r1).to(r2).emit()` which auto-
-    // deduplicates — each target socket receives the event exactly ONCE
-    // even if it's in both rooms.
-
-    const relayCallEvent = async (eventName: string, data: { sessionId: string; [key: string]: any }) => {
-      // Start with session room
-      let broadcast = socket.to(`session:${data.sessionId}`);
-
-      // Also target partner's personal user room for guaranteed delivery
-      try {
-        const session = await CollaborationSession.findById(data.sessionId).select('participants').lean();
-        if (session) {
-          const partnerId = (session.participants as string[]).find(p => p !== userId);
-          if (partnerId) {
-            broadcast = broadcast.to(`user:${partnerId}`);
-          }
-        }
-      } catch (err) {
-        console.error('[Call relay] Error looking up session:', err);
-      }
-
-      // Single emit with deduplication across rooms
-      broadcast.emit(eventName, data);
-    };
-
-    // ── call:offer ──
-    socket.on('call:offer', (data: { sessionId: string; offer: any; callerName?: string; isReconnect?: boolean }) => {
-      // If this is a reconnect offer from a user who rejoined, relay it normally
-      relayCallEvent('call:offer', data);
-      // Track the caller info for the active call
-      if (!data.isReconnect) {
-        // Pre-register: we'll complete registration when the answer comes
-        const existing = activeCalls.get(data.sessionId);
-        if (!existing) {
-          activeCalls.set(data.sessionId, {
-            sessionId: data.sessionId,
-            callerUserId: userId,
-            callerSocketId: socket.id,
-            receiverUserId: '', // filled on answer
-            receiverSocketId: '', // filled on answer
-            startTimestamp: Date.now(),
-            graceTimer: null,
-          });
-        }
-      }
-    });
-
-    // ── call:answer — register the call as fully active ──
-    socket.on('call:answer', (data: { sessionId: string; answer: any }) => {
-      relayCallEvent('call:answer', data);
-      const call = activeCalls.get(data.sessionId);
-      if (call) {
-        call.receiverUserId = userId;
-        call.receiverSocketId = socket.id;
-        call.startTimestamp = Date.now();
-        console.log(`[Call] Active call registered: session=${data.sessionId}, caller=${call.callerUserId}, receiver=${userId}`);
-      }
-    });
-
-    // ── call:ice-candidate (kept for legacy compatibility) ──
-    socket.on('call:ice-candidate', (data: { sessionId: string; candidate: any }) =>
-      relayCallEvent('call:ice-candidate', data));
-
-    // ── call:audio-chunk — relay binary audio INSTANTLY (no DB lookup) ──
-    // Audio chunks arrive 10x/second — must be zero-latency. relayCallEvent
-    // does a MongoDB query which would bottleneck audio badly.
-    socket.on('call:audio-chunk', (data: { sessionId: string; chunk: Buffer }) => {
-      socket.to(`session:${data.sessionId}`).emit('call:audio-chunk', { chunk: data.chunk });
-    });
-
-    // ── call:end — user explicitly ended the call ──
-    socket.on('call:end', (data: { sessionId: string }) => {
-      const call = activeCalls.get(data.sessionId);
-      if (call?.graceTimer) clearTimeout(call.graceTimer);
-      activeCalls.delete(data.sessionId);
-      console.log(`[Call] Call ended by user: session=${data.sessionId}`);
-      relayCallEvent('call:end', data);
-    });
-
-    // ── call:rejoin — user refreshed and is back, reconnect the call ──
-    socket.on('call:rejoin', (data: { sessionId: string }) => {
-      const call = activeCalls.get(data.sessionId);
-      if (!call) {
-        // No active call for this session, tell the user
-        socket.emit('call:rejoin-failed');
-        return;
-      }
-
-      // Clear grace timer
-      if (call.graceTimer) { clearTimeout(call.graceTimer); call.graceTimer = null; }
-
-      // Update the socket ID for the returning user
-      const isCaller = call.callerUserId === userId;
-      if (isCaller) call.callerSocketId = socket.id;
-      else call.receiverSocketId = socket.id;
-
-      // Determine the partner
-      const partnerUserId = isCaller ? call.receiverUserId : call.callerUserId;
-
-      console.log(`[Call] User ${userId} rejoined call in session ${data.sessionId}. Partner: ${partnerUserId}`);
-
-      // Tell the partner that the user is back. Partner will enter 'reconnecting' state if not already.
-      io.to(`user:${partnerUserId}`).emit('call:partner-reconnected', {
-        sessionId: data.sessionId,
-        startTimestamp: call.startTimestamp,
-      });
-
-      // Tell the rejoining user to be the initiator (create offer)
-      socket.emit('call:rejoin-success', {
-        sessionId: data.sessionId,
-        partnerUserId: partnerUserId,
-        startTimestamp: call.startTimestamp,
-        role: 'initiator', // this user creates the WebRTC offer
-      });
-    });
-    // ── End voice call signaling ───────────────────────────────────────────
+    // ── End voice call signaling (removed) ───────────────────────────────────────
 
     // Inline code comment
     socket.on('code:comment', (data: { sessionId: string; filePath: string; comment: any; senderId: string }) => {
@@ -868,31 +740,7 @@ export function setupSocketHandlers(io: Server) {
       // Remove from matchmaking queue
       matchmakingQueue.delete(userId);
 
-      // ── Handle active call graceful reconnection ──
-      for (const [sessionId, call] of activeCalls.entries()) {
-        const isInCall = call.callerUserId === userId || call.receiverUserId === userId;
-        if (!isInCall) continue;
 
-        const partnerUserId = call.callerUserId === userId ? call.receiverUserId : call.callerUserId;
-
-        console.log(`[Call] User ${userId} disconnected during active call (session: ${sessionId}). Starting 30s grace period.`);
-
-        // Tell partner that this user is reconnecting
-        io.to(`user:${partnerUserId}`).emit('call:partner-reconnecting', {
-          sessionId,
-          startTimestamp: call.startTimestamp,
-        });
-
-        // Set 30-second grace period — if user doesn't rejoin, end the call
-        if (call.graceTimer) clearTimeout(call.graceTimer);
-        call.graceTimer = setTimeout(() => {
-          console.log(`[Call] Grace period expired for session ${sessionId}. Ending call.`);
-          io.to(`user:${partnerUserId}`).emit('call:ended-by-server', { sessionId });
-          activeCalls.delete(sessionId);
-        }, 30_000);
-
-        break; // a user can only be in one call at a time
-      }
 
       // Update user offline status
       try {

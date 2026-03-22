@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { AuthProvider, ThemeProvider, MatchingProvider, CallProvider } from '@/context';
-import { GlobalCallUI } from '@/components/GlobalCallUI';
+import { AuthProvider, ThemeProvider, MatchingProvider } from '@/context';
 import {
   LandingPage,
   LoginPage,
@@ -142,9 +141,9 @@ function GlobalNotifier() {
     socket.on('challenge:matched', (data: any) => {
       if (data.sessionId) {
         localStorage.setItem('challenge_session', JSON.stringify(data));
-        // Navigate to collaborate if not already there
+        // Navigate to collaborate if not already there (use React Router, NOT window.location)
         if (window.location.pathname !== '/collaborate') {
-          window.location.href = '/collaborate';
+          navigate('/collaborate');
         }
       }
     });
@@ -348,7 +347,6 @@ function AppRoutes() {
   return (
     <>
       <GlobalNotifier />
-      <GlobalCallUI />
       <Routes>
         <Route path="/" element={<PublicRoute><LandingPage /></PublicRoute>} />
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
@@ -377,13 +375,11 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <CallProvider>
-          <MatchingProvider>
-            <BrowserRouter>
-              <AppRoutes />
-            </BrowserRouter>
-          </MatchingProvider>
-        </CallProvider>
+        <MatchingProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </MatchingProvider>
       </AuthProvider>
     </ThemeProvider>
   );
