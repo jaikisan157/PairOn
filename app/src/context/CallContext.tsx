@@ -1,15 +1,12 @@
 /**
- * CallContext — Global WebRTC voice call.
+ * CallContext — Global WebRTC voice call (P2P, $0/month).
  *
- * Audio flows DIRECTLY between browsers (P2P via WebRTC).
- * Your server only relays tiny signaling messages (~2KB per call setup).
- * Cost: $0/month forever.
- *
- * Flow:
- *   Caller:  getUserMedia → RTCPeerConnection → createOffer → send via Socket.IO
- *   Callee:  receive offer → RTCPeerConnection → createAnswer → send via Socket.IO
- *   Both:    ontrack → play remote audio via <audio> element
- *   Refresh: sessionStorage persists state → auto-rejoin → new offer/answer exchange
+ * KEY FIXES from previous versions:
+ * 1. Audio element ATTACHED to DOM (detached elements don't play in many browsers)
+ * 2. Audio element "pre-warmed" during user gesture to bypass autoplay policy
+ * 3. SDP explicitly serialized as { type, sdp } plain objects
+ * 4. Comprehensive logging at every step for debugging
+ * 5. Proper socket listener cleanup
  */
 import {
   createContext, useContext, useRef, useState, useEffect, useCallback,
@@ -46,16 +43,12 @@ export function useCall(): CallContextType {
   return ctx;
 }
 
-// ─── Free ICE Servers (no API keys, no cost) ─────────────────────────────────
+// ─── Free ICE Servers ────────────────────────────────────────────────────────
 const ICE_SERVERS: RTCIceServer[] = [
-  // Google STUN — free forever, handles ~85% of connections
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
-  // Optional TURN for NAT traversal fallback (~15% of connections)
-  // Set VITE_TURN_URL, VITE_TURN_USERNAME, VITE_TURN_CREDENTIAL in .env
-  // Free TURN: https://www.metered.ca/tools/openrelay/ (500GB/month free)
   ...(import.meta.env.VITE_TURN_URL ? [{
     urls: import.meta.env.VITE_TURN_URL as string,
     username: (import.meta.env.VITE_TURN_USERNAME || '') as string,
@@ -65,6 +58,11 @@ const ICE_SERVERS: RTCIceServer[] = [
 
 const RINGING_TIMEOUT_MS = 45_000;
 const CALLING_TIMEOUT_MS = 45_000;
+
+/** Serialize SDP to a plain { type, sdp } object for Socket.IO */
+function serializeSDP(desc: RTCSessionDescription | RTCSessionDescriptionInit): { type: string; sdp: string } {
+  return { type: desc.type as string, sdp: desc.sdp as string };
+}
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 export function CallProvider({ children }: { children: ReactNode }) {
@@ -102,11 +100,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const remoteAudioRef   = useRef<HTMLAudioElement | null>(null);
   const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([]);
 
-  // Speaker boost (GainNode for volume > 1.0)
-  const audioCtxRef      = useRef<AudioContext | null>(null);
-  const gainNodeRef      = useRef<GainNode | null>(null);
-  const sourceNodeRef    = useRef<MediaStreamAudioSourceNode | null>(null);
-
   // Ring beep
   const ringCtxRef       = useRef<AudioContext | null>(null);
   const ringingBeepRef   = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -119,8 +112,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   // Pending incoming call
   const pendingOfferRef = useRef<{
-    sessionId: string; callerName: string; offer: RTCSessionDescriptionInit;
+    sessionId: string; callerName: string; offer: { type: string; sdp: string };
   } | null>(null);
+
+  // Socket listeners registered flag
+  const listenersAttachedRef = useRef(false);
 
   // Keep refs in sync
   useEffect(() => { callStatusRef.current = callStatus; }, [callStatus]);
@@ -133,22 +129,32 @@ export function CallProvider({ children }: { children: ReactNode }) {
         status: callStatus, sessionId: callSessionId,
         partnerName: callPartnerName, duration: callDuration,
         startTimestamp: callStartRef.current,
+        callerName: callerNameRef.current,
       }));
     } else if (callStatus === 'idle') {
       sessionStorage.removeItem('pairon_call');
     }
   }, [callStatus, callSessionId, callPartnerName, callDuration]);
 
-  // ── Create remote <audio> element (once) ───────────────────────────────────
+  // ── Create remote <audio> element IN THE DOM ──────────────────────────────
+  // CRITICAL: Must be in the DOM for browsers to actually play audio.
+  // A detached `new Audio()` often fails silently.
   useEffect(() => {
-    if (!remoteAudioRef.current) {
-      const audio = new Audio();
-      audio.autoplay = true;
-      audio.setAttribute('playsinline', 'true');
-      remoteAudioRef.current = audio;
-    }
+    const audio = document.createElement('audio');
+    audio.id = 'pairon-remote-audio';
+    audio.autoplay = true;
+    audio.setAttribute('playsinline', 'true');
+    audio.style.position = 'fixed';
+    audio.style.top = '-9999px';
+    audio.style.left = '-9999px';
+    audio.style.pointerEvents = 'none';
+    document.body.appendChild(audio);
+    remoteAudioRef.current = audio;
+    console.log('[Call] 🔈 Remote audio element created and attached to DOM');
     return () => {
-      remoteAudioRef.current?.pause();
+      audio.pause();
+      audio.srcObject = null;
+      audio.remove();
       remoteAudioRef.current = null;
     };
   }, []);
@@ -179,15 +185,34 @@ export function CallProvider({ children }: { children: ReactNode }) {
     try { ringCtxRef.current?.close(); } catch {} ringCtxRef.current = null;
   }, []);
 
+  // ── "Pre-warm" audio element (call during user gesture to bypass autoplay) ─
+  const prewarmAudio = useCallback(() => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    // Play a tiny silent WAV to unlock the audio element
+    // This must happen during a user gesture (button click)
+    const silentWav = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    audio.src = silentWav;
+    audio.play().then(() => {
+      audio.pause();
+      audio.src = '';
+      audio.srcObject = null;
+      console.log('[Call] 🔓 Audio element pre-warmed (autoplay unlocked)');
+    }).catch((err) => {
+      console.warn('[Call] Pre-warm failed:', err.message);
+    });
+  }, []);
+
   // ── Create RTCPeerConnection ──────────────────────────────────────────────
   const createPeerConnection = useCallback((sessionId: string) => {
     // Clean up old connection
     if (pcRef.current) {
-      pcRef.current.close();
+      try { pcRef.current.close(); } catch {}
       pcRef.current = null;
     }
     iceCandidateQueue.current = [];
 
+    console.log('[Call] Creating RTCPeerConnection with', ICE_SERVERS.length, 'ICE servers');
     const pc = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
       iceCandidatePoolSize: 2,
@@ -196,58 +221,88 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // ── ICE candidate events ──
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        const candidate = event.candidate.toJSON();
+        console.log('[Call] 📤 Sending ICE candidate:', candidate.candidate?.substring(0, 50));
         socketService.getSocket()?.emit('call:ice-candidate', {
-          sessionId, candidate: event.candidate.toJSON(),
+          sessionId, candidate,
         });
+      } else {
+        console.log('[Call] ICE gathering complete');
       }
     };
 
     pc.onicecandidateerror = (event) => {
-      // STUN/TURN errors are usually non-fatal — other candidates may still work
-      console.warn('[Call] ICE candidate error:', (event as RTCPeerConnectionIceErrorEvent).errorText);
+      console.warn('[Call] ICE error:', (event as RTCPeerConnectionIceErrorEvent).errorText);
     };
 
     // ── Remote audio track ──
     pc.ontrack = (event) => {
-      console.log('[Call] 🔊 Remote track received');
-      if (remoteAudioRef.current && event.streams[0]) {
-        remoteAudioRef.current.srcObject = event.streams[0];
-        remoteAudioRef.current.play().catch(() => {
-          // Autoplay blocked — will resolve on user interaction
-          console.warn('[Call] Autoplay blocked, waiting for user gesture');
-        });
+      console.log('[Call] 🔊 Remote track received! streams:', event.streams.length,
+        'tracks:', event.streams[0]?.getTracks().map(t => `${t.kind}:${t.readyState}`));
+
+      const audio = remoteAudioRef.current;
+      if (audio && event.streams[0]) {
+        audio.srcObject = event.streams[0];
+        console.log('[Call] Set srcObject on audio element');
+
+        // Try to play — should succeed because we pre-warmed in user gesture
+        const playPromise = audio.play();
+        if (playPromise) {
+          playPromise.then(() => {
+            console.log('[Call] ✅ Audio playing successfully!');
+          }).catch((err) => {
+            console.error('[Call] ❌ Audio play failed:', err.message);
+            // Last resort: try again on any user click
+            const retryPlay = () => {
+              audio.play().then(() => {
+                console.log('[Call] ✅ Audio playing after user gesture retry');
+                document.removeEventListener('click', retryPlay);
+              }).catch(() => {});
+            };
+            document.addEventListener('click', retryPlay, { once: true });
+          });
+        }
+      } else {
+        console.error('[Call] ❌ Cannot play: audio element =', !!audio, ', streams =', event.streams.length);
       }
     };
 
     // ── Connection state tracking ──
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
-      console.log('[Call] ICE state:', state);
+      console.log('[Call] ICE connection state:', state);
 
       if (state === 'connected' || state === 'completed') {
         if (callStatusRef.current === 'reconnecting' || callStatusRef.current === 'calling') {
           setCallStatus('connected');
           callStatusRef.current = 'connected';
+          console.log('[Call] ✅ ICE connected — P2P audio active!');
         }
       } else if (state === 'disconnected') {
-        // Temporary loss — WebRTC will try to recover automatically
         console.log('[Call] ICE disconnected — waiting for recovery...');
       } else if (state === 'failed') {
-        // Try ICE restart before giving up
         console.log('[Call] ICE failed — attempting ICE restart');
         try {
           pc.restartIce();
-          // Create a new offer with iceRestart
           pc.createOffer({ iceRestart: true }).then((offer) => {
             pc.setLocalDescription(offer);
             socketService.getSocket()?.emit('call:offer', {
-              sessionId, offer, callerName: callerNameRef.current, isRestart: true,
+              sessionId, offer: serializeSDP(offer),
+              callerName: callerNameRef.current, isRestart: true,
             });
-          }).catch(() => {});
-        } catch {
-          console.error('[Call] ICE restart failed');
+          }).catch((err) => console.error('[Call] ICE restart offer failed:', err));
+        } catch (err) {
+          console.error('[Call] ICE restart failed:', err);
         }
       }
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('[Call] Connection state:', pc.connectionState);
+    };
+
+    pc.onsignalingstatechange = () => {
+      console.log('[Call] Signaling state:', pc.signalingState);
     };
 
     pcRef.current = pc;
@@ -259,8 +314,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const pc = pcRef.current;
     if (!pc || !pc.remoteDescription) return;
     const queued = iceCandidateQueue.current.splice(0);
+    if (queued.length > 0) console.log('[Call] Flushing', queued.length, 'queued ICE candidates');
     for (const candidate of queued) {
-      pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      pc.addIceCandidate(new RTCIceCandidate(candidate)).catch((err) => {
+        console.warn('[Call] Failed to add ICE candidate:', err.message);
+      });
     }
   }, []);
 
@@ -275,20 +333,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // ── Full cleanup ──────────────────────────────────────────────────────────
   const fullCleanup = useCallback(() => {
     stopRingBeep();
-    // WebRTC
     if (pcRef.current) { try { pcRef.current.close(); } catch {} pcRef.current = null; }
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
     if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = null;
       remoteAudioRef.current.pause();
+      remoteAudioRef.current.srcObject = null;
     }
     iceCandidateQueue.current = [];
-    // Speaker boost cleanup
-    if (sourceNodeRef.current) { try { sourceNodeRef.current.disconnect(); } catch {} sourceNodeRef.current = null; }
-    if (gainNodeRef.current) { try { gainNodeRef.current.disconnect(); } catch {} gainNodeRef.current = null; }
-    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} audioCtxRef.current = null; }
-    // Timers
     if (callTimerRef.current) clearInterval(callTimerRef.current); callTimerRef.current = null;
     if (ringingTimeoutRef.current) clearTimeout(ringingTimeoutRef.current); ringingTimeoutRef.current = null;
     if (callingTimeoutRef.current) clearTimeout(callingTimeoutRef.current); callingTimeoutRef.current = null;
@@ -297,6 +349,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   // ── endCall ───────────────────────────────────────────────────────────────
   const endCall = useCallback((notify = true) => {
+    console.log('[Call] Ending call, notify:', notify);
     if (notify && callSessionIdRef.current)
       socketService.getSocket()?.emit('call:end', { sessionId: callSessionIdRef.current });
     fullCleanup();
@@ -313,90 +366,81 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (track) {
       track.enabled = !track.enabled;
       setIsMuted(!track.enabled);
+      console.log('[Call] Mute:', !track.enabled);
     }
   }, []);
 
-  // ── toggleSpeaker (volume boost via GainNode) ─────────────────────────────
+  // ── toggleSpeaker (volume via audio element) ──────────────────────────────
   const toggleSpeaker = useCallback(() => {
     setIsSpeakerOn(prev => {
       const next = !prev;
-      if (gainNodeRef.current && audioCtxRef.current) {
-        gainNodeRef.current.gain.setTargetAtTime(
-          next ? 2.0 : 1.0, audioCtxRef.current.currentTime, 0.05);
+      // HTML audio volume is 0-1, but we can only reduce, not boost
+      // For boost we'd need Web Audio API GainNode; for now toggle between 1.0 and 0.3
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.volume = next ? 1.0 : 0.5;
       }
       return next;
     });
-  }, []);
-
-  // ── Setup speaker boost audio chain ───────────────────────────────────────
-  const setupSpeakerChain = useCallback((remoteStream: MediaStream) => {
-    try {
-      // Clean up previous chain
-      if (sourceNodeRef.current) { try { sourceNodeRef.current.disconnect(); } catch {} }
-      if (gainNodeRef.current) { try { gainNodeRef.current.disconnect(); } catch {} }
-      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
-        try { audioCtxRef.current.close(); } catch {}
-      }
-
-      const ctx = new AudioContext();
-      const source = ctx.createMediaStreamSource(remoteStream);
-      const gain = ctx.createGain();
-      gain.gain.value = 1.0;
-      source.connect(gain);
-      gain.connect(ctx.destination);
-
-      audioCtxRef.current = ctx;
-      sourceNodeRef.current = source;
-      gainNodeRef.current = gain;
-    } catch (err) {
-      console.warn('[Call] Speaker chain setup failed:', err);
-    }
   }, []);
 
   // ── startCall ─────────────────────────────────────────────────────────────
   const startCall = useCallback(async (sessionId: string, partnerName: string, callerName: string) => {
     if (callStatusRef.current !== 'idle') return;
     callerNameRef.current = callerName;
+    console.log('[Call] Starting call to', partnerName, 'in session', sessionId);
+
+    // Pre-warm audio element DURING this user gesture (button click)
+    prewarmAudio();
 
     try {
       // 1. Get microphone
+      console.log('[Call] Requesting microphone...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
+      console.log('[Call] Microphone acquired:', stream.getAudioTracks().map(t => `${t.label} (${t.readyState})`));
 
       // 2. Create peer connection
       const pc = createPeerConnection(sessionId);
 
-      // 3. Add local audio track
+      // 3. Add local audio track to peer connection
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      console.log('[Call] Local tracks added to peer connection');
 
-      // 4. Create offer
+      // 4. Create SDP offer
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      const serializedOffer = serializeSDP(offer);
+      console.log('[Call] SDP offer created, type:', serializedOffer.type, 'sdp length:', serializedOffer.sdp.length);
 
       // 5. Send offer via signaling
       callSessionIdRef.current = sessionId;
       setCallSessionId(sessionId);
       setCallPartnerName(partnerName);
       socketService.getSocket()?.emit('call:offer', {
-        sessionId, offer, callerName,
+        sessionId, offer: serializedOffer, callerName,
       });
+      console.log('[Call] 📤 Offer sent via socket');
 
       // 6. Set status
       setCallStatus('calling'); callStatusRef.current = 'calling';
 
-      // Timeout: auto-end if not answered
+      // Timeout
       if (callingTimeoutRef.current) clearTimeout(callingTimeoutRef.current);
       callingTimeoutRef.current = setTimeout(() => {
-        if (callStatusRef.current === 'calling') endCall(true);
+        if (callStatusRef.current === 'calling') {
+          console.log('[Call] Calling timeout — no answer');
+          endCall(true);
+        }
       }, CALLING_TIMEOUT_MS);
 
     } catch (err: any) {
+      console.error('[Call] startCall error:', err);
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
-      if (err.name === 'NotAllowedError') alert('Microphone access blocked. Please allow it in browser settings.');
+      if (err.name === 'NotAllowedError') alert('Microphone access blocked. Allow it in browser settings.');
       else alert('Could not start call: ' + err.message);
     }
-  }, [createPeerConnection, endCall]);
+  }, [createPeerConnection, endCall, prewarmAudio]);
 
   // ── acceptCall ────────────────────────────────────────────────────────────
   const acceptCall = useCallback(async () => {
@@ -405,20 +449,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pendingOfferRef.current = null;
     stopRingBeep();
     if (ringingTimeoutRef.current) { clearTimeout(ringingTimeoutRef.current); ringingTimeoutRef.current = null; }
+    console.log('[Call] Accepting call for session', sessionId);
+
+    // Pre-warm audio element DURING this user gesture (Accept button click)
+    prewarmAudio();
 
     try {
       // 1. Get microphone
+      console.log('[Call] Requesting microphone...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
+      console.log('[Call] Microphone acquired');
 
       // 2. Create peer connection
       const pc = createPeerConnection(sessionId);
 
-      // 3. Set remote description (the offer)
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-      // 4. Add local audio track
+      // 3. Add local audio tracks BEFORE setRemoteDescription
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      console.log('[Call] Local tracks added');
+
+      // 4. Set remote description (the offer)
+      console.log('[Call] Setting remote description (offer), sdp length:', offer.sdp?.length);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer as RTCSessionDescriptionInit));
+      console.log('[Call] Remote description set');
 
       // 5. Flush queued ICE candidates
       flushIceCandidates();
@@ -426,22 +479,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
       // 6. Create answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      const serializedAnswer = serializeSDP(answer);
+      console.log('[Call] SDP answer created, sdp length:', serializedAnswer.sdp.length);
 
       // 7. Send answer
       callSessionIdRef.current = sessionId;
       setCallSessionId(sessionId);
-      socketService.getSocket()?.emit('call:answer', { sessionId, answer });
+      socketService.getSocket()?.emit('call:answer', { sessionId, answer: serializedAnswer });
+      console.log('[Call] 📤 Answer sent via socket');
 
       // 8. Connected!
       setCallStatus('connected'); callStatusRef.current = 'connected';
       startCallTimer();
-      console.log('[Call] ✅ Accepted — WebRTC P2P audio active');
+      console.log('[Call] ✅ Accepted — waiting for ICE to connect and audio to flow');
 
     } catch (err: any) {
+      console.error('[Call] acceptCall error:', err);
       alert('Could not answer call: ' + err.message);
       setCallStatus('idle'); callStatusRef.current = 'idle';
     }
-  }, [createPeerConnection, flushIceCandidates, stopRingBeep, startCallTimer]);
+  }, [createPeerConnection, flushIceCandidates, stopRingBeep, startCallTimer, prewarmAudio]);
 
   // ── declineCall ───────────────────────────────────────────────────────────
   const declineCall = useCallback(() => {
@@ -454,11 +511,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCallPartnerName(null); setCallSessionId(null); callSessionIdRef.current = null;
   }, [stopRingBeep]);
 
-  // ── Unlock remote audio on user gesture (needed after refresh) ────────────
+  // ── Unlock remote audio on any user gesture (fallback for autoplay) ───────
   useEffect(() => {
     const unlock = () => {
-      if (remoteAudioRef.current && remoteAudioRef.current.paused && remoteAudioRef.current.srcObject) {
-        remoteAudioRef.current.play().catch(() => {});
+      const audio = remoteAudioRef.current;
+      if (audio && audio.paused && audio.srcObject) {
+        console.log('[Call] Attempting audio unlock via user gesture...');
+        audio.play().then(() => console.log('[Call] ✅ Audio unlocked')).catch(() => {});
       }
     };
     document.addEventListener('click', unlock, { passive: true });
@@ -473,52 +532,78 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    const removeAllCallListeners = () => {
+      const s = socketService.getSocket();
+      if (!s) return;
+      s.off('call:offer');
+      s.off('call:answer');
+      s.off('call:ice-candidate');
+      s.off('call:end');
+      s.off('call:ended-by-server');
+      s.off('call:partner-reconnecting');
+      s.off('call:partner-reconnected');
+      s.off('call:rejoin-success');
+      s.off('call:rejoin-failed');
+      listenersAttachedRef.current = false;
+    };
+
     const attach = () => {
       const socket = socketService.getSocket();
-      if (!socket) return;
+      if (!socket || listenersAttachedRef.current) return;
+
+      console.log('[Call] Attaching socket listeners');
+      listenersAttachedRef.current = true;
 
       // ── Incoming call offer ──
       socket.on('call:offer', async (data: {
-        sessionId: string; callerName: string; offer: RTCSessionDescriptionInit;
+        sessionId: string; callerName: string; offer: { type: string; sdp: string };
         isRestart?: boolean; isReconnect?: boolean;
       }) => {
-        // ICE restart from active call — handle transparently
+        console.log('[Call] 📥 Received call:offer', {
+          sessionId: data.sessionId, isRestart: data.isRestart, isReconnect: data.isReconnect,
+          callerName: data.callerName, hasOffer: !!data.offer, sdpLength: data.offer?.sdp?.length,
+        });
+
+        // ICE restart — transparent renegotiation
         if (data.isRestart && callStatusRef.current === 'connected' && pcRef.current) {
           try {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+            await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.offer as RTCSessionDescriptionInit));
             flushIceCandidates();
             const answer = await pcRef.current.createAnswer();
             await pcRef.current.setLocalDescription(answer);
-            socket.emit('call:answer', { sessionId: data.sessionId, answer });
-          } catch (err) { console.error('[Call] ICE restart answer failed:', err); }
+            socket.emit('call:answer', { sessionId: data.sessionId, answer: serializeSDP(answer) });
+            console.log('[Call] ICE restart answer sent');
+          } catch (err) { console.error('[Call] ICE restart failed:', err); }
           return;
         }
 
-        // Reconnect offer (after page refresh) — auto-accept
+        // Reconnect (after page refresh) — auto-accept
         if (data.isReconnect) {
           if (callStatusRef.current !== 'reconnecting' && callStatusRef.current !== 'connected') return;
+          console.log('[Call] Auto-accepting reconnect offer');
           try {
             const stream = localStreamRef.current
               ?? await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             localStreamRef.current = stream;
             const pc = createPeerConnection(data.sessionId);
-            await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
             stream.getTracks().forEach(track => pc.addTrack(track, stream));
+            await pc.setRemoteDescription(new RTCSessionDescription(data.offer as RTCSessionDescriptionInit));
             flushIceCandidates();
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            socket.emit('call:answer', { sessionId: data.sessionId, answer });
+            socket.emit('call:answer', { sessionId: data.sessionId, answer: serializeSDP(answer) });
             setCallStatus('connected'); callStatusRef.current = 'connected';
             console.log('[Call] ✅ Reconnect answer sent');
-          } catch (err) { console.error('[Call] Reconnect failed:', err); }
+          } catch (err) { console.error('[Call] Reconnect accept failed:', err); }
           return;
         }
 
-        // Normal incoming call — show ringing UI
-        if (callStatusRef.current !== 'idle') return;
-        pendingOfferRef.current = {
-          sessionId: data.sessionId, callerName: data.callerName, offer: data.offer,
-        };
+        // Normal incoming call
+        if (callStatusRef.current !== 'idle') {
+          console.log('[Call] Ignoring offer — not idle, current status:', callStatusRef.current);
+          return;
+        }
+        pendingOfferRef.current = { sessionId: data.sessionId, callerName: data.callerName, offer: data.offer };
         setCallSessionId(data.sessionId); callSessionIdRef.current = data.sessionId;
         setCallPartnerName(data.callerName);
         setCallStatus('ringing'); callStatusRef.current = 'ringing';
@@ -534,16 +619,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
       });
 
       // ── Answer received (caller gets this) ──
-      socket.on('call:answer', async (data: { sessionId: string; answer: RTCSessionDescriptionInit }) => {
+      socket.on('call:answer', async (data: { sessionId: string; answer: { type: string; sdp: string } }) => {
+        console.log('[Call] 📥 Received call:answer, sdp length:', data.answer?.sdp?.length);
         const pc = pcRef.current;
-        if (!pc) return;
+        if (!pc) { console.error('[Call] No peer connection to set answer on!'); return; }
         if (callingTimeoutRef.current) { clearTimeout(callingTimeoutRef.current); callingTimeoutRef.current = null; }
         try {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer as RTCSessionDescriptionInit));
           flushIceCandidates();
           setCallStatus('connected'); callStatusRef.current = 'connected';
           startCallTimer();
-          console.log('[Call] ✅ Connected — WebRTC P2P audio active');
+          console.log('[Call] ✅ Connected — remote description set, waiting for audio');
         } catch (err) {
           console.error('[Call] Failed to set remote answer:', err);
         }
@@ -554,14 +640,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const pc = pcRef.current;
         if (!pc) return;
         if (pc.remoteDescription) {
-          pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
+          pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch((err) => {
+            console.warn('[Call] Failed to add ICE candidate:', err.message);
+          });
         } else {
-          // Queue until remote description is set
           iceCandidateQueue.current.push(data.candidate);
+          console.log('[Call] 📥 ICE candidate queued (no remote desc yet), queue size:', iceCandidateQueue.current.length);
         }
       });
 
-      // ── Partner reconnecting (their page refreshed) ──
+      // ── Partner reconnecting ──
       socket.on('call:partner-reconnecting', () => {
         if (callStatusRef.current === 'connected' || callStatusRef.current === 'reconnecting') {
           setCallStatus('reconnecting'); callStatusRef.current = 'reconnecting';
@@ -574,15 +662,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (callStatusRef.current !== 'reconnecting') return;
         startCallTimer(data.startTimestamp);
         console.log('[Call] ✅ Partner reconnected');
-        // The reconnecting partner will send a new offer — we'll answer in call:offer handler
       });
 
-      // ── Call ended by partner or server ──
-      socket.on('call:end', () => endCall(false));
-      socket.on('call:ended-by-server', () => endCall(false));
-      socket.on('call:rejoin-failed', () => endCall(false));
+      // ── Call ended ──
+      socket.on('call:end', () => { console.log('[Call] Partner ended call'); endCall(false); });
+      socket.on('call:ended-by-server', () => { console.log('[Call] Server ended call'); endCall(false); });
+      socket.on('call:rejoin-failed', () => { console.log('[Call] Rejoin failed'); endCall(false); });
 
-      // ── Rejoin success (after OUR page refresh) ──
+      // ── Rejoin success ──
       socket.on('call:rejoin-success', async (data: {
         sessionId: string; startTimestamp: number; partnerUserId: string;
       }) => {
@@ -594,19 +681,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
           stream.getTracks().forEach(track => pc.addTrack(track, stream));
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-
           socket.emit('call:offer', {
-            sessionId: data.sessionId,
-            offer,
-            callerName: callerNameRef.current,
-            isReconnect: true,
+            sessionId: data.sessionId, offer: serializeSDP(offer),
+            callerName: callerNameRef.current, isReconnect: true,
           });
-
           callSessionIdRef.current = data.sessionId;
           setCallSessionId(data.sessionId);
           startCallTimer(data.startTimestamp);
-          // Status stays 'reconnecting' until ICE connects → switches to 'connected'
-          console.log('[Call] 🔄 Reconnect offer sent, waiting for answer...');
+          console.log('[Call] 🔄 Reconnect offer sent');
         } catch (err) {
           console.error('[Call] Rejoin failed:', err);
           endCall(false);
@@ -614,7 +696,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       });
     };
 
-    // Check if we need to rejoin an active call (after page refresh)
+    // Check if we need to rejoin
     const checkRejoin = () => {
       try {
         const s = JSON.parse(sessionStorage.getItem('pairon_call') || 'null');
@@ -632,22 +714,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
       } catch {}
     };
 
+    // Attach and check rejoin
     const socket = socketService.getSocket();
-    if (socket?.connected) { attach(); checkRejoin(); }
-    else {
+    if (socket?.connected) {
+      attach();
+      checkRejoin();
+    } else {
       const onConnect = () => { attach(); checkRejoin(); };
       socket?.on('connect', onConnect);
-      return () => { socket?.off('connect', onConnect); };
     }
 
     return () => {
+      removeAllCallListeners();
       const s = socketService.getSocket();
-      s?.off('call:offer'); s?.off('call:answer'); s?.off('call:ice-candidate');
-      s?.off('call:end'); s?.off('call:partner-reconnecting'); s?.off('call:partner-reconnected');
-      s?.off('call:rejoin-success'); s?.off('call:rejoin-failed'); s?.off('call:ended-by-server');
+      s?.off('connect');
     };
   }, [isAuthenticated, endCall, startCallTimer, createPeerConnection,
-    flushIceCandidates, startRingBeep, stopRingBeep, setupSpeakerChain]);
+    flushIceCandidates, startRingBeep, stopRingBeep, prewarmAudio]);
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
