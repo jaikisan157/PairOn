@@ -25,6 +25,22 @@ const pendingExitRequests = new Map<string, { requesterId: string; requesterName
 // Pending project edit proposals: sessionId -> proposal data
 const pendingProjectEdits = new Map<string, { proposerId: string; proposerName: string; title: string; description: string }>();
 
+// ── Pending match confirmations ─────────────────────────────────────────
+interface PendingMatch {
+    pendingMatchId: string;
+    userId1: string; socketId1: string;
+    userId2: string; socketId2: string;
+    mode: ChallengeMode;
+    projectIdea: any;
+    user1Name: string; user2Name: string;
+    user1Reputation: number; user2Reputation: number;
+    acceptedBy: Set<string>;  // userIds who accepted
+    expiresAt: number;        // unix ms
+    timeoutHandle: NodeJS.Timeout;
+}
+const pendingMatches: Map<string, PendingMatch> = new Map(); // pendingMatchId -> PendingMatch
+const CONFIRM_TIMEOUT_MS = 30_000; // 30 seconds to accept
+
 // IDE state per session (in-memory; lost on server restart)
 const ideSessionState = new Map<string, { files: Record<string, string>; folders: string[]; previewUrl?: string }>();
 
@@ -119,6 +135,62 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
         socket.emit('challenge:cancelled');
         console.log(`[Challenge] User ${userId} cancelled search.`);
     });
+
+    // ===== Confirm match =====
+    socket.on('challenge:confirm', async (data: { pendingMatchId: string }) => {
+        const pm = pendingMatches.get(data.pendingMatchId);
+        if (!pm) return; // expired or already resolved
+
+        pm.acceptedBy.add(userId);
+        console.log(`[Challenge] ${userId} accepted pending match ${data.pendingMatchId}. Accepted: ${pm.acceptedBy.size}/2`);
+
+        if (pm.acceptedBy.size < 2) {
+            socket.emit('challenge:waiting-for-partner');
+            return;
+        }
+
+        // Both accepted — create session
+        clearTimeout(pm.timeoutHandle);
+        pendingMatches.delete(data.pendingMatchId);
+        try {
+            await createMatchedSession(io, pm);
+        } catch (err) {
+            console.error('[Challenge] Failed to create session after confirm:', err);
+        }
+    });
+
+    // ===== Decline match =====
+    socket.on('challenge:decline', (data: { pendingMatchId: string }) => {
+        const pm = pendingMatches.get(data.pendingMatchId);
+        if (!pm) return;
+
+        clearTimeout(pm.timeoutHandle);
+        pendingMatches.delete(data.pendingMatchId);
+
+        const declinedId = pm.userId1 === userId ? pm.userId2 : pm.userId1;
+        const declinedSocketId = pm.userId1 === userId ? pm.socketId2 : pm.socketId1;
+        const declinerName = pm.userId1 === userId ? pm.user1Name : pm.user2Name;
+
+        console.log(`[Challenge] ${userId} declined pending match ${data.pendingMatchId}`);
+
+        // Notify the other user
+        io.to(`user:${declinedId}`).emit('challenge:match-declined', {
+            reason: 'declined',
+            message: `${declinerName} declined the match. Searching again...`,
+        });
+        // Re-queue the other user
+        const otherSocket = io.sockets.sockets.get(declinedSocketId);
+        if (otherSocket) {
+            challengeQueue.set(declinedId, {
+                userId: declinedId, mode: pm.mode,
+                socketId: declinedSocketId, joinedAt: Date.now(),
+            });
+            io.to(`user:${declinedId}`).emit('challenge:requeued', { mode: pm.mode });
+        }
+
+        socket.emit('challenge:decline-confirmed');
+    });
+
 
     // ===== Send message (with content moderation) =====
     socket.on('challenge:message', async (sessionId: string, content: string) => {
@@ -902,105 +974,150 @@ async function findChallengePartner(
     // Generate project idea
     const projectIdea = generateProjectIdea(user1, user2);
 
-    // Calculate end time
+    // Remove BOTH from queue BEFORE sending invite (prevents double-matching)
+    challengeQueue.delete(userId);
+    challengeQueue.delete(best.userId);
+
+    // ── Create a PENDING match — wait for both to confirm ──────────────────
+    const pendingMatchId = `pmatch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const expiresAt = Date.now() + CONFIRM_TIMEOUT_MS;
+
+    const matchFoundData1 = {
+        pendingMatchId,
+        partnerId: best.userId,
+        partnerName: (user2 as any).name,
+        partnerReputation: (user2 as any).reputation || 0,
+        mode, projectIdea, expiresAt,
+    };
+    const matchFoundData2 = {
+        pendingMatchId,
+        partnerId: userId,
+        partnerName: (user1 as any).name,
+        partnerReputation: (user1 as any).reputation || 0,
+        mode, projectIdea, expiresAt,
+    };
+
+    const timeoutHandle = setTimeout(() => {
+        const pm = pendingMatches.get(pendingMatchId);
+        if (!pm) return;
+        pendingMatches.delete(pendingMatchId);
+
+        const a1 = pm.acceptedBy.has(pm.userId1);
+        const a2 = pm.acceptedBy.has(pm.userId2);
+        console.log(`[Challenge] Pending match ${pendingMatchId} timed out. a1=${a1}, a2=${a2}`);
+
+        const noRespMsg = 'Match timed out — no response. Searching again...';
+        const noRespOther = (name: string) => `${name} didn't respond in time. Searching again...`;
+
+        if (!a1 && !a2) {
+            io.to(`user:${pm.userId1}`).emit('challenge:match-declined', { reason: 'timeout', message: noRespMsg });
+            io.to(`user:${pm.userId2}`).emit('challenge:match-declined', { reason: 'timeout', message: noRespMsg });
+            challengeQueue.set(pm.userId1, { userId: pm.userId1, mode: pm.mode, socketId: pm.socketId1, joinedAt: Date.now() });
+            challengeQueue.set(pm.userId2, { userId: pm.userId2, mode: pm.mode, socketId: pm.socketId2, joinedAt: Date.now() });
+            io.to(`user:${pm.userId1}`).emit('challenge:requeued', { mode: pm.mode });
+            io.to(`user:${pm.userId2}`).emit('challenge:requeued', { mode: pm.mode });
+        } else if (a1 && !a2) {
+            io.to(`user:${pm.userId1}`).emit('challenge:match-declined', { reason: 'timeout', message: noRespOther(pm.user2Name) });
+            io.to(`user:${pm.userId2}`).emit('challenge:match-declined', { reason: 'timeout', message: 'You did not respond in time. Searching again...' });
+            challengeQueue.set(pm.userId1, { userId: pm.userId1, mode: pm.mode, socketId: pm.socketId1, joinedAt: Date.now() });
+            io.to(`user:${pm.userId1}`).emit('challenge:requeued', { mode: pm.mode });
+        } else if (!a1 && a2) {
+            io.to(`user:${pm.userId2}`).emit('challenge:match-declined', { reason: 'timeout', message: noRespOther(pm.user1Name) });
+            io.to(`user:${pm.userId1}`).emit('challenge:match-declined', { reason: 'timeout', message: 'You did not respond in time. Searching again...' });
+            challengeQueue.set(pm.userId2, { userId: pm.userId2, mode: pm.mode, socketId: pm.socketId2, joinedAt: Date.now() });
+            io.to(`user:${pm.userId2}`).emit('challenge:requeued', { mode: pm.mode });
+        }
+    }, CONFIRM_TIMEOUT_MS);
+
+    pendingMatches.set(pendingMatchId, {
+        pendingMatchId,
+        userId1: userId, socketId1: socket.id,
+        userId2: best.userId, socketId2: best.socketId,
+        mode, projectIdea,
+        user1Name: (user1 as any).name, user2Name: (user2 as any).name,
+        user1Reputation: (user1 as any).reputation || 0,
+        user2Reputation: (user2 as any).reputation || 0,
+        acceptedBy: new Set(), expiresAt, timeoutHandle,
+    });
+
+    socket.emit('challenge:match-found', matchFoundData1);
+    io.to(best.socketId).emit('challenge:match-found', matchFoundData2);
+    io.to(`user:${userId}`).emit('challenge:match-found', matchFoundData1);
+    io.to(`user:${best.userId}`).emit('challenge:match-found', matchFoundData2);
+
+    console.log(`[Challenge] Pending match ${pendingMatchId}: ${userId} + ${best.userId} for ${mode}`);
+
+    return true;
+}
+
+// ── createMatchedSession — creates DB records and navigates both users ────────
+async function createMatchedSession(io: Server, pm: PendingMatch) {
+    const { userId1, userId2, socketId1, socketId2, mode, projectIdea,
+            user1Name, user2Name, user1Reputation, user2Reputation } = pm;
+
     const now = new Date();
     const endsAt = new Date(now.getTime() + MODE_DURATIONS[mode]);
 
     // Create Match record
     const match = new Match({
-        user1Id: userId,
-        user2Id: best.userId,
-        mode,
-        status: 'active',
-        startedAt: now,
-        endsAt,
-        projectIdea,
-        matchScore: 100,
+        user1Id: userId1, user2Id: userId2,
+        mode, status: 'active',
+        startedAt: now, endsAt, projectIdea, matchScore: 100,
     });
     await match.save();
 
     // Create CollaborationSession
-    const systemMsg = `🚀 Challenge started! Mode: ${mode.toUpperCase()} | Duration: ${mode === 'sprint' ? '3 hours' : mode === 'challenge' ? '24 hours' : '7 days'}`;
+    const durationLabel = mode === 'sprint' ? '3 hours' : mode === 'challenge' ? '24 hours' : '7 days';
+    const systemMsg = `🚀 Challenge started! Mode: ${mode.toUpperCase()} | Duration: ${durationLabel}`;
     const session = new CollaborationSession({
         matchId: match._id.toString(),
-        participants: [userId, best.userId],
-        messages: [
-            {
-                id: `sys-start-${Date.now()}`,
-                senderId: 'system',
-                content: systemMsg,
-                timestamp: now,
-                type: 'system',
-            },
-        ],
+        participants: [userId1, userId2],
+        messages: [{ id: `sys-start-${Date.now()}`, senderId: 'system', content: systemMsg, timestamp: now, type: 'system' }],
         tasks: (projectIdea as any)?.tasks || [],
-        status: 'active',
-        startedAt: now,
-        endsAt,
+        status: 'active', startedAt: now, endsAt,
     });
     await session.save();
 
-    // Remove BOTH from queue
-    challengeQueue.delete(userId);
-    challengeQueue.delete(best.userId);
-
-    // Join socket room (EXACTLY like Quick Chat)
-    socket.join(`challenge:${session._id}`);
-    const partnerSocket = io.sockets.sockets.get(best.socketId);
-    partnerSocket?.join(`challenge:${session._id}`);
+    // Join socket rooms
+    const socket1 = io.sockets.sockets.get(socketId1);
+    const socket2 = io.sockets.sockets.get(socketId2);
+    socket1?.join(`challenge:${session._id}`);
+    socket2?.join(`challenge:${session._id}`);
 
     // Track active sessions
-    activeChallengeSockets.get(socket.id)?.add(session._id.toString());
-    if (partnerSocket) {
-        if (!activeChallengeSockets.has(partnerSocket.id)) {
-            activeChallengeSockets.set(partnerSocket.id, new Set());
-        }
-        activeChallengeSockets.get(partnerSocket.id)?.add(session._id.toString());
+    if (socket1) {
+        if (!activeChallengeSockets.has(socketId1)) activeChallengeSockets.set(socketId1, new Set());
+        activeChallengeSockets.get(socketId1)?.add(session._id.toString());
+    }
+    if (socket2) {
+        if (!activeChallengeSockets.has(socketId2)) activeChallengeSockets.set(socketId2, new Set());
+        activeChallengeSockets.get(socketId2)?.add(session._id.toString());
     }
 
-    // Build match data (same for both, just swap partner info)
-    const matchData1 = {
+    const base = {
         sessionId: session._id.toString(),
         matchId: match._id.toString(),
-        partnerId: best.userId,
-        partnerName: user2.name,
-        partnerReputation: user2.reputation || 0,
-        mode,
-        projectIdea,
+        mode, projectIdea,
         endsAt: endsAt.toISOString(),
         startedAt: now.toISOString(),
         messages: session.messages,
         tasks: session.tasks,
     };
+    const matchData1 = { ...base, partnerId: userId2, partnerName: user2Name, partnerReputation: user2Reputation };
+    const matchData2 = { ...base, partnerId: userId1, partnerName: user1Name, partnerReputation: user1Reputation };
 
-    const matchData2 = {
-        sessionId: session._id.toString(),
-        matchId: match._id.toString(),
-        partnerId: userId,
-        partnerName: user1.name,
-        partnerReputation: user1.reputation || 0,
-        mode,
-        projectIdea,
-        endsAt: endsAt.toISOString(),
-        startedAt: now.toISOString(),
-        messages: session.messages,
-        tasks: session.tasks,
-    };
+    // Emit to both (socket + user room for reliability)
+    socket1?.emit('challenge:matched', matchData1);
+    socket2?.emit('challenge:matched', matchData2);
+    io.to(`user:${userId1}`).emit('challenge:matched', matchData1);
+    io.to(`user:${userId2}`).emit('challenge:matched', matchData2);
 
-    // Emit to BOTH users (use user room AND socket ID for reliability)
-    socket.emit('challenge:matched', matchData1);
-    io.to(best.socketId).emit('challenge:matched', matchData2);
-    // Also emit to user rooms as backup (in case socketId is stale from reconnect)
-    io.to(`user:${userId}`).emit('challenge:matched', matchData1);
-    io.to(`user:${best.userId}`).emit('challenge:matched', matchData2);
-
-    console.log(`[Challenge] Matched ${userId} + ${best.userId} for ${mode}`);
+    console.log(`[Challenge] Session created: ${session._id} for ${userId1} + ${userId2} (${mode})`);
 
     // Start session timer
-    startChallengeTimer(io, session._id.toString(), endsAt, session.participants);
-
-    return true;
+    startChallengeTimer(io, session._id.toString(), endsAt, session.participants as string[]);
 }
+
 
 // ===== Session timer =====
 function startChallengeTimer(io: Server, sessionId: string, endsAt: Date, participants: string[]) {

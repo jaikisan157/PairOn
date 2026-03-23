@@ -35,6 +35,8 @@ import { formatDuration } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { isMobileOrTablet } from '@/lib/deviceDetect';
 import { playMatchSound } from '@/lib/audio';
+import { MatchConfirmModal } from '@/components/MatchConfirmModal';
+import type { MatchFoundData } from '@/components/MatchConfirmModal';
 import type { MatchMode } from '@/types';
 
 const iconMap = {
@@ -73,6 +75,10 @@ export function DashboardPage() {
 
   // Unread DM count for Friends icon badge
   const [totalDmUnread, setTotalDmUnread] = useState(0);
+
+  // Match confirmation
+  const [pendingMatchData, setPendingMatchData] = useState<MatchFoundData | null>(null);
+  const [waitingForPartner, setWaitingForPartner] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('pairon_token') || '';
@@ -140,6 +146,34 @@ export function DashboardPage() {
       setSessionHistory(history);
     });
 
+    // Match found — show confirmation popup
+    socket.on('challenge:match-found', (data: MatchFoundData) => {
+      console.log('[Dashboard] Match found:', data);
+      playMatchSound();
+      setPendingMatchData(data);
+      setWaitingForPartner(false);
+    });
+
+    // Partner waiting / both accepted — real session incoming via challenge:matched
+    socket.on('challenge:waiting-for-partner', () => {
+      setWaitingForPartner(true);
+    });
+
+    // Match declined or timed out
+    socket.on('challenge:match-declined', (data: { reason: string; message: string }) => {
+      setPendingMatchData(null);
+      setWaitingForPartner(false);
+      setIsSearching(false); // stop spinner — user is shown re-queue notification
+      if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+      alert(data.message ?? 'Match cancelled. Searching again...');
+    });
+
+    // Server re-queued user (after other declined) — resume searching
+    socket.on('challenge:requeued', (data: { mode: string }) => {
+      console.log('[Dashboard] Re-queued for mode:', data.mode);
+      setIsSearching(true);
+    });
+
     // Matched — save data and navigate
     socket.on('challenge:matched', (data: any) => {
       setIsSearching(false);
@@ -198,8 +232,12 @@ export function DashboardPage() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       if (socket) {
+        socket.removeAllListeners('challenge:match-found');
         socket.removeAllListeners('challenge:matched');
         socket.removeAllListeners('challenge:waiting');
+        socket.removeAllListeners('challenge:waiting-for-partner');
+        socket.removeAllListeners('challenge:match-declined');
+        socket.removeAllListeners('challenge:requeued');
         socket.removeAllListeners('challenge:error');
         socket.removeAllListeners('challenge:cancelled');
         socket.removeAllListeners('dashboard:cleanup-done');
@@ -268,8 +306,53 @@ export function DashboardPage() {
     { label: 'Projects', value: user?.completedProjects || 0, icon: Trophy, color: 'text-purple-500' },
   ];
 
+  const handleMatchAccept = (pendingMatchId: string) => {
+    socketService.getSocket()?.emit('challenge:confirm', { pendingMatchId });
+    setWaitingForPartner(true);
+    setPendingMatchData(null);
+  };
+
+  const handleMatchDecline = (pendingMatchId: string) => {
+    socketService.getSocket()?.emit('challenge:decline', { pendingMatchId });
+    setPendingMatchData(null);
+    setWaitingForPartner(false);
+    setIsSearching(false);
+  };
+
   return (
     <div className="min-h-screen bg-pairon-bg dark:bg-gray-900">
+
+      {/* Match confirmation modal */}
+      <MatchConfirmModal
+        data={pendingMatchData}
+        onAccept={handleMatchAccept}
+        onDecline={handleMatchDecline}
+      />
+
+      {/* Waiting for partner overlay */}
+      {waitingForPartner && !pendingMatchData && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 99989,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
+          fontFamily: 'Inter, system-ui, sans-serif',
+        }}>
+          <div style={{
+            background: '#1a1d2e', borderRadius: 20, padding: '32px 40px',
+            textAlign: 'center', boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+          }}>
+            <div style={{
+              width: 44, height: 44, border: '3px solid #10b981',
+              borderTopColor: 'transparent', borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite', margin: '0 auto 16px',
+            }} />
+            <p style={{ color: 'white', fontWeight: 700, fontSize: 16, margin: 0 }}>Waiting for partner...</p>
+            <p style={{ color: '#9ca3af', fontSize: 13, marginTop: 6 }}>They accepted — connecting now</p>
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-12">
