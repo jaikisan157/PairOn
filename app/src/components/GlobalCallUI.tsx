@@ -1,15 +1,15 @@
 import { useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, PhoneOff, PhoneIncoming, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, Mic, MicOff, Volume2 } from 'lucide-react';
 import { useCall } from '@/context/CallContext';
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
 export function GlobalCallUI() {
   const {
-    callStatus, callPartnerName, callDuration, isMuted, isSpeakerOn,
+    callStatus, callPartnerName, callDuration, isMuted, volume, setVolume,
     callBarPos, setCallBarPos,
-    acceptCall, declineCall, endCall, toggleMute, toggleSpeaker,
+    acceptCall, declineCall, endCall, toggleMute,
   } = useCall();
 
   const dragStartRef = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
@@ -154,10 +154,10 @@ export function GlobalCallUI() {
                     ? 'linear-gradient(135deg, #6366f1, #4f46e5)'
                     : 'linear-gradient(135deg, #10b981, #059669)',
                 borderRadius: 50, padding: '10px 20px',
-                display: 'flex', alignItems: 'center', gap: 14,
+                display: 'flex', alignItems: 'center', gap: 12,
                 boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
                 cursor: 'grab', userSelect: 'none',
-                minWidth: 260,
+                minWidth: 280,
               }}
             >
               {/* Status icon */}
@@ -193,14 +193,15 @@ export function GlobalCallUI() {
 
               {/* Controls (only when connected) */}
               {callStatus === 'connected' && (
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {/* Mute button */}
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleMute(); }}
                     style={{
                       width: 32, height: 32, borderRadius: '50%', border: 'none',
                       background: isMuted ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.15)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer', transition: 'background 0.2s',
+                      cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0,
                     }}
                     title={isMuted ? 'Unmute' : 'Mute'}
                   >
@@ -208,20 +209,21 @@ export function GlobalCallUI() {
                       ? <MicOff style={{ width: 14, height: 14, color: '#fca5a5' }} />
                       : <Mic style={{ width: 14, height: 14, color: 'white' }} />}
                   </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleSpeaker(); }}
+                  {/* Volume slider */}
+                  <Volume2 style={{ width: 13, height: 13, color: 'rgba(255,255,255,0.7)', flexShrink: 0 }} />
+                  <input
+                    max={100}
+                    value={volume}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onChange={(e) => { e.stopPropagation(); setVolume(Number(e.target.value)); }}
+                    title={`Volume: ${volume}%`}
                     style={{
-                      width: 32, height: 32, borderRadius: '50%', border: 'none',
-                      background: isSpeakerOn ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.15)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer', transition: 'background 0.2s',
+                      width: 64, height: 4, accentColor: 'white',
+                      cursor: 'pointer', flexShrink: 0,
                     }}
-                    title={isSpeakerOn ? 'Normal volume' : 'Boost volume'}
-                  >
-                    {isSpeakerOn
-                      ? <Volume2 style={{ width: 14, height: 14, color: '#a5b4fc' }} />
-                      : <VolumeX style={{ width: 14, height: 14, color: 'white' }} />}
-                  </button>
+                  />
                 </div>
               )}
 

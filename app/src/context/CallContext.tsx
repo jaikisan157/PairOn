@@ -23,7 +23,8 @@ interface CallContextType {
   callSessionId: string | null;
   callPartnerName: string | null;
   isMuted: boolean;
-  isSpeakerOn: boolean;
+  volume: number;          // 0–100
+  setVolume: (v: number) => void;
   callDuration: number;
   callBarPos: { x: number; y: number };
   setCallBarPos: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
@@ -32,7 +33,6 @@ interface CallContextType {
   declineCall: () => void;
   endCall: (notify?: boolean) => void;
   toggleMute: () => void;
-  toggleSpeaker: () => void;
 }
 
 const CallContext = createContext<CallContextType | null>(null);
@@ -82,8 +82,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [callPartnerName, setCallPartnerName] = useState<string | null>(() => {
     try { return JSON.parse(sessionStorage.getItem('pairon_call') || 'null')?.partnerName ?? null; } catch { return null; }
   });
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const [isMuted, setIsMuted] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('pairon_call') || 'null')?.isMuted ?? false; } catch { return false; }
+  });
+  const muteRef = useRef<boolean>(false); // ref so audio callback always has latest value
+  const [volume, setVolumeState] = useState(100);
   const [callDuration, setCallDuration] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('pairon_call') || 'null')?.duration ?? 0; } catch { return 0; }
   });
@@ -122,7 +125,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => { callStatusRef.current = callStatus; }, [callStatus]);
   useEffect(() => { callSessionIdRef.current = callSessionId; }, [callSessionId]);
 
-  // ── Persist call state to sessionStorage ───────────────────────────────────
+  // ── Persist call state to sessionStorage (including mute) ─────────────────
   useEffect(() => {
     if (callStatus === 'connected' || callStatus === 'reconnecting') {
       sessionStorage.setItem('pairon_call', JSON.stringify({
@@ -130,11 +133,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         partnerName: callPartnerName, duration: callDuration,
         startTimestamp: callStartRef.current,
         callerName: callerNameRef.current,
+        isMuted: muteRef.current,
       }));
     } else if (callStatus === 'idle') {
       sessionStorage.removeItem('pairon_call');
     }
-  }, [callStatus, callSessionId, callPartnerName, callDuration]);
+  }, [callStatus, callSessionId, callPartnerName, callDuration, isMuted]);
 
   // ── Create remote <audio> element IN THE DOM ──────────────────────────────
   // CRITICAL: Must be in the DOM for browsers to actually play audio.
@@ -189,17 +193,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const prewarmAudio = useCallback(() => {
     const audio = remoteAudioRef.current;
     if (!audio) return;
-    // Play a tiny silent WAV to unlock the audio element
-    // This must happen during a user gesture (button click)
-    const silentWav = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-    audio.src = silentWav;
-    audio.play().then(() => {
-      audio.pause();
-      audio.src = '';
-      audio.srcObject = null;
-      console.log('[Call] 🔓 Audio element pre-warmed (autoplay unlocked)');
-    }).catch((err) => {
-      console.warn('[Call] Pre-warm failed:', err.message);
+    // Just call play() with no src — this registers the user gesture with the browser.
+    // We do NOT set audio.src or srcObject here because that would overwrite the real stream later.
+    audio.play().catch(() => {
+      // Will fail (no source yet) — that's fine. The gesture is registered.
+      console.log('[Call] 🔓 Audio gesture registered');
     });
   }, []);
 
@@ -347,6 +345,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pendingOfferRef.current = null;
   }, [stopRingBeep]);
 
+  // ── toggleMute ────────────────────────────────────────────────────────────
+  const toggleMute = useCallback(() => {
+    const track = localStreamRef.current?.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      muteRef.current = !track.enabled;
+      setIsMuted(!track.enabled);
+      console.log('[Call] Mute:', !track.enabled);
+    }
+  }, []);
+
+  // ── setVolume (0–100, applied to remote audio element) ────────────────────
+  const setVolume = useCallback((v: number) => {
+    const clamped = Math.max(0, Math.min(100, v));
+    setVolumeState(clamped);
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.volume = clamped / 100;
+    }
+  }, []);
+
   // ── endCall ───────────────────────────────────────────────────────────────
   const endCall = useCallback((notify = true) => {
     console.log('[Call] Ending call, notify:', notify);
@@ -355,33 +373,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
     fullCleanup();
     sessionStorage.removeItem('pairon_call');
     setCallStatus('idle'); callStatusRef.current = 'idle';
-    setCallDuration(0); setIsMuted(false); setIsSpeakerOn(false);
+    setCallDuration(0); setIsMuted(false); muteRef.current = false;
+    setVolumeState(100);
     setCallSessionId(null); callSessionIdRef.current = null;
     setCallPartnerName(null); setCallBarPos({ x: 0, y: 0 });
   }, [fullCleanup]);
 
-  // ── toggleMute ────────────────────────────────────────────────────────────
-  const toggleMute = useCallback(() => {
-    const track = localStreamRef.current?.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      setIsMuted(!track.enabled);
-      console.log('[Call] Mute:', !track.enabled);
-    }
-  }, []);
 
-  // ── toggleSpeaker (volume via audio element) ──────────────────────────────
-  const toggleSpeaker = useCallback(() => {
-    setIsSpeakerOn(prev => {
-      const next = !prev;
-      // HTML audio volume is 0-1, but we can only reduce, not boost
-      // For boost we'd need Web Audio API GainNode; for now toggle between 1.0 and 0.3
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.volume = next ? 1.0 : 0.5;
-      }
-      return next;
-    });
-  }, []);
+
 
   // ── startCall ─────────────────────────────────────────────────────────────
   const startCall = useCallback(async (sessionId: string, partnerName: string, callerName: string) => {
@@ -432,6 +431,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
           endCall(true);
         }
       }, CALLING_TIMEOUT_MS);
+
+      // Restore mute if it was active before refresh
+      if (muteRef.current) {
+        stream.getAudioTracks().forEach(t => { t.enabled = false; });
+        console.log('[Call] 🔇 Mute restored after start');
+      }
 
     } catch (err: any) {
       console.error('[Call] startCall error:', err);
@@ -488,9 +493,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       socketService.getSocket()?.emit('call:answer', { sessionId, answer: serializedAnswer });
       console.log('[Call] 📤 Answer sent via socket');
 
-      // 8. Connected!
+      // 8. Connected — restore mute state if it was active
       setCallStatus('connected'); callStatusRef.current = 'connected';
       startCallTimer();
+      if (muteRef.current) {
+        stream.getAudioTracks().forEach(t => { t.enabled = false; });
+        console.log('[Call] 🔇 Mute restored after accept');
+      }
       console.log('[Call] ✅ Accepted — waiting for ICE to connect and audio to flow');
 
     } catch (err: any) {
@@ -585,6 +594,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
             const stream = localStreamRef.current
               ?? await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             localStreamRef.current = stream;
+            // Restore mute after reconnect
+            if (muteRef.current) {
+              stream.getAudioTracks().forEach(t => { t.enabled = false; });
+              console.log('[Call] 🔇 Mute restored after reconnect');
+            }
             const pc = createPeerConnection(data.sessionId);
             stream.getTracks().forEach(track => pc.addTrack(track, stream));
             await pc.setRemoteDescription(new RTCSessionDescription(data.offer as RTCSessionDescriptionInit));
@@ -677,6 +691,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
           localStreamRef.current = stream;
+          // Restore mute after rejoin
+          if (muteRef.current) {
+            stream.getAudioTracks().forEach(t => { t.enabled = false; });
+            console.log('[Call] 🔇 Mute restored after rejoin');
+          }
           const pc = createPeerConnection(data.sessionId);
           stream.getTracks().forEach(track => pc.addTrack(track, stream));
           const offer = await pc.createOffer();
@@ -707,6 +726,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
             setCallPartnerName(s.partnerName ?? null);
             callSessionIdRef.current = s.sessionId; setCallSessionId(s.sessionId);
             callerNameRef.current = s.callerName ?? '';
+            // Restore mute state from session storage
+            muteRef.current = s.isMuted ?? false;
+            setIsMuted(muteRef.current);
             socket.emit('call:rejoin', { sessionId: s.sessionId });
             console.log('[Call] 🔄 Attempting rejoin for session:', s.sessionId);
           }
@@ -736,8 +758,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   return (
     <CallContext.Provider value={{
       callStatus, callSessionId, callPartnerName,
-      isMuted, isSpeakerOn, callDuration, callBarPos, setCallBarPos,
-      startCall, acceptCall, declineCall, endCall, toggleMute, toggleSpeaker,
+      isMuted, volume, setVolume, callDuration, callBarPos, setCallBarPos,
+      startCall, acceptCall, declineCall, endCall, toggleMute,
     }}>
       {children}
     </CallContext.Provider>
