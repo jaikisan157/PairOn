@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { motion, useInView } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Coins, ArrowRight, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CREDIT_COSTS } from '@/data/constants';
@@ -19,6 +20,7 @@ const spendActions = [
 export function CreditSystemSection() {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: '-100px' });
+  const navigate = useNavigate();
 
   return (
     <section className="relative py-20 lg:py-32 bg-pairon-bg dark:bg-gray-900 overflow-hidden">
@@ -130,7 +132,7 @@ export function CreditSystemSection() {
                   animate={isInView ? { opacity: 1, y: 0 } : {}}
                   transition={{ delay: 0.5, duration: 0.4 }}
                 >
-                  <Button className="pairon-btn-primary">
+                  <Button className="pairon-btn-primary" onClick={() => navigate('/register')}>
                     See rewards
                     <ArrowRight className="ml-2 w-4 h-4" />
                   </Button>

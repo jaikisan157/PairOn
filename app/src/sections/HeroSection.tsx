@@ -171,18 +171,18 @@ export function HeroSection() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.9, duration: 0.4 }}
-              className="mt-4 flex items-center justify-center gap-5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl px-5 py-3 shadow-sm"
+              className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl px-4 py-3 shadow-sm"
             >
               {[
-                'Real-time matching',
+                'Real-time',
                 'Built-in workspace',
                 'Earn credits',
               ].map((feature) => (
                 <div
                   key={feature}
-                  className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400"
+                  className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 whitespace-nowrap"
                 >
-                  <CheckCircle className="w-4 h-4 text-pairon-accent" />
+                  <CheckCircle className="w-3.5 h-3.5 text-pairon-accent flex-shrink-0" />
                   {feature}
                 </div>
               ))}

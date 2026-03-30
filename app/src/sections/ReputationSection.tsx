@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { motion, useInView } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Star, ThumbsUp, Award, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -12,6 +13,7 @@ const ratingOptions = [
 export function ReputationSection() {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: '-100px' });
+  const navigate = useNavigate();
 
   return (
     <section className="relative py-20 lg:py-32 bg-pairon-bg dark:bg-gray-900">
@@ -120,7 +122,7 @@ export function ReputationSection() {
                 ))}
               </div>
 
-              <Button variant="outline" className="w-full">
+              <Button variant="outline" className="w-full" onClick={() => navigate('/login')}>
                 View profile
               </Button>
             </motion.div>

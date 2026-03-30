@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Mail } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 
@@ -40,23 +40,13 @@ export function FinalCTASection() {
               Create your profile, pick a mode, and meet your next collaborator.
             </p>
 
-            <div className="flex flex-wrap justify-center gap-4">
-              <Button
-                onClick={handleStartMatching}
-                className="pairon-btn-primary text-base px-8 py-4 h-auto"
-              >
-                Start matching
-                <ArrowRight className="ml-2 w-5 h-5" />
-              </Button>
-              <Button
-                variant="outline"
-                className="pairon-btn-secondary text-base px-8 py-4 h-auto"
-                onClick={() => window.open('mailto:support@pairon.app')}
-              >
-                <Mail className="mr-2 w-5 h-5" />
-                Contact support
-              </Button>
-            </div>
+            <Button
+              onClick={handleStartMatching}
+              className="pairon-btn-primary text-base px-8 py-4 h-auto"
+            >
+              Start matching
+              <ArrowRight className="ml-2 w-5 h-5" />
+            </Button>
           </motion.div>
 
           {/* Footer */}
@@ -74,7 +64,7 @@ export function FinalCTASection() {
 
               {/* Links */}
               <div className="flex items-center gap-6">
-                {['Privacy', 'Terms', 'Support'].map((link) => (
+                {['Privacy', 'Terms'].map((link) => (
                   <a
                     key={link}
                     href="#"
