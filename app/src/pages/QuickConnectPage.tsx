@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
 import { socketService } from '@/lib/socket';
-import { isMobileOrTablet } from '@/lib/deviceDetect';
+
 import { UserProfileModal } from '@/components/UserProfileModal';
 import { playMessageSound, playSendSound, playMatchSound, playDisconnectSound } from '@/lib/audio';
 
@@ -610,10 +610,6 @@ export function QuickConnectPage() {
                                 </Button>
                                 <Button
                                     onClick={() => {
-                                        if (isMobileOrTablet()) {
-                                            alert('⚠️ Collaboration projects require a desktop/laptop. Please switch to a PC to accept this proposal.');
-                                            return;
-                                        }
                                         // Block if user already has an active challenge session
                                         const existingSession = localStorage.getItem('challenge_session');
                                         if (existingSession) {

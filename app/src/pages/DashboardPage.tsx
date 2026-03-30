@@ -33,7 +33,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { MATCH_MODES, CHALLENGE_RULES } from '@/data/constants';
 import { formatDuration } from '@/lib/utils';
 import { api } from '@/lib/api';
-import { isMobileOrTablet } from '@/lib/deviceDetect';
+
 import { playMatchSound } from '@/lib/audio';
 import { MatchConfirmModal } from '@/components/MatchConfirmModal';
 import type { MatchFoundData } from '@/components/MatchConfirmModal';
@@ -265,10 +265,6 @@ export function DashboardPage() {
 
   const handleStartMatching = () => {
     if (!selectedMode) return;
-    if (isMobileOrTablet()) {
-      alert('⚠️ Collaboration projects require a desktop/laptop. The code editor and workspace only work on PC. Please switch to a desktop to start matching.');
-      return;
-    }
     // Block if user has an active session
     if (activeSessions.length > 0) {
       const sess = activeSessions[0];

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { motion, useInView, AnimatePresence } from 'framer-motion';
-import { MessageSquare, Layout, Link2, CheckCircle, ArrowRight, X, Send, Code2 } from 'lucide-react';
+import { MessageSquare, Layout, Link2, CheckCircle, ArrowRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const features = [
@@ -9,57 +9,9 @@ const features = [
   { icon: Link2, label: 'Submit via link' },
 ];
 
-// ── Demo workspace data ────────────────────────────────────────────────────
-const DEMO_MESSAGES = [
-  { id: 1, sender: 'Alex', self: false, text: 'Hey! Should we start with the landing page or the API?', time: '2:01 PM' },
-  { id: 2, sender: 'You', self: true, text: "Let's do landing page first — I'll handle the hero section.", time: '2:02 PM' },
-  { id: 3, sender: 'Alex', self: false, text: 'Perfect 👌 I\'ll set up the nav and footer.', time: '2:03 PM' },
-  { id: 4, sender: 'You', self: true, text: 'Done! Hero is pushed. Check the PR when you can.', time: '2:31 PM' },
-  { id: 5, sender: 'Alex', self: false, text: 'Looks great! Merging now 🚀', time: '2:33 PM' },
-];
-const DEMO_TASKS = [
-  { id: 1, label: 'Design hero section', done: true },
-  { id: 2, label: 'Build navigation', done: true },
-  { id: 3, label: 'Write API endpoints', done: false },
-  { id: 4, label: 'Connect frontend to backend', done: false },
-  { id: 5, label: 'Deploy to Vercel', done: false },
-];
-const DEMO_CODE = `// hero.tsx — PairOn Sprint Session
-import { useState, useEffect } from 'react';
-
-interface MatchData {
-  partner: string;
-  mode: 'sprint' | 'challenge' | 'build';
-  endsAt: Date;
-}
-
-export function Hero({ match }: { match: MatchData }) {
-  const [timeLeft, setTimeLeft] = useState('');
-
-  useEffect(() => {
-    const tick = () => {
-      const diff = match.endsAt.getTime() - Date.now();
-      const h = Math.floor(diff / 3600000);
-      const m = Math.floor((diff % 3600000) / 60000);
-      const s = Math.floor((diff % 60000) / 1000);
-      setTimeLeft(\`\${h}:\${m}:\${s}\`);
-    };
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [match]);
-
-  return (
-    <section className="hero">
-      <h1>Collaborating with {match.partner}</h1>
-      <p className="timer">⏱ {timeLeft} remaining</p>
-    </section>
-  );
-}`;
-const DEMO_TABS = ['Chat', 'Tasks', 'Code'];
-
-// ── Interactive demo modal ────────────────────────────────────────────────
+// ── Actual workspace screenshot lightbox ─────────────────────────────────
 function WorkspaceDemoModal({ onClose }: { onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState('Chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'code'>('chat');
 
   return (
     <motion.div
@@ -70,217 +22,100 @@ function WorkspaceDemoModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 99990,
-        background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)',
+        background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(10px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 16, fontFamily: 'Inter, system-ui, sans-serif',
       }}
     >
       <motion.div
-        initial={{ scale: 0.9, opacity: 0, y: 24 }}
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 24 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
         onClick={e => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 680, background: '#111827',
-          borderRadius: 20, overflow: 'hidden',
-          boxShadow: '0 32px 100px rgba(0,0,0,0.8)',
-          border: '1px solid rgba(255,255,255,0.08)',
-        }}
+        style={{ width: '100%', maxWidth: 960, position: 'relative' }}
       >
-        {/* Title bar */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.07)',
-          background: '#0f1623',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8, background: '#10b98120',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Layout style={{ width: 16, height: 16, color: '#10b981' }} />
-            </div>
-            <div>
-              <p style={{ color: 'white', fontWeight: 700, fontSize: 13, margin: 0 }}>Workspace — Sprint Mode</p>
-              <p style={{ color: '#6b7280', fontSize: 11, margin: 0 }}>🔴 Demo — read-only preview</p>
-            </div>
-          </div>
-          <button onClick={onClose} style={{
-            background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 8,
-            width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        {/* Close */}
+        <button
+          onClick={onClose}
+          style={{
+            position: 'absolute', top: -14, right: -14, zIndex: 10,
+            width: 36, height: 36, borderRadius: '50%',
+            background: '#1f2937', border: '1px solid rgba(255,255,255,0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer', color: '#9ca3af',
+          }}
+        >
+          <X style={{ width: 16, height: 16 }} />
+        </button>
+
+        {/* Browser chrome */}
+        <div style={{
+          background: '#1a1d2e', borderRadius: '16px 16px 0 0',
+          padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10,
+          border: '1px solid rgba(255,255,255,0.08)', borderBottom: 'none',
+        }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ef4444' }} />
+            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#f59e0b' }} />
+            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10b981' }} />
+          </div>
+          {/* Tab switcher */}
+          <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+            {(['chat', 'code'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                style={{
+                  background: activeTab === tab ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.06)',
+                  border: activeTab === tab ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 8, padding: '4px 12px',
+                  color: activeTab === tab ? '#10b981' : '#6b7280',
+                  fontSize: 12, fontWeight: activeTab === tab ? 700 : 400,
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >
+                {tab === 'chat' ? '💬 Chat view' : '{}› Code view'}
+              </button>
+            ))}
+          </div>
+          <div style={{
+            flex: 1, background: 'rgba(255,255,255,0.05)', borderRadius: 6,
+            padding: '4px 12px', color: '#6b7280', fontSize: 12, textAlign: 'center',
           }}>
-            <X style={{ width: 16, height: 16 }} />
-          </button>
+            pairon.app/workspace
+          </div>
         </div>
 
-        {/* Tabs */}
-        <div style={{
-          display: 'flex', gap: 4, padding: '10px 16px 0',
-          background: '#0f1623', borderBottom: '1px solid rgba(255,255,255,0.07)',
-        }}>
-          {DEMO_TABS.map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                padding: '8px 14px', borderRadius: '8px 8px 0 0', fontSize: 13,
-                fontWeight: activeTab === tab ? 700 : 400,
-                color: activeTab === tab ? '#10b981' : '#6b7280',
-                borderBottom: activeTab === tab ? '2px solid #10b981' : '2px solid transparent',
-                transition: 'all 0.15s',
-              }}
-            >
-              {tab === 'Code' ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Code2 style={{ width: 13, height: 13 }} /> {tab}
-                </span>
-              ) : tab}
-            </button>
-          ))}
-        </div>
+        {/* Screenshot */}
+        <img
+          key={activeTab}
+          src="/workspace-preview.png"
+          alt={`PairOn Workspace — ${activeTab} view`}
+          style={{
+            width: '100%', display: 'block',
+            borderRadius: '0 0 16px 16px',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderTop: 'none',
+            maxHeight: '75vh', objectFit: 'cover', objectPosition: 'top',
+          }}
+        />
 
-        {/* Content */}
-        <div style={{ height: 380, overflow: 'hidden', background: '#111827' }}>
-
-          {/* ── Chat tab ── */}
-          {activeTab === 'Chat' && (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {DEMO_MESSAGES.map(msg => (
-                  <div key={msg.id} style={{ display: 'flex', justifyContent: msg.self ? 'flex-end' : 'flex-start' }}>
-                    <div style={{
-                      maxWidth: '72%', padding: '10px 14px',
-                      borderRadius: msg.self ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                      background: msg.self ? '#10b981' : '#1f2937',
-                      color: msg.self ? 'white' : '#e5e7eb', fontSize: 13, lineHeight: 1.5,
-                    }}>
-                      {!msg.self && <p style={{ color: '#10b981', fontSize: 11, fontWeight: 700, margin: '0 0 4px' }}>{msg.sender}</p>}
-                      <p style={{ margin: 0 }}>{msg.text}</p>
-                      <p style={{ color: msg.self ? 'rgba(255,255,255,0.6)' : '#6b7280', fontSize: 10, margin: '4px 0 0', textAlign: 'right' }}>{msg.time}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div style={{
-                padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.07)',
-                display: 'flex', gap: 10, alignItems: 'center',
-              }}>
-                <div style={{
-                  flex: 1, background: '#1f2937', borderRadius: 24, padding: '10px 16px',
-                  color: '#4b5563', fontSize: 13,
-                }}>Type a message… (demo)</div>
-                <div style={{
-                  width: 36, height: 36, borderRadius: '50%', background: '#10b981',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.4,
-                }}>
-                  <Send style={{ width: 15, height: 15, color: 'white' }} />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Tasks tab ── */}
-          {activeTab === 'Tasks' && (
-            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', height: '100%' }}>
-              <p style={{ color: '#9ca3af', fontSize: 12, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Sprint Tasks</p>
-              {DEMO_TASKS.map(task => (
-                <div key={task.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '12px 14px', borderRadius: 12,
-                  background: '#1f2937', opacity: task.done ? 0.6 : 1,
-                }}>
-                  <div style={{
-                    width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                    background: task.done ? '#10b981' : 'transparent',
-                    border: task.done ? 'none' : '2px solid #374151',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    {task.done && <CheckCircle style={{ width: 14, height: 14, color: 'white' }} />}
-                  </div>
-                  <span style={{
-                    color: task.done ? '#6b7280' : '#e5e7eb', fontSize: 13,
-                    textDecoration: task.done ? 'line-through' : 'none',
-                  }}>{task.label}</span>
-                  {!task.done && (
-                    <span style={{
-                      marginLeft: 'auto', fontSize: 11, color: '#f59e0b',
-                      background: '#f59e0b20', padding: '2px 8px', borderRadius: 20,
-                    }}>In progress</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ── Code tab ── */}
-          {activeTab === 'Code' && (
-            <div style={{ height: '100%', overflowY: 'auto', background: '#0d1117' }}>
-              {/* Editor header */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '10px 16px', background: '#161b22',
-                borderBottom: '1px solid rgba(255,255,255,0.06)',
-              }}>
-                <Code2 style={{ width: 14, height: 14, color: '#10b981' }} />
-                <span style={{ color: '#8b949e', fontSize: 12 }}>hero.tsx</span>
-                <span style={{
-                  marginLeft: 'auto', fontSize: 11, color: '#10b981',
-                  background: '#10b98115', padding: '2px 8px', borderRadius: 20,
-                }}>● Live — Alex is editing</span>
-              </div>
-              {/* Code block */}
-              <pre style={{
-                margin: 0, padding: '16px 20px',
-                fontFamily: "'Fira Code', 'JetBrains Mono', Consolas, monospace",
-                fontSize: 12.5, lineHeight: 1.75,
-                color: '#c9d1d9', overflowX: 'auto',
-                whiteSpace: 'pre',
-              }}>
-                {DEMO_CODE.split('\n').map((line, i) => (
-                  <div key={i} style={{ display: 'flex' }}>
-                    <span style={{ color: '#484f58', minWidth: 30, userSelect: 'none', marginRight: 16, textAlign: 'right' }}>{i + 1}</span>
-                    <span dangerouslySetInnerHTML={{ __html: syntaxColor(line) }} />
-                  </div>
-                ))}
-              </pre>
-            </div>
-          )}
-        </div>
-
-        {/* Demo notice */}
-        <div style={{
-          padding: '10px 20px', background: '#0f1623', borderTop: '1px solid rgba(255,255,255,0.06)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <p style={{ color: '#6b7280', fontSize: 12, margin: 0 }}>
-            👆 Read-only preview. Sign up to use the real workspace.
-          </p>
-          <button onClick={() => { window.location.href = '/register'; }} style={{
-            background: '#10b981', border: 'none', borderRadius: 8,
-            padding: '6px 14px', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-          }}>Sign up free</button>
-        </div>
+        {/* Caption */}
+        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.45)', fontSize: 13, marginTop: 14 }}>
+          👆 Read-only preview of the actual PairOn workspace ·{' '}
+          <span
+            style={{ color: '#10b981', cursor: 'pointer', fontWeight: 600 }}
+            onClick={() => { window.location.href = '/register'; }}
+          >
+            Sign up free to use it →
+          </span>
+        </p>
       </motion.div>
     </motion.div>
   );
 }
 
-// Minimal syntax highlighter (keywords / strings / comments)
-function syntaxColor(line: string): string {
-  return line
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/(\/\/.*)/g, '<span style="color:#6e7681">$1</span>')
-    .replace(/\b(import|export|from|const|let|function|return|interface|extends|type|useEffect|useState|setInterval|clearInterval|Math|Date|string|number|boolean|void)\b/g,
-      '<span style="color:#ff7b72">$1</span>')
-    .replace(/\b(true|false|null|undefined)\b/g, '<span style="color:#79c0ff">$1</span>')
-    .replace(/(`[^`]*`)/g, '<span style="color:#a5d6ff">$1</span>')
-    .replace(/("[^"]*")/g, '<span style="color:#a5d6ff">$1</span>')
-    .replace(/('[^']*')/g, '<span style="color:#a5d6ff">$1</span>')
-    .replace(/(\d+)/g, '<span style="color:#ffa657">$1</span>');
-}
 
 // ── Main section ─────────────────────────────────────────────────────────────
 export function CollaborationSection() {
