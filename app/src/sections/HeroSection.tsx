@@ -128,50 +128,51 @@ export function HeroSection() {
           </div>
 
           {/* Right Image Panel */}
-          <div className="hidden lg:block relative w-[41%] p-6 pb-10">
+          <div className="hidden lg:flex flex-col relative w-[41%] p-6 pb-6 gap-3">
+            {/* Image */}
             <motion.div
               initial={{ opacity: 0, x: 60, scale: 0.985 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
               transition={{ delay: 0.25, duration: 0.6, ease: [0.33, 1, 0.68, 1] }}
-              className="relative h-full rounded-[22px] overflow-hidden"
+              className="relative flex-1 rounded-[22px] overflow-hidden min-h-0"
             >
               <img
                 src="https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&h=1000&fit=crop"
                 alt="Collaboration"
                 className="w-full h-full object-cover"
               />
-              {/* Overlay gradient */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+
+              {/* Floating badge — inside the image */}
+              <motion.div
+                initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ delay: 0.75, duration: 0.4 }}
+                className="absolute bottom-4 left-4 bg-white dark:bg-gray-800 rounded-2xl p-3 shadow-badge animate-float"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-pairon-accent-light dark:bg-pairon-accent/20 flex items-center justify-center">
+                    <div className="w-2.5 h-2.5 rounded-full bg-pairon-accent" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      You matched with Alex
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      Product · 48 min
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
             </motion.div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 18, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ delay: 0.75, duration: 0.4 }}
-              className="absolute bottom-12 left-8 bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-badge animate-float"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-pairon-accent-light dark:bg-pairon-accent/20 flex items-center justify-center">
-                  <div className="w-3 h-3 rounded-full bg-pairon-accent" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                    You matched with Alex
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    Product · 48 min
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Feature Pills — inside the right panel */}
+            {/* Feature Pills — BELOW the image, always visible */}
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.9, duration: 0.4 }}
-              className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl px-4 py-3 shadow-sm"
+              className="flex items-center justify-center gap-x-5 gap-y-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl px-4 py-3 shadow-sm flex-shrink-0"
             >
               {[
                 'Real-time',
