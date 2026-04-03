@@ -14,7 +14,7 @@ import { socketService } from '@/lib/socket';
 import type * as MonacoTypes from 'monaco-editor';
 import {
     useToasts, ToastContainer, Breadcrumb, usePanelResize, ResizeDivider,
-    SearchPanel, PackageManagerPanel, EnvVarsPanel,
+    SearchPanel, PackageManagerPanel,
 } from './CollabIDEHelpers';
 
 // ===== Types =====
@@ -175,7 +175,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     // New panel states
     const [showSearch, setShowSearch] = useState(false);
     const [showPackageManager, setShowPackageManager] = useState(false);
-    const [showEnvPanel, setShowEnvPanel] = useState(false);
 
     // GitHub push modal
     const [showGithubModal, setShowGithubModal] = useState(false);
@@ -256,11 +255,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const foldersRef = useRef<Set<string>>(new Set());
     const previewUrlRef = useRef<string>('');
     const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    // Per-entry .env ownership: each entry tracks who created it via userId
-    const ENV_ENTRIES_KEY = `pairon_env_entries_${sessionId}`;
-    const [envEntries, setEnvEntries] = useState<Array<{ key: string; value: string; ownerId: string }>>(() => {
-        try { const saved = localStorage.getItem(ENV_ENTRIES_KEY); return saved ? JSON.parse(saved) : []; } catch { return []; }
-    });
+    // Track who created .env file (by userId). Creator sees real values, partner sees masked.
+    const ENV_CREATOR_KEY = `pairon_env_creator_${sessionId}`;
+    const envCreatorRef = useRef<string>(localStorage.getItem(ENV_CREATOR_KEY) || '');
     // Track when the local user last edited a file (to skip remote model updates during active typing)
     const locallyEditingRef = useRef<{ path: string; time: number }>({ path: '', time: 0 });
     // Line authorship: Map<filePath, Map<lineNumber, 'local' | 'partner'>>
@@ -356,17 +353,34 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         return model;
     }, []);
 
+    // Helper to mask .env values (used in switchToFile and handleFileChange)
+    const maskEnvContent = useCallback((content: string) => content.split('\n').map(line => {
+        if (!line.trim() || line.startsWith('#')) return line;
+        const eqIdx = line.indexOf('=');
+        if (eqIdx < 0) return line;
+        return line.slice(0, eqIdx + 1) + '\u2022'.repeat(Math.max(8, line.length - eqIdx - 1));
+    }).join('\n'), []);
+
+    const isPartnerEnv = useCallback((path: string) =>
+        (path === '.env' || path.startsWith('.env.')) && envCreatorRef.current !== '' && envCreatorRef.current !== userId
+    , [userId]);
+
     const switchToFile = useCallback((path: string) => {
         const editor = editorRef.current;
-        const content = filesRef.current[path] ?? '';
-        const model = getOrCreateModel(path, content);
+        const rawContent = filesRef.current[path] ?? '';
+        // If this is partner's .env, show masked values
+        const isPartnerEnvFile = isPartnerEnv(path);
+        const displayContent = isPartnerEnvFile ? maskEnvContent(rawContent) : rawContent;
+        const model = getOrCreateModel(path, displayContent);
         if (editor && model) {
             editor.setModel(model);
-            if (model.getValue() !== content) { suppressSyncRef.current = true; model.setValue(content); suppressSyncRef.current = false; }
+            if (model.getValue() !== displayContent) { suppressSyncRef.current = true; model.setValue(displayContent); suppressSyncRef.current = false; }
+            // Make editor read-only for partner's .env
+            editor.updateOptions({ readOnly: isPartnerEnvFile });
         }
         setActiveFile(path);
         if (!openTabs.includes(path)) setOpenTabs(prev => [...prev, path]);
-    }, [getOrCreateModel, openTabs]);
+    }, [getOrCreateModel, openTabs, isPartnerEnv, maskEnvContent]);
 
     // ===== Line authorship decorations (typing indicator) =====
     const updateLineDecorations = useCallback((editor: MonacoTypes.editor.IStandaloneCodeEditor, filePath: string) => {
@@ -621,6 +635,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const socket = socketService.getSocket();
         if (!socket) return;
 
+        // Helper: mask .env values (keeps key names, replaces values with dots)
+        const maskEnvValues = (content: string) => content.split('\n').map(line => {
+            if (!line.trim() || line.startsWith('#')) return line;
+            const eqIdx = line.indexOf('=');
+            if (eqIdx < 0) return line;
+            return line.slice(0, eqIdx + 1) + '\u2022'.repeat(Math.max(8, line.length - eqIdx - 1));
+        }).join('\n');
+
+        const isPartnerEnvFile = (path: string) => (path === '.env' || path.startsWith('.env.')) && envCreatorRef.current !== '' && envCreatorRef.current !== userId;
+
         const handleFileChange = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
             // Always update our internal state with partner's version
@@ -651,14 +675,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
 
             // Safe to update model — file is not being locally edited
-            if (model && !model.isDisposed() && model.getValue() !== data.content) {
+            // For partner's .env, show masked values in the editor
+            const displayContent = isPartnerEnvFile(data.path) ? maskEnvValues(data.content) : data.content;
+            if (model && !model.isDisposed() && model.getValue() !== displayContent) {
                 suppressSyncRef.current = true;
                 const editor = editorRef.current;
                 const isActiveModel = editor?.getModel() === model;
                 const savedPosition = isActiveModel ? editor?.getPosition() : null;
                 const savedScroll = isActiveModel ? editor?.getScrollTop() : null;
                 const fullRange = model.getFullModelRange();
-                model.pushEditOperations([], [{ range: fullRange, text: data.content, forceMoveMarkers: false }], () => null);
+                model.pushEditOperations([], [{ range: fullRange, text: displayContent, forceMoveMarkers: false }], () => null);
                 if (isActiveModel && editor) {
                     if (savedPosition) editor.setPosition(savedPosition);
                     if (savedScroll !== null) editor.setScrollTop(savedScroll);
@@ -670,7 +696,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         };
         const handleFileCreate = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
+            // Track .env creator: if partner creates .env, they own it
+            if (data.path === '.env' || data.path.startsWith('.env.')) {
+                if (!envCreatorRef.current) {
+                    envCreatorRef.current = 'partner'; // We know WE didn't create it
+                    localStorage.setItem(ENV_CREATOR_KEY, 'partner');
+                }
+            }
             setFiles(prev => { const next = { ...prev, [data.path]: data.content }; autosave(next); return next; });
+            // If this is partner's .env, mask it in the Monaco model but keep real values in WebContainer
+            if (isPartnerEnvFile(data.path)) {
+                const model = modelsRef.current.get(data.path);
+                if (model && !model.isDisposed()) {
+                    suppressSyncRef.current = true;
+                    model.setValue(maskEnvValues(data.content));
+                    suppressSyncRef.current = false;
+                }
+            }
             if (webcontainerRef.current) {
                 const dir = data.path.split('/').slice(0, -1).join('/');
                 if (dir) webcontainerRef.current.fs.mkdir(dir, { recursive: true }).catch(() => { });
@@ -744,13 +786,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         socket.on('code:file-unlock', handleFileUnlock);
         socket.on('code:comment', handleComment);
 
-        // ===== Env entries sync handler =====
-        const handleEnvEntries = (data: { entries: Array<{ key: string; value: string; ownerId: string }>; senderId: string }) => {
-            if (data.senderId === socket.id) return;
-            setEnvEntries(data.entries);
-            localStorage.setItem(ENV_ENTRIES_KEY, JSON.stringify(data.entries));
-        };
-        socket.on('code:env-entries', handleEnvEntries);
+        // (env entries are now tracked via envCreatorRef — no separate handler needed)
 
         // ===== IDE state sync handlers =====
         const handleStateSnapshot = (data: { files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
@@ -1887,8 +1923,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             const fullPath = prefix ? `${prefix}/${node.name}` : node.name;
             // Detect .env files and whether this file belongs to the partner
             const isEnvFile = fullPath === '.env' || fullPath.startsWith('.env.');
-            // isPartnerEnv = true when there are env entries from the partner
-            const isPartnerEnv = isEnvFile && envEntries.some(e => e.ownerId !== userId);
+            // isPartnerEnv = true when partner created the .env file
+            const isPartnerEnv = isEnvFile && envCreatorRef.current !== '' && envCreatorRef.current !== userId;
 
             // Renaming mode
             if (renamingPath === fullPath) {
@@ -1957,17 +1993,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             const locked = isLockedByPartner(fullPath);
 
-            // 🔒 Partner's .env — show masked panel instead of blocking
+            // 🔒 Partner's .env — open normally but with masked values (read-only)
             if (isPartnerEnv) {
                 return (
                     <div key={fullPath}
-                        className="flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer text-yellow-600 hover:bg-yellow-400/10 transition-colors"
-                        onClick={() => setShowEnvPanel(true)}
-                        title="Partner's .env (values hidden)"
+                        className="flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer text-yellow-500 hover:bg-yellow-400/10 transition-colors"
+                        onClick={() => switchToFile(fullPath)}
+                        title="Partner's .env (values hidden, read-only)"
                     >
                         <Lock className="w-3.5 h-3.5 text-yellow-500" />
-                        <span className="select-none blur-[2px] truncate flex-1">{node.name}</span>
-                        <span className="text-[9px] text-yellow-600 no-blur bg-yellow-400/10 px-1 rounded">partner</span>
+                        <span className="truncate flex-1">{node.name}</span>
+                        <span className="text-[9px] text-yellow-600 bg-yellow-400/10 px-1 rounded">🔒</span>
                     </div>
                 );
             }
@@ -2046,9 +2082,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <Package className="w-3.5 h-3.5" />
                     </button>
                     {/* Project Templates button removed — use terminal instead */}
-                    {/* Env Variables */}
-                    <button onClick={() => setShowEnvPanel(true)}
-                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Environment Variables (.env)">
+                    {/* Create / Open .env file */}
+                    <button onClick={() => {
+                        // Create .env if it doesn't exist, then open it
+                        if (!files['.env']) {
+                            const defaultEnv = '# Environment Variables\n# Add your keys below (KEY=value)\n';
+                            setFiles(prev => { const next = { ...prev, '.env': defaultEnv }; autosave(next); return next; });
+                            if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', defaultEnv).catch(() => { });
+                            const socket = socketService.getSocket();
+                            socket?.emit('code:file-create', { sessionId, path: '.env', content: defaultEnv, senderId: socket.id });
+                            // Mark this user as the creator
+                            envCreatorRef.current = userId;
+                            localStorage.setItem(ENV_CREATOR_KEY, userId);
+                        }
+                        if (!openTabs.includes('.env')) setOpenTabs(prev => [...prev, '.env']);
+                        switchToFile('.env');
+                    }}
+                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Create / Open .env file">
                         <Settings2 className="w-3.5 h-3.5" />
                     </button>
                     {/* Separator */}
@@ -2688,47 +2738,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             )}
 
 
-            {/* ===== Environment Variables Panel ===== */}
-            {showEnvPanel && (
-                <EnvVarsPanel
-                    entries={envEntries}
-                    userId={userId}
-                    onSave={(newEntries) => {
-                        // 1. Persist entries to localStorage
-                        setEnvEntries(newEntries);
-                        localStorage.setItem(ENV_ENTRIES_KEY, JSON.stringify(newEntries));
-                        // 2. Build .env file content from ALL entries (real values for WebContainer)
-                        const envContent = [
-                            '# Environment Variables',
-                            '# Generated by PairOn IDE',
-                            '',
-                            ...newEntries.map(e => `${e.key}=${e.value}`),
-                        ].join('\n');
-                        // 3. Update files state
-                        setFiles(prev => { const next = { ...prev, '.env': envContent }; autosave(next); return next; });
-                        // 4. Write to WebContainer FS
-                        if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', envContent).catch(() => { });
-                        // 5. Sync entries to partner (with full values — partner's UI will mask them)
-                        const socket = socketService.getSocket();
-                        socket?.emit('code:env-entries', { sessionId, entries: newEntries, senderId: socket.id });
-                        socket?.emit('code:file-create', { sessionId, path: '.env', content: envContent, senderId: socket.id });
-                        // 6. Update Monaco model
-                        const model = modelsRef.current.get('.env');
-                        if (model && !model.isDisposed()) {
-                            suppressSyncRef.current = true;
-                            model.setValue(envContent);
-                            suppressSyncRef.current = false;
-                        } else {
-                            getOrCreateModel('.env', envContent);
-                        }
-                        // 7. Open .env tab
-                        if (!openTabs.includes('.env')) setOpenTabs(prev => [...prev, '.env']);
-                        switchToFile('.env');
-                        addToast('.env saved ✓', 'success');
-                    }}
-                    onClose={() => setShowEnvPanel(false)}
-                />
-            )}
+            {/* EnvVarsPanel removed — .env is edited like any normal file */}
 
             {/* ===== Push to GitHub Modal ===== */}
             {showGithubModal && (
