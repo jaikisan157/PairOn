@@ -310,10 +310,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [showImportWarning, setShowImportWarning] = useState(false);
     const [importedCount, setImportedCount] = useState(0);
 
-    // Inline comments
-    const [comments, setComments] = useState<Record<string, { id: string; line: number; text: string; userId: string; userName: string; timestamp: number }[]>>({});
-    const [commentLine, setCommentLine] = useState<number | null>(null);
-    const [commentText, setCommentText] = useState('');
+    // Inline comments — setters used by socket handler + editor action
+    const [, setComments] = useState<Record<string, { id: string; line: number; text: string; userId: string; userName: string; timestamp: number }[]>>({});
+    const [, setCommentLine] = useState<number | null>(null);
 
     useEffect(() => { filesRef.current = files; }, [files]);
     useEffect(() => { foldersRef.current = folders; }, [folders]);
