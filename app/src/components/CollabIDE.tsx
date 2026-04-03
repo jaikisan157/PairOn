@@ -5,7 +5,7 @@ import { Terminal as XTermTerminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import {
-    FolderOpen, Folder, File, Plus, X, Play, Square, ChevronRight, ChevronDown,
+    FolderOpen, Folder, File, Plus, X, Play, Square, ChevronRight, ChevronDown, ChevronLeft, ChevronUp,
     RefreshCw, Download, Maximize2, Minimize2, Terminal, MessageCircle, Send, Lock,
     Trash2, Pencil, Copy, FolderPlus, Sun, Moon, Hammer, Info,
     MoreVertical, Search, Package, Settings2, RotateCcw, Upload,
@@ -203,6 +203,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const sidebar = usePanelResize(200, 120, 400);
     const preview = usePanelResize(350, 200, 600, 'horizontal', true);
     const terminal = usePanelResize(200, 100, 500, 'vertical', true);
+
+    // Collapsible panel states
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [previewCollapsed, setPreviewCollapsed] = useState(false);
+    const [terminalCollapsed, setTerminalCollapsed] = useState(false);
 
     // Monaco refs
     const editorRef = useRef<MonacoTypes.editor.IStandaloneCodeEditor | null>(null);
@@ -2216,17 +2221,36 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             {/* Main — CSS Grid ensures columns never exceed container width */}
             <div className="flex-1 overflow-hidden" style={{
                 display: 'grid',
-                gridTemplateColumns: `${sidebar.size}px 5px 1fr 5px ${preview.size}px`,
+                gridTemplateColumns: sidebarCollapsed
+                    ? (previewCollapsed ? '36px 0px 1fr 0px 36px' : `36px 0px 1fr 5px ${preview.size}px`)
+                    : (previewCollapsed ? `${sidebar.size}px 5px 1fr 0px 36px` : `${sidebar.size}px 5px 1fr 5px ${preview.size}px`),
                 minHeight: 0,
             }
             }>
                 {/* File explorer */}
                 <div className="bg-[#0d1117] border-r border-gray-800 flex flex-col min-w-0 overflow-hidden relative">
+                    {sidebarCollapsed ? (
+                        /* Collapsed sidebar — thin strip with expand button */
+                        <div className="flex flex-col items-center py-2 h-full">
+                            <button onClick={() => setSidebarCollapsed(false)}
+                                className="p-1 text-gray-500 hover:text-blue-400 hover:bg-blue-400/10 rounded transition-colors mb-2"
+                                title="Expand Explorer">
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
+                            <span className="text-[9px] font-semibold text-gray-600 uppercase tracking-widest"
+                                style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>Explorer</span>
+                        </div>
+                    ) : (<>
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                             {showSearch ? 'Search' : 'Explorer'}
                         </span>
                         <div className="flex items-center gap-0.5">
+                            <button onClick={() => setSidebarCollapsed(true)}
+                                className="p-0.5 text-gray-500 hover:text-blue-400 rounded transition-colors mr-0.5"
+                                title="Collapse Explorer">
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
                             <button onClick={() => setShowSearch(s => !s)}
                                 className={`p-0.5 rounded transition-colors ${showSearch ? 'text-blue-400 bg-blue-400/10' : 'text-gray-500 hover:text-white'}`}
                                 title="Global Search (Ctrl+Shift+F)">
@@ -2305,9 +2329,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             </div>
                         </div>
                     )}
+                    </>)}
                 </div>
                 {/* Sidebar resize divider */}
-                <ResizeDivider dividerRef={sidebar.dividerRef} />
+                {!sidebarCollapsed && <ResizeDivider dividerRef={sidebar.dividerRef} />}
 
                 {/* Editor + Terminal */}
                 <div className="flex flex-col min-w-0 overflow-hidden">
@@ -2357,12 +2382,24 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             />
                         </div>
                     </div>
-
+                    {/* Terminal section — collapsible */}
+                    {terminalCollapsed ? (
+                        <div className="flex-shrink-0 border-t border-gray-800 bg-[#161b22] flex items-center px-2 py-1 cursor-pointer hover:bg-[#1e2030] transition-colors"
+                            onClick={() => setTerminalCollapsed(false)}>
+                            <ChevronUp className="w-3 h-3 text-gray-500 mr-1.5" />
+                            <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Terminal</span>
+                        </div>
+                    ) : (<>
                     {/* Terminal resize handle */}
                     <ResizeDivider dividerRef={terminal.dividerRef} direction="vertical" />
                     <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
                         <div className="flex items-center justify-between px-2 py-1 bg-[#161b22] border-b border-gray-800">
                             <div className="flex items-center gap-0 overflow-x-auto">
+                                <button onClick={() => setTerminalCollapsed(true)}
+                                    className="p-0.5 text-gray-500 hover:text-blue-400 rounded transition-colors mr-1"
+                                    title="Collapse Terminal">
+                                    <ChevronDown className="w-3 h-3" />
+                                </button>
                                 {terminalTabs.map((tab) => {
                                     const locked = terminalLocks.has(tab.id);
                                     return (
@@ -2524,6 +2561,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             </div>
                         )}
                     </div>
+                    </>)}
 
                     {/* Inline Comment Panel */}
                     {
@@ -2559,10 +2597,31 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 </div>
 
                 {/* Preview resize divider */}
-                <ResizeDivider dividerRef={preview.dividerRef} />
+                {!previewCollapsed && <ResizeDivider dividerRef={preview.dividerRef} />}
 
                 {/* Preview + Mini Chat */}
                 <div className="border-l border-gray-800 bg-[#161b22] flex flex-col min-w-0 overflow-hidden" >
+                    {previewCollapsed ? (
+                        /* Collapsed preview — thin strip with expand button + chat toggle */
+                        <div className="flex flex-col items-center h-full">
+                            <button onClick={() => setPreviewCollapsed(false)}
+                                className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-blue-400/10 rounded transition-colors my-2"
+                                title="Expand Preview">
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="text-[9px] font-semibold text-gray-600 uppercase tracking-widest flex-1"
+                                style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>Preview</span>
+                            {/* Chat toggle always accessible */}
+                            <button onClick={() => { setShowMiniChat(!showMiniChat); if (!showMiniChat) onMessagesSeen(messages.length); }}
+                                className="p-1.5 text-gray-500 hover:text-blue-400 rounded transition-colors my-2 relative"
+                                title="Toggle Chat">
+                                <MessageCircle className="w-4 h-4" />
+                                {!showMiniChat && unreadCount > 0 && (
+                                    <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 text-white text-[7px] font-bold rounded-full flex items-center justify-center animate-pulse">{unreadCount > 9 ? '9+' : unreadCount}</span>
+                                )}
+                            </button>
+                        </div>
+                    ) : (<>
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 flex-shrink-0">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Preview</span>
                         <div className="flex items-center gap-1">
@@ -2577,6 +2636,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                     </div>
                                 </div>
                             )}
+                            <button onClick={() => setPreviewCollapsed(true)} className="p-0.5 text-gray-500 hover:text-blue-400 rounded transition-colors" title="Collapse Preview">
+                                <ChevronRight className="w-3 h-3" />
+                            </button>
                             <button onClick={() => preview.setSize(w => w === 350 ? 500 : 350)} className="p-0.5 text-gray-500 hover:text-white">
                                 {preview.size > 350 ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
                             </button>
@@ -2633,6 +2695,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             </div>
                         )
                     }
+                    </>)}
                 </div>
             </div>
 
