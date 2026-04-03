@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { AuthProvider, ThemeProvider, MatchingProvider, CallProvider } from '@/context';
+import { AuthProvider, ThemeProvider, MatchingProvider, CallProvider, NotificationProvider, useNotifications } from '@/context';
 import { GlobalCallUI } from '@/components/GlobalCallUI';
 import {
   LandingPage,
@@ -84,11 +84,18 @@ function GlobalNotifier() {
   const navigate = useNavigate();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [responding, setResponding] = useState<string | null>(null);
+  const { add: addNotification } = useNotifications();
 
   const addToast = (t: Omit<Toast, 'id'>) => {
     const id = `toast-${Date.now()}`;
     setToasts(prev => [...prev.slice(-2), { ...t, id }]); // max 3 toasts
     setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), 8000);
+
+    // Also save to persistent notification store (bell icon)
+    // Only save types that matter when missed
+    if (['friend-request', 'friend-accepted', 'friend-declined', 'dm', 'collab-proposal', 'collab-declined', 'force-quit-partner'].includes(t.type)) {
+      addNotification({ type: t.type, title: t.title, body: t.body, data: t.data });
+    }
   };
 
   const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
@@ -377,13 +384,15 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <CallProvider>
-          <MatchingProvider>
-            <BrowserRouter>
-              <AppRoutes />
-            </BrowserRouter>
-          </MatchingProvider>
-        </CallProvider>
+        <NotificationProvider>
+          <CallProvider>
+            <MatchingProvider>
+              <BrowserRouter>
+                <AppRoutes />
+              </BrowserRouter>
+            </MatchingProvider>
+          </CallProvider>
+        </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
   );

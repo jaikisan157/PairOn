@@ -37,6 +37,7 @@ import type { MatchFoundData } from '@/components/MatchConfirmModal';
 import type { MatchMode } from '@/types';
 import { DashboardSidebar } from '@/components/DashboardSidebar';
 import { DashboardRightSidebar } from '@/components/DashboardRightSidebar';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const iconMap = {
   zap: Zap,
@@ -379,6 +380,7 @@ export function DashboardPage() {
               </span>
             </div>
             <div className="w-px h-6 bg-gray-200 dark:bg-gray-700" />
+            <NotificationBell />
             <button
               onClick={toggleTheme}
               className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
