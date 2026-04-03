@@ -2687,10 +2687,28 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     envContent={files['.env'] || ''}
                     partnerOwned={envOwnerRef.current !== '' && envOwnerRef.current !== socketService.getSocket()?.id}
                     onSave={(content) => {
+                        // 1. Update files state
                         setFiles(prev => { const next = { ...prev, '.env': content }; autosave(next); return next; });
+                        // 2. Write to WebContainer FS
                         if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', content).catch(() => { });
+                        // 3. Sync to partner
                         const socket = socketService.getSocket();
                         socket?.emit('code:file-create', { sessionId, path: '.env', content, senderId: socket.id });
+                        // 4. Mark ourselves as the .env owner
+                        envOwnerRef.current = socket?.id || '';
+                        // 5. Update Monaco model so the editor shows the new content
+                        const model = modelsRef.current.get('.env');
+                        if (model && !model.isDisposed()) {
+                            suppressSyncRef.current = true;
+                            model.setValue(content);
+                            suppressSyncRef.current = false;
+                        } else {
+                            // Create model if it doesn't exist yet
+                            getOrCreateModel('.env', content);
+                        }
+                        // 6. Open .env tab so user can see the result
+                        if (!openTabs.includes('.env')) setOpenTabs(prev => [...prev, '.env']);
+                        switchToFile('.env');
                         addToast('.env saved ✓', 'success');
                     }}
                     onClose={() => setShowEnvPanel(false)}
