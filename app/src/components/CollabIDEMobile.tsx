@@ -402,6 +402,7 @@ export function CollabIDEMobile({
                     <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                         {activeTab === 'code' && (
                             <Editor
+                                key={activeFile}
                                 height="100%" theme={editorTheme}
                                 language={getLanguage(activeFile)}
                                 value={files[activeFile] || ''}
@@ -475,20 +476,19 @@ export function CollabIDEMobile({
     // ===== Portrait / Small Screen Layout =====
     return (
         <div className="flex flex-col w-full bg-[#0d1117] overflow-hidden" style={{ height: '100%' }}>
-            {/* ── Top Header (32px) ── */}
-            <header className="flex items-center gap-2 px-3 bg-[#161b22] border-b border-gray-800 flex-shrink-0" style={{ height: 40 }}>
-                <span className="text-[10px] font-bold text-blue-400 truncate max-w-[80px]">
+            {/* ── Top Header ── */}
+            <header className="flex items-center gap-1.5 px-2 bg-[#161b22] border-b border-gray-800 flex-shrink-0" style={{ height: 32 }}>
+                <span className="text-[9px] font-bold text-blue-400 truncate max-w-[60px]">
                     {projectTitle || 'PairOn'}
                 </span>
                 <div className="flex-1 overflow-x-auto flex items-center gap-0.5 scrollbar-hide">
-                    {/* File tabs — horizontal scroll */}
                     {Object.keys(files).slice(0, 8).map(path => {
                         const name = path.split('/').pop() || path;
                         const isActive = activeFile === path;
                         return (
                             <button key={path}
                                 onClick={() => { onSwitchFile(path); setActiveTab('code'); }}
-                                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] whitespace-nowrap flex-shrink-0 transition-colors ${isActive ? 'bg-blue-600/30 text-blue-300' : 'text-gray-500 hover:text-gray-300'}`}>
+                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] whitespace-nowrap flex-shrink-0 transition-colors ${isActive ? 'bg-blue-600/30 text-blue-300' : 'text-gray-500'}`}>
                                 {name}
                                 {isActive && <span className="w-1 h-1 rounded-full bg-blue-400" />}
                             </button>
@@ -496,8 +496,8 @@ export function CollabIDEMobile({
                     })}
                 </div>
                 <button onClick={() => setEditorTheme(t => t === 'vs-dark' ? 'light' : 'vs-dark')}
-                    className="p-1 text-gray-600 hover:text-gray-300 flex-shrink-0">
-                    <Settings2 className="w-3.5 h-3.5" />
+                    className="p-0.5 text-gray-600 hover:text-gray-300 flex-shrink-0">
+                    <Settings2 className="w-3 h-3" />
                 </button>
             </header>
 
@@ -540,13 +540,14 @@ export function CollabIDEMobile({
                 {/* CODE TAB */}
                 {activeTab === 'code' && (
                     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                        {/* Sub-header: active file path */}
-                        <div className="flex items-center gap-2 px-2 py-1 bg-[#0d1117] border-b border-gray-800 flex-shrink-0">
-                            <Code2 className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                            <span className="text-[10px] text-gray-400 truncate flex-1">{activeFile}</span>
+                        {/* Sub-header: active file — compact */}
+                        <div className="flex items-center gap-1.5 px-2 bg-[#0d1117] border-b border-gray-800 flex-shrink-0" style={{ height: 20 }}>
+                            <Code2 className="w-2.5 h-2.5 text-blue-400 flex-shrink-0" />
+                            <span className="text-[9px] text-gray-500 truncate flex-1">{activeFile}</span>
                         </div>
                         <div className="flex-1 min-h-0">
                             <Editor
+                                key={activeFile}
                                 height="100%" theme={editorTheme}
                                 language={getLanguage(activeFile)}
                                 value={files[activeFile] || ''}
@@ -564,11 +565,8 @@ export function CollabIDEMobile({
                                     glyphMargin: false,
                                     lineDecorationsWidth: 2,
                                     lineNumbersMinChars: 3,
-                                    padding: { top: 4, bottom: 80 }, // bottom pad for keyboard
-                                    scrollbar: {
-                                        verticalScrollbarSize: 4,
-                                        horizontalScrollbarSize: 4,
-                                    },
+                                    padding: { top: 4, bottom: 60 },
+                                    scrollbar: { verticalScrollbarSize: 4, horizontalScrollbarSize: 4 },
                                     overviewRulerLanes: 0,
                                     renderLineHighlight: 'line',
                                     suggestFontSize: 11,
@@ -652,7 +650,7 @@ export function CollabIDEMobile({
             </main>
 
             {/* ── Bottom Nav ── */}
-            <nav className="flex-shrink-0 bg-[#161b22] border-t border-gray-800" style={{ height: 52, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)' }}>
+            <nav className="flex-shrink-0 bg-[#161b22] border-t border-gray-800" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', paddingBottom: 'env(safe-area-inset-bottom)', minHeight: 44 }}>
                 {tabItems.map(tab => {
                     const isActive = activeTab === tab.id;
                     const badge = tab.id === 'chat' && unreadCount > 0;

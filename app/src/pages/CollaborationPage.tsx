@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Circle,
   MoreHorizontal,
+  MoreVertical,
   Link2,
   X,
   ArrowLeft,
@@ -21,6 +22,7 @@ import {
   Check,
   Phone,
   PhoneOff,
+  Monitor,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -162,6 +164,10 @@ export function CollaborationPage() {
 
   // User profile modal
   const [showPartnerProfile, setShowPartnerProfile] = useState(false);
+  // Small-screen detection
+  const [isMobileScreen, setIsMobileScreen] = useState(() => window.innerWidth < 1024);
+  // Mobile leave menu
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -172,6 +178,13 @@ export function CollaborationPage() {
   // Idle tracking for slide-to-verify
   const lastActivityRef = useRef<number>(Date.now());
   const idleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Resize listener for mobile screen guard
+  useEffect(() => {
+    const onResize = () => setIsMobileScreen(window.innerWidth < 1024);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // Voice call (global — from CallContext, WebRTC P2P)
   const { callStatus, startCall: globalStartCall, endCall: globalEndCall } = useCall();
@@ -912,8 +925,113 @@ export function CollaborationPage() {
   const doneTasks = tasks.filter(t => t.status === 'done');
 
   return (
-    <div className="h-screen bg-pairon-bg dark:bg-gray-900 flex flex-col overflow-hidden">
-      {/* Header — hidden on mobile, CollabIDEMobile has its own compact header */}
+    <div className="bg-pairon-bg dark:bg-gray-900 flex flex-col overflow-hidden" style={{ height: '100svh' }}>
+
+      {/* ── Small-screen tip banner (dismissable, non-blocking) ── */}
+      {isMobileScreen && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700 flex-shrink-0">
+          <Monitor className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+          <p className="text-xs text-amber-700 dark:text-amber-300 flex-1">
+            For the best experience, use a <strong>desktop browser</strong>.
+          </p>
+        </div>
+      )}
+
+      {/* ── Mobile-only header bar (< md) ── */}
+      <div className="md:hidden flex items-center gap-2 px-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0" style={{ height: 48 }}>
+        {/* Back */}
+        <button
+          onClick={() => { gracefulEndRef.current = true; navigate('/dashboard'); }}
+          className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
+        >
+          <ArrowLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+        </button>
+
+        {/* Partner + mode */}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-gray-900 dark:text-white truncate leading-tight">{session.partnerName}</p>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">{session.mode.toUpperCase()}</p>
+        </div>
+
+        {/* Timer */}
+        <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-mono font-bold flex-shrink-0 ${
+          timeRemaining < 300 ? 'bg-red-100 dark:bg-red-900/30 text-red-600' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+        }`}>
+          <Clock className="w-3 h-3" />
+          {formatTime(timeRemaining)}
+        </div>
+
+        {/* Chat / Code toggle */}
+        <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5 flex-shrink-0">
+          <button
+            onClick={() => setActiveView('chat')}
+            className={`px-2 py-1 rounded-md text-[10px] font-semibold transition-all ${
+              activeView === 'chat' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >Chat</button>
+          <button
+            onClick={() => setActiveView('code')}
+            className={`px-2 py-1 rounded-md text-[10px] font-semibold transition-all ${
+              activeView === 'code' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >Code</button>
+        </div>
+
+        {/* ⋯ Actions menu */}
+        <div className="relative flex-shrink-0">
+          <button
+            onClick={() => setShowMobileMenu(v => !v)}
+            className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            <MoreVertical className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+          </button>
+          {showMobileMenu && (
+            <div
+              className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden"
+              onClick={() => setShowMobileMenu(false)}
+            >
+              {/* Call button */}
+              {session && (
+                callStatus === 'idle' ? (
+                  <button onClick={() => globalStartCall(session.sessionId, session.partnerName, user?.name ?? 'Partner')}
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors">
+                    <Phone className="w-4 h-4" /> Start voice call
+                  </button>
+                ) : callStatus === 'connected' ? (
+                  <button onClick={() => globalEndCall(true)}
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                    <PhoneOff className="w-4 h-4" /> End call
+                  </button>
+                ) : callStatus === 'calling' ? (
+                  <button onClick={() => globalEndCall(true)}
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/20 transition-colors">
+                    <PhoneOff className="w-4 h-4" /> Cancel call
+                  </button>
+                ) : null
+              )}
+              <div className="mx-3 border-t border-gray-100 dark:border-gray-700" />
+              {isSoloMode ? (
+                <button onClick={() => setShowSoloLeaveConfirm(true)}
+                  className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  <LogOut className="w-4 h-4 text-gray-500" /> Leave session
+                </button>
+              ) : (<>
+                <button onClick={() => setShowExitModal(true)}
+                  className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-colors">
+                  <LogOut className="w-4 h-4" /> Request to leave
+                </button>
+                <div className="mx-3 border-t border-gray-100 dark:border-gray-700" />
+                <button onClick={() => setShowForceQuitConfirm(true)}
+                  className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                  <X className="w-4 h-4" /> Force leave
+                </button>
+              </>)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Header — desktop only */}
       <header className="hidden md:block bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -1029,12 +1147,14 @@ export function CollaborationPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
 
 
         {/* IDE — always mounted so WebContainer/sockets/polling stay alive.
-            Hidden with CSS when in chat view so it doesn't re-boot on tab switch. */}
+            Hidden with CSS when in chat view so it doesn't re-boot on tab switch.
+            On mobile: use absolute positioning so CollabIDEMobile fills the area
+            below the mobile header without fighting for flex height. */}
         <div className={`flex-1 flex flex-col h-full${activeView !== 'code' ? ' hidden' : ''}`}>
           <div className="flex-1 min-h-0 h-full overflow-hidden">
             <CollabIDE
@@ -1060,8 +1180,8 @@ export function CollaborationPage() {
           </div>
         </div>
 
-        {/* Chat Panel — always mounted too, hidden when in code view */}
-        <div className={`flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700${activeView !== 'chat' ? ' hidden' : ''}`}>
+        {/* Chat Panel — always mounted, hidden when code view active */}
+        <div className={`flex-1 flex flex-col min-w-0 border-r border-gray-200 dark:border-gray-700${activeView !== 'chat' ? ' hidden' : ''}`}>
             {/* Warning toast */}
             <AnimatePresence>
               {warningMessage && (
@@ -1141,7 +1261,7 @@ export function CollaborationPage() {
             )}
 
             {/* Input */}
-            <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <form onSubmit={handleSendMessage} className="p-3 md:p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <div className="flex gap-2">
                 <Input
                   value={newMessage}
@@ -1161,11 +1281,35 @@ export function CollaborationPage() {
                 </Button>
               </div>
             </form>
+
+            {/* ── Mobile-only: Submission section ── */}
+            {isMobileScreen && (
+              <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+                {/* Submission */}
+                <div className="px-4 py-3">
+                  <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Submission</p>
+                  {session.submission ? (
+                    <div className="p-2.5 bg-green-50 dark:bg-green-900/20 rounded-xl">
+                      <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
+                      <a href={session.submission.link} target="_blank" rel="noopener noreferrer"
+                        className="text-[10px] text-pairon-accent hover:underline break-all">{session.submission.link}</a>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowSubmitModal(true)}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-pairon-accent hover:bg-pairon-accent/90 text-white rounded-xl text-sm font-semibold transition-colors"
+                    >
+                      <Link2 className="w-4 h-4" /> Submit project
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-        {/* Kanban + Sidebar — only in chat view */}
+        {/* Kanban + Sidebar — only in chat view, hidden on mobile */}
         {activeView === 'chat' && sidebarOpen && (<>
-          <div className="w-96 bg-gray-50 dark:bg-gray-900/50 flex flex-col border-r border-gray-200 dark:border-gray-700">
+          <div className="hidden md:flex w-96 bg-gray-50 dark:bg-gray-900/50 flex-col border-r border-gray-200 dark:border-gray-700">
             {/* Task Header with + and AI buttons */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <div className="flex items-center justify-between">
@@ -1228,9 +1372,6 @@ export function CollaborationPage() {
                             Add All
                           </button>
                         )}
-                        <button onClick={() => { setShowTaskSuggestions(false); setAiTaskSuggestions([]); }} className="p-1 rounded hover:bg-purple-100 dark:hover:bg-purple-800/40">
-                          <X className="w-3 h-3 text-purple-500" />
-                        </button>
                       </div>
                     </div>
                     {loadingTaskSuggestions ? (
@@ -1259,7 +1400,6 @@ export function CollaborationPage() {
                 </motion.div>
               )}
             </AnimatePresence>
-
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {/* Empty state */}
               {tasks.length === 0 && !showTaskSuggestions && (
@@ -1374,7 +1514,7 @@ export function CollaborationPage() {
           </div>
 
           {/* Project sidebar */}
-          <div className="w-64 bg-white dark:bg-gray-800 p-4 space-y-6">
+          <div className="hidden md:block w-64 bg-white dark:bg-gray-800 p-4 space-y-6">
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Project Idea</h3>
