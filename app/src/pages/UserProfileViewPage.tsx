@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Star, Zap, CheckCircle, Award, UserPlus, MessageCircle, Handshake, Check, Loader2, Calendar, Globe } from 'lucide-react';
+import { ArrowLeft, Star, Zap, CheckCircle, Award, UserPlus, MessageCircle, Check, Loader2, Calendar, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
@@ -209,7 +209,7 @@ export function UserProfileViewPage() {
 
           {/* Interests */}
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-white dark:bg-gray-800 rounded-2xl sm:rounded-[24px] shadow-card p-5 sm:p-6">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2"><Globe className="w-3.5 h-3.5" />Interests</h3>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2"><Heart className="w-3.5 h-3.5" />Interests</h3>
             {profile.interests.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {profile.interests.map(i => (
