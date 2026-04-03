@@ -333,11 +333,11 @@ export function CollabIDEMobile({
     };
 
     const tabItems: { id: MobileTab; icon: React.ReactNode; label: string }[] = [
-        { id: 'files', icon: <FolderInput className="w-5 h-5" />, label: 'Files' },
-        { id: 'code', icon: <Code2 className="w-5 h-5" />, label: 'Code' },
-        { id: 'terminal', icon: <Terminal className="w-5 h-5" />, label: 'Term' },
-        { id: 'preview', icon: <Globe className="w-5 h-5" />, label: 'Preview' },
-        { id: 'chat', icon: <MessageCircle className="w-5 h-5" />, label: 'Chat' },
+        { id: 'files', icon: <FolderInput className="w-4 h-4" />, label: 'Files' },
+        { id: 'code', icon: <Code2 className="w-4 h-4" />, label: 'Code' },
+        { id: 'terminal', icon: <Terminal className="w-4 h-4" />, label: 'Term' },
+        { id: 'preview', icon: <Globe className="w-4 h-4" />, label: 'View' },
+        { id: 'chat', icon: <MessageCircle className="w-4 h-4" />, label: 'Chat' },
     ];
 
     // ===== Landscape 2-Panel Layout =====
@@ -651,8 +651,8 @@ export function CollabIDEMobile({
                 )}
             </main>
 
-            {/* ── Bottom Nav (48px) ── */}
-            <nav className="flex-shrink-0 bg-[#161b22] border-t border-gray-800 flex items-stretch" style={{ height: 52 }}>
+            {/* ── Bottom Nav ── */}
+            <nav className="flex-shrink-0 bg-[#161b22] border-t border-gray-800" style={{ height: 52, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)' }}>
                 {tabItems.map(tab => {
                     const isActive = activeTab === tab.id;
                     const badge = tab.id === 'chat' && unreadCount > 0;
@@ -662,20 +662,20 @@ export function CollabIDEMobile({
                                 setActiveTab(tab.id);
                                 if (tab.id === 'chat') onMessagesSeen(messages.length);
                             }}
-                            className={`flex-1 flex flex-col items-center justify-center gap-0.5 relative transition-colors ${isActive ? 'text-blue-400' : 'text-gray-600 active:text-gray-400'}`}
+                            className={`flex flex-col items-center justify-center gap-0.5 relative transition-colors min-w-0 overflow-hidden ${isActive ? 'text-blue-400' : 'text-gray-600 active:text-gray-400'}`}
                         >
                             {/* Active indicator bar */}
                             {isActive && (
-                                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-blue-500 rounded-full" />
+                                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-5 h-0.5 bg-blue-500 rounded-full" />
                             )}
                             {/* Badge */}
                             {badge && (
-                                <span className="absolute top-1.5 right-[calc(50%-14px)] w-4 h-4 bg-red-500 text-[7px] font-bold text-white rounded-full flex items-center justify-center z-10">
+                                <span className="absolute top-1 right-[calc(50%-12px)] w-3.5 h-3.5 bg-red-500 text-[6px] font-bold text-white rounded-full flex items-center justify-center z-10">
                                     {unreadCount > 9 ? '9+' : unreadCount}
                                 </span>
                             )}
                             {tab.icon}
-                            <span className="text-[9px] font-semibold tracking-wide">{tab.label}</span>
+                            <span className="text-[8px] font-semibold tracking-wide truncate w-full text-center px-0.5">{tab.label}</span>
                         </button>
                     );
                 })}
