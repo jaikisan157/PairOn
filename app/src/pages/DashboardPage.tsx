@@ -55,8 +55,19 @@ export function DashboardPage() {
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [rulesAgreed, setRulesAgreed] = useState(false);
 
-  // Sidebar expanded/collapsed
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  // Sidebar expanded/collapsed (persisted)
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
+    const saved = localStorage.getItem('pairon_sidebar');
+    return saved !== null ? saved === 'expanded' : true; // default expanded
+  });
+
+  const toggleSidebar = () => {
+    setSidebarExpanded(prev => {
+      const next = !prev;
+      localStorage.setItem('pairon_sidebar', next ? 'expanded' : 'collapsed');
+      return next;
+    });
+  };
 
   // Searching state
   const [isSearching, setIsSearching] = useState(false);
@@ -351,7 +362,7 @@ export function DashboardPage() {
       <DashboardSidebar
         onLogout={() => setShowLogoutConfirm(true)}
         expanded={sidebarExpanded}
-        onToggle={() => setSidebarExpanded(prev => !prev)}
+        onToggle={toggleSidebar}
       />
 
       {/* Top Header Bar (shifted right for sidebar) */}
