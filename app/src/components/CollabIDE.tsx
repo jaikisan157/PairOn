@@ -204,10 +204,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const preview = usePanelResize(350, 200, 600, 'horizontal', true);
     const terminal = usePanelResize(200, 100, 500, 'vertical', true);
 
-    // Collapsible panel states
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [previewCollapsed, setPreviewCollapsed] = useState(false);
-    const [terminalCollapsed, setTerminalCollapsed] = useState(false);
+    // Collapsible panel states — auto-collapse on small screens for mobile friendliness
+    const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(isMobileScreen);
+    const [previewCollapsed, setPreviewCollapsed] = useState(isMobileScreen);
+    const [terminalCollapsed, setTerminalCollapsed] = useState(isMobileScreen);
 
     // Monaco refs
     const editorRef = useRef<MonacoTypes.editor.IStandaloneCodeEditor | null>(null);
