@@ -2,38 +2,35 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Zap,
   LayoutDashboard,
-  MessageCircle,
   Users,
   FolderOpen,
   Award,
-  Settings,
+  User,
   LogOut,
 } from 'lucide-react';
 
 interface DashboardSidebarProps {
-  totalDmUnread: number;
   onLogout: () => void;
 }
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
   { icon: Zap, label: 'Quick Connect', path: '/quick-connect' },
-  { icon: MessageCircle, label: 'Messages', path: '/messages', badgeKey: 'messages' },
   { icon: Users, label: 'Friends', path: '/friends' },
   { icon: FolderOpen, label: 'Projects', path: '/projects' },
   { icon: Award, label: 'Credits', path: '/credits' },
 ];
 
-// Bottom nav shows limited items on mobile
+// Bottom nav for mobile/tablet — Profile added next to Projects
 const mobileNavItems = [
   { icon: LayoutDashboard, label: 'Home', path: '/dashboard' },
   { icon: Zap, label: 'Connect', path: '/quick-connect' },
-  { icon: MessageCircle, label: 'Messages', path: '/messages', badgeKey: 'messages' },
   { icon: Users, label: 'Friends', path: '/friends' },
   { icon: FolderOpen, label: 'Projects', path: '/projects' },
+  { icon: User, label: 'Profile', path: '/profile' },
 ];
 
-export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarProps) {
+export function DashboardSidebar({ onLogout }: DashboardSidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -55,7 +52,6 @@ export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarPr
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
-            const badge = item.badgeKey === 'messages' ? totalDmUnread : 0;
 
             return (
               <button
@@ -72,11 +68,6 @@ export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarPr
                   <div className="absolute left-[-8px] top-1/2 -translate-y-1/2 w-1 h-6 bg-pairon-accent rounded-r-full" />
                 )}
                 <Icon className="w-5 h-5" />
-                {badge > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5">
-                    {badge > 99 ? '99+' : badge}
-                  </span>
-                )}
                 <span className="absolute left-full ml-3 px-2 py-1 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap transition-opacity z-50">
                   {item.label}
                 </span>
@@ -85,14 +76,21 @@ export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarPr
           })}
         </nav>
 
-        {/* Bottom Actions */}
+        {/* Bottom Actions — Profile + Logout */}
         <div className="flex flex-col items-center gap-1 w-full px-2 pt-2 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={() => navigate('/profile')}
-            title="Settings"
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            title="Profile"
+            className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors group relative
+              ${location.pathname === '/profile'
+                ? 'bg-pairon-accent/10 text-pairon-accent'
+                : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
           >
-            <Settings className="w-5 h-5" />
+            <User className="w-5 h-5" />
+            <span className="absolute left-full ml-3 px-2 py-1 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap transition-opacity z-50">
+              Profile
+            </span>
           </button>
           <button
             onClick={onLogout}
@@ -104,13 +102,12 @@ export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarPr
         </div>
       </aside>
 
-      {/* Mobile bottom nav — visible only on mobile */}
+      {/* Mobile bottom nav — visible only on mobile/tablet */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 z-40 safe-area-bottom">
         <div className="flex items-center justify-around h-14 px-1">
           {mobileNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
-            const badge = item.badgeKey === 'messages' ? totalDmUnread : 0;
 
             return (
               <button
@@ -119,14 +116,7 @@ export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarPr
                 className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 py-1 transition-colors
                   ${isActive ? 'text-pairon-accent' : 'text-gray-400'}`}
               >
-                <div className="relative">
-                  <Icon className="w-5 h-5" />
-                  {badge > 0 && (
-                    <span className="absolute -top-1.5 -right-2 min-w-[14px] h-[14px] bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5">
-                      {badge > 99 ? '99+' : badge}
-                    </span>
-                  )}
-                </div>
+                <Icon className="w-5 h-5" />
                 <span className="text-[10px] font-medium">{item.label}</span>
                 {isActive && (
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-5 h-0.5 bg-pairon-accent rounded-full" />

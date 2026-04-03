@@ -72,8 +72,7 @@ export function DashboardPage() {
   // Session history
   const [sessionHistory, setSessionHistory] = useState<any[]>([]);
 
-  // Unread DM count for Friends icon badge
-  const [totalDmUnread, setTotalDmUnread] = useState(0);
+
 
   // Match confirmation
   const [pendingMatchData, setPendingMatchData] = useState<MatchFoundData | null>(null);
@@ -96,26 +95,6 @@ export function DashboardPage() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  useEffect(() => {
-    const token = localStorage.getItem('pairon_token') || '';
-    const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-    fetch(`${API}/api/dm/threads`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          const total = data.reduce((sum: number, t: any) => sum + (t.unreadCount || 0), 0);
-          setTotalDmUnread(total);
-        }
-      })
-      .catch(() => {});
-
-    const sock = socketService.getSocket();
-    if (sock) {
-      const handler = () => setTotalDmUnread(prev => prev + 1);
-      sock.on('dm:new-message', handler);
-      return () => { sock.off('dm:new-message', handler); };
-    }
-  }, []);
 
   // Fetch online collaborator count
   useEffect(() => {
@@ -367,7 +346,6 @@ export function DashboardPage() {
 
       {/* Sidebar Navigation */}
       <DashboardSidebar
-        totalDmUnread={totalDmUnread}
         onLogout={() => setShowLogoutConfirm(true)}
       />
 
@@ -395,13 +373,6 @@ export function DashboardPage() {
               ) : (
                 <Sun className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               )}
-            </button>
-            <button
-              onClick={() => navigate('/profile')}
-              className="w-8 h-8 rounded-full bg-pairon-accent/10 flex items-center justify-center text-pairon-accent font-bold text-sm hover:bg-pairon-accent/20 transition-colors"
-              title="Profile"
-            >
-              {user?.name?.charAt(0).toUpperCase() || 'U'}
             </button>
           </div>
         </div>
