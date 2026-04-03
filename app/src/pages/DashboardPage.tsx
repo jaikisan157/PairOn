@@ -372,7 +372,7 @@ export function DashboardPage() {
       />
 
       {/* Top Header Bar (shifted right for sidebar) */}
-      <header className="fixed top-0 left-[68px] right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-30">
+      <header className="fixed top-0 left-0 md:left-[68px] right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-30">
         <div className="px-6 flex items-center justify-between h-14">
           <h2 className="font-display font-bold text-lg text-gray-900 dark:text-white">
             Dashboard
@@ -408,10 +408,10 @@ export function DashboardPage() {
       </header>
 
       {/* Main Content — offset for sidebar + topbar */}
-      <main className="ml-[68px] pt-14">
+      <main className="md:ml-[68px] pt-14 pb-16 md:pb-0">
         <div className="flex">
           {/* Left: Main content area */}
-          <div className="flex-1 min-w-0 px-6 py-6 max-w-4xl">
+          <div className="flex-1 min-w-0 px-4 md:px-6 py-4 md:py-6 max-w-4xl">
           {/* Welcome */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
