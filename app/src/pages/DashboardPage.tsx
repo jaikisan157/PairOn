@@ -372,8 +372,8 @@ export function DashboardPage() {
       />
 
       {/* Top Header Bar (shifted right for sidebar) */}
-      <header className="fixed top-0 left-0 md:left-[68px] right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-30">
-        <div className="px-6 flex items-center justify-between h-14">
+      <header className="fixed top-0 left-0 lg:left-[68px] right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-30">
+        <div className="px-4 sm:px-6 flex items-center justify-between h-14">
           <h2 className="font-display font-bold text-lg text-gray-900 dark:text-white">
             Dashboard
           </h2>
@@ -408,17 +408,17 @@ export function DashboardPage() {
       </header>
 
       {/* Main Content — offset for sidebar + topbar */}
-      <main className="md:ml-[68px] pt-14 pb-16 md:pb-0">
+      <main className="lg:ml-[68px] pt-14 pb-16 lg:pb-0">
         <div className="flex">
           {/* Left: Main content area */}
-          <div className="flex-1 min-w-0 px-4 md:px-6 py-4 md:py-6 max-w-4xl">
+          <div className="flex-1 min-w-0 px-3 sm:px-4 lg:px-6 py-4 lg:py-6 max-w-4xl">
           {/* Welcome */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="mb-6"
           >
-            <h1 className="font-display text-3xl font-bold text-gray-900 dark:text-white mb-1">
+            <h1 className="font-display text-xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-1">
               {(() => {
                 const hour = new Date().getHours();
                 const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -437,7 +437,7 @@ export function DashboardPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="grid sm:grid-cols-3 gap-4 mb-6"
+            className="grid grid-cols-3 gap-2 sm:gap-4 mb-6"
           >
             {stats.map((stat) => {
               const topBorderColor = stat.label === 'Credits' ? 'bg-green-500' : stat.label === 'Reputation' ? 'bg-yellow-500' : 'bg-purple-500';
@@ -446,19 +446,19 @@ export function DashboardPage() {
                 <div
                   key={stat.label}
                   onClick={stat.label === 'Projects' ? () => navigate('/projects') : undefined}
-                  className={`relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-card${stat.label === 'Projects' ? ' cursor-pointer hover:ring-2 hover:ring-purple-400 transition-all' : ''}`}
+                  className={`relative overflow-hidden bg-white dark:bg-gray-800 rounded-xl sm:rounded-2xl p-3 sm:p-5 shadow-card${stat.label === 'Projects' ? ' cursor-pointer hover:ring-2 hover:ring-purple-400 transition-all' : ''}`}
                 >
                   <div className={`absolute top-0 left-0 right-0 h-[3px] ${topBorderColor}`} />
-                  <div className="flex items-center gap-3 mb-2">
-                    <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-1.5 sm:gap-3 mb-1 sm:mb-2">
+                    <stat.icon className={`w-4 h-4 sm:w-5 sm:h-5 ${stat.color}`} />
+                    <span className="text-[10px] sm:text-sm text-gray-500 dark:text-gray-400">
                       {stat.label}
                     </span>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-white">
                     {stat.value}
                   </p>
-                  <p className={`text-xs mt-1 ${stat.label === 'Projects' ? 'text-purple-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                  <p className={`text-[9px] sm:text-xs mt-0.5 sm:mt-1 hidden sm:block ${stat.label === 'Projects' ? 'text-purple-500' : 'text-gray-400 dark:text-gray-500'}`}>
                     {contextText}
                   </p>
                 </div>
@@ -571,7 +571,7 @@ export function DashboardPage() {
                     key={mode.id}
                     onClick={() => !isSearching && setSelectedMode(mode.id)}
                     disabled={isSearching}
-                    className={`p-6 rounded-2xl border-2 text-left transition-all duration-200 ${isSelected
+                    className={`p-4 sm:p-6 rounded-2xl border-2 text-left transition-all duration-200 ${isSelected
                       ? 'border-pairon-accent bg-pairon-accent-light dark:bg-pairon-accent/10 shadow-[0_0_20px_rgba(34,197,94,0.15)] scale-[1.02]'
                       : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:scale-[1.01] hover:shadow-md'
                       } ${isSearching ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -721,13 +721,13 @@ export function DashboardPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="bg-white dark:bg-gray-800 rounded-[28px] shadow-card p-8"
+            className="bg-white dark:bg-gray-800 rounded-2xl sm:rounded-[28px] shadow-card p-4 sm:p-8"
           >
-            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-              <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white">
+            <div className="flex items-center justify-between mb-4 sm:mb-6 flex-wrap gap-2 sm:gap-3">
+              <h2 className="font-display text-base sm:text-xl font-semibold text-gray-900 dark:text-white">
                 Recent Sessions
               </h2>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto">
                 {(['all', 'completed', 'skipped', 'abandoned'] as const).map((f) => (
                   <button
                     key={f}
@@ -802,17 +802,17 @@ export function DashboardPage() {
                   return (
                     <div
                       key={sess.sessionId}
-                      className={`flex items-center justify-between p-4 rounded-xl border-l-4 border border-gray-200 dark:border-gray-700 transition-all ${leftBorderColor} ${isActive ? 'bg-green-50/50 dark:bg-green-900/10' : 'hover:bg-gray-50/50 dark:hover:bg-gray-700/30'} ${!isActive ? 'cursor-pointer' : ''}`}
+                      className={`flex items-center justify-between p-3 sm:p-4 rounded-xl border-l-4 border border-gray-200 dark:border-gray-700 transition-all ${leftBorderColor} ${isActive ? 'bg-green-50/50 dark:bg-green-900/10' : 'hover:bg-gray-50/50 dark:hover:bg-gray-700/30'} ${!isActive ? 'cursor-pointer' : ''}`}
                       onClick={!isActive ? () => navigate('/projects') : undefined}
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         {/* Partner avatar initial */}
-                        <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${partnerColor}`}>
+                        <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-xs sm:text-sm ${partnerColor}`}>
                           {partnerInitial}
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 flex-wrap">
+                            <p className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white truncate max-w-[120px] sm:max-w-none">
                               {sess.projectIdea?.title || 'Untitled'}
                             </p>
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[displayStatus] || statusColors.ended}`}>
@@ -831,7 +831,7 @@ export function DashboardPage() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 ml-3">
+                      <div className="flex items-center gap-2 sm:gap-3 ml-2 sm:ml-3 flex-shrink-0">
                         <span className="text-xs text-gray-400 whitespace-nowrap" title={new Date(sess.startedAt).toLocaleString()}>
                           {relativeDate(sess.startedAt)}
                         </span>
@@ -858,7 +858,7 @@ export function DashboardPage() {
           </div>
 
           {/* Right sidebar */}
-          <div className="hidden lg:block w-72 flex-shrink-0 py-6 pr-6">
+          <div className="hidden xl:block w-72 flex-shrink-0 py-6 pr-6">
             <div className="sticky top-20">
               <DashboardRightSidebar
                 onlineCount={onlineCount}

@@ -40,7 +40,7 @@ export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarPr
   return (
     <>
       {/* Desktop sidebar — hidden on mobile */}
-      <aside className="hidden md:flex fixed left-0 top-0 bottom-0 w-[68px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col items-center py-4 z-40">
+      <aside className="hidden lg:flex fixed left-0 top-0 bottom-0 w-[68px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col items-center py-4 z-40">
         {/* Logo */}
         <button
           onClick={() => navigate('/')}
@@ -105,7 +105,7 @@ export function DashboardSidebar({ totalDmUnread, onLogout }: DashboardSidebarPr
       </aside>
 
       {/* Mobile bottom nav — visible only on mobile */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 z-40 safe-area-bottom">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 z-40 safe-area-bottom">
         <div className="flex items-center justify-around h-14 px-1">
           {mobileNavItems.map((item) => {
             const isActive = location.pathname === item.path;
