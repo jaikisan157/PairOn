@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 
 export interface Notification {
   id: string;
-  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner' | 'session-completed';
+  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner' | 'session-completed' | 'time-up';
   title: string;
   body: string;
   timestamp: number;

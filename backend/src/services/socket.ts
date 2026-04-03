@@ -104,9 +104,11 @@ export function setupSocketHandlers(io: Server) {
       try {
         const now = new Date();
 
-        // Only close EXPIRED collaboration sessions (endsAt in the past)
+        // Only close EXPIRED collaboration sessions that have been expired for 30+ minutes
+        // (grace period so users can still go back and save their project after timer expires)
+        const graceThreshold = new Date(now.getTime() - 30 * 60 * 1000); // 30 min old
         const closedSessions = await CollaborationSession.updateMany(
-          { participants: userId, status: 'active', endsAt: { $lt: now } },
+          { participants: userId, status: 'active', endsAt: { $lt: graceThreshold } },
           { $set: { status: 'completed' } }
         );
 

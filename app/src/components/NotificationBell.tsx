@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bell, CheckCheck, Trash2, X, MessageCircle, UserPlus, Users, Handshake, AlertTriangle, Info } from 'lucide-react';
+import { Bell, CheckCheck, Trash2, X, MessageCircle, UserPlus, Users, Handshake, AlertTriangle, Info, Clock } from 'lucide-react';
 import { useNotifications } from '@/context/NotificationContext';
 import type { Notification } from '@/context/NotificationContext';
 import { useNavigate } from 'react-router-dom';
@@ -24,6 +24,7 @@ function getNotifIcon(type: Notification['type']) {
     case 'collab-proposal': return <Handshake className="w-4 h-4 text-emerald-400" />;
     case 'collab-declined': return <Handshake className="w-4 h-4 text-red-400" />;
     case 'force-quit-partner': return <AlertTriangle className="w-4 h-4 text-amber-400" />;
+    case 'time-up': return <Clock className="w-4 h-4 text-orange-400" />;
     default: return <Info className="w-4 h-4 text-gray-400" />;
   }
 }
@@ -36,6 +37,7 @@ function getNotifColor(type: Notification['type']) {
     case 'dm': return 'bg-blue-500/10';
     case 'collab-proposal': return 'bg-emerald-500/10';
     case 'force-quit-partner': return 'bg-amber-500/10';
+    case 'time-up': return 'bg-orange-500/10';
     default: return 'bg-gray-500/10';
   }
 }

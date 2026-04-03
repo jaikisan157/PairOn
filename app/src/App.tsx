@@ -73,7 +73,7 @@ interface FriendNotif {
 
 interface Toast {
   id: string;
-  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner';
+  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner' | 'time-up';
   title: string;
   body: string;
   data?: any;
@@ -87,7 +87,7 @@ function GlobalNotifier() {
   const { add: addNotification } = useNotifications();
 
   // Types that require user action — do NOT auto-dismiss
-  const PERSISTENT_TYPES = ['friend-request', 'collab-proposal', 'force-quit-partner'];
+  const PERSISTENT_TYPES = ['friend-request', 'collab-proposal', 'force-quit-partner', 'time-up'];
 
   const addToast = (t: Omit<Toast, 'id'>) => {
     const id = `toast-${Date.now()}`;
@@ -99,7 +99,7 @@ function GlobalNotifier() {
     }
 
     // Also save to persistent notification store (bell icon)
-    if (['friend-request', 'friend-accepted', 'friend-declined', 'dm', 'collab-proposal', 'collab-declined', 'force-quit-partner'].includes(t.type)) {
+    if (['friend-request', 'friend-accepted', 'friend-declined', 'dm', 'collab-proposal', 'collab-declined', 'force-quit-partner', 'time-up'].includes(t.type)) {
       addNotification({ type: t.type, title: t.title, body: t.body, data: t.data });
     }
   };
@@ -195,6 +195,20 @@ function GlobalNotifier() {
       });
     });
 
+    // ── Session timer expired while user is on another page ──
+    socket.on('challenge:time-up', () => {
+      if (window.location.pathname === '/collaborate') return; // collab page handles its own modal
+      const stored = localStorage.getItem('challenge_session');
+      if (!stored) return;
+
+      addToast({
+        type: 'time-up',
+        title: '⏰ Session Time\'s Up!',
+        body: 'Your collaboration session timer has expired. Go back to save your project or end the session.',
+        data: { returnTo: '/collaborate' },
+      });
+    });
+
     return () => {
       socket.off('friend:request-received');
       socket.off('friend:request-accepted');
@@ -204,6 +218,7 @@ function GlobalNotifier() {
       socket.off('challenge:matched');
       socket.off('dm:new-message');
       socket.off('challenge:partner-force-quit');
+      socket.off('challenge:time-up');
     };
   }, [isAuthenticated]);
 
@@ -278,9 +293,9 @@ function GlobalNotifier() {
               {/* Icon */}
               <div style={{
                 width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: 'white',
-                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.2)' : toast.type === 'collab-proposal' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'info' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'force-quit-partner' ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
+                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.2)' : toast.type === 'collab-proposal' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'info' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'force-quit-partner' ? 'linear-gradient(135deg,#f59e0b,#d97706)' : toast.type === 'time-up' ? 'linear-gradient(135deg,#f97316,#ea580c)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
               }}>
-                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' || toast.type === 'info' ? '✓' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? '✗' : toast.type === 'collab-proposal' ? '🤝' : toast.type === 'force-quit-partner' ? '⚠️' : '💬'}
+                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' || toast.type === 'info' ? '✓' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? '✗' : toast.type === 'collab-proposal' ? '🤝' : toast.type === 'force-quit-partner' ? '⚠️' : toast.type === 'time-up' ? '⏰' : '💬'}
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -339,6 +354,24 @@ function GlobalNotifier() {
                       style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
                     >
                       Leave Session
+                    </button>
+                  </div>
+                )}
+
+                {/* Actions for time-up */}
+                {toast.type === 'time-up' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => { removeToast(toast.id); navigate('/collaborate'); }}
+                      style={{ padding: '5px 14px', background: '#f97316', color: 'white', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      📂 Go Back & Save
+                    </button>
+                    <button
+                      onClick={() => { removeToast(toast.id); localStorage.removeItem('challenge_session'); }}
+                      style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      End Session
                     </button>
                   </div>
                 )}

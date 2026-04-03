@@ -1131,17 +1131,10 @@ function startChallengeTimer(io: Server, sessionId: string, endsAt: Date, partic
             clearInterval(timer);
             sessionTimers.delete(sessionId);
 
-            // Time's up — end session
-            try {
-                const session = await CollaborationSession.findById(sessionId) as any;
-                if (session && session.status === 'active') {
-                    session.status = 'completed';
-                    session.endedAt = new Date();
-                    await session.save();
-                }
-            } catch (e) {
-                console.error('Timer completion error:', e);
-            }
+            // Time's up — do NOT auto-complete the session.
+            // Users get a modal to choose: Submit, Continue Working, or End.
+            // The session stays 'active' so they can still rejoin and save.
+            console.log(`[Challenge] Timer expired for session ${sessionId} — waiting for user action`);
 
             // Notify both — time-up does NOT end the session; users choose what to do
             io.to(`challenge:${sessionId}`).emit('challenge:time-up');
