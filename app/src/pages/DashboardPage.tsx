@@ -10,8 +10,6 @@ import {
   Calendar,
   ArrowRight,
   LogOut,
-  User,
-  Users,
   History,
   Sun,
   Moon,
@@ -19,7 +17,6 @@ import {
   Handshake,
   CheckCircle,
   XCircle,
-  Award,
   Shield,
   AlertTriangle,
   Clock,
@@ -38,6 +35,8 @@ import { playMatchSound } from '@/lib/audio';
 import { MatchConfirmModal } from '@/components/MatchConfirmModal';
 import type { MatchFoundData } from '@/components/MatchConfirmModal';
 import type { MatchMode } from '@/types';
+import { DashboardSidebar } from '@/components/DashboardSidebar';
+import { DashboardRightSidebar } from '@/components/DashboardRightSidebar';
 
 const iconMap = {
   zap: Zap,
@@ -79,6 +78,23 @@ export function DashboardPage() {
   // Match confirmation
   const [pendingMatchData, setPendingMatchData] = useState<MatchFoundData | null>(null);
   const [waitingForPartner, setWaitingForPartner] = useState(false);
+
+  // Session filter
+  const [sessionFilter, setSessionFilter] = useState<'all' | 'completed' | 'skipped' | 'abandoned'>('all');
+
+  // Relative date helper
+  const relativeDate = (dateStr: string) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 4) return `${weeks}w ago`;
+    return new Date(dateStr).toLocaleDateString();
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('pairon_token') || '';
@@ -349,103 +365,70 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-12">
-          <div className="flex items-center justify-between h-16">
-            {/* Logo */}
-            <div
-              onClick={() => navigate('/')}
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <div className="w-9 h-9 rounded-xl bg-pairon-accent flex items-center justify-center">
-                <Zap className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-display font-bold text-xl text-gray-900 dark:text-white">
-                PairOn
+      {/* Sidebar Navigation */}
+      <DashboardSidebar
+        totalDmUnread={totalDmUnread}
+        onLogout={() => setShowLogoutConfirm(true)}
+      />
+
+      {/* Top Header Bar (shifted right for sidebar) */}
+      <header className="fixed top-0 left-[68px] right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-30">
+        <div className="px-6 flex items-center justify-between h-14">
+          <h2 className="font-display font-bold text-lg text-gray-900 dark:text-white">
+            Dashboard
+          </h2>
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-pairon-accent-light dark:bg-pairon-accent/10 rounded-full">
+              <Coins className="w-4 h-4 text-pairon-accent" />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {user?.credits} credits
               </span>
             </div>
-
-            {/* Right Actions */}
-            <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-pairon-accent-light dark:bg-pairon-accent/10 rounded-full">
-                <Coins className="w-4 h-4 text-pairon-accent" />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {user?.credits} credits
-                </span>
-              </div>
-              <button
-                onClick={() => navigate('/credits')}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title="Credits & Certificates"
-              >
-                <Award className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
-              <button
-                onClick={() => navigate('/quick-connect')}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title="Quick Connect"
-              >
-                <MessageCircle className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
-              <div className="relative">
-                <button
-                  onClick={() => navigate('/friends')}
-                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  title="Friends"
-                >
-                  <Users className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                </button>
-                {totalDmUnread > 0 && (
-                  <span
-                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 pointer-events-none"
-                  >
-                    {totalDmUnread > 99 ? '99+' : totalDmUnread}
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={toggleTheme}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title={theme === 'light' ? 'Dark mode' : 'Light mode'}
-              >
-                {theme === 'light' ? (
-                  <Moon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                ) : (
-                  <Sun className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                )}
-              </button>
-              <button
-                onClick={() => navigate('/profile')}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <User className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
-              <button
-                onClick={() => setShowLogoutConfirm(true)}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <LogOut className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              </button>
-            </div>
+            <div className="w-px h-6 bg-gray-200 dark:bg-gray-700" />
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+            >
+              {theme === 'light' ? (
+                <Moon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              ) : (
+                <Sun className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              )}
+            </button>
+            <button
+              onClick={() => navigate('/profile')}
+              className="w-8 h-8 rounded-full bg-pairon-accent/10 flex items-center justify-center text-pairon-accent font-bold text-sm hover:bg-pairon-accent/20 transition-colors"
+              title="Profile"
+            >
+              {user?.name?.charAt(0).toUpperCase() || 'U'}
+            </button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-12 py-8">
-        <div className="max-w-6xl mx-auto">
+      {/* Main Content — offset for sidebar + topbar */}
+      <main className="ml-[68px] pt-14">
+        <div className="flex">
+          {/* Left: Main content area */}
+          <div className="flex-1 min-w-0 px-6 py-6 max-w-4xl">
           {/* Welcome */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-8"
+            className="mb-6"
           >
-            <h1 className="font-display text-3xl font-bold text-gray-900 dark:text-white mb-2">
-              Welcome back, {user?.name?.split(' ')[0]}!
+            <h1 className="font-display text-3xl font-bold text-gray-900 dark:text-white mb-1">
+              {(() => {
+                const hour = new Date().getHours();
+                const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+                return `${greeting}, ${user?.name?.split(' ')[0]}! 👋`;
+              })()}
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Ready to find your next collaborator?
+              {activeSessions.length > 0
+                ? 'You have an active session in progress ⚡'
+                : 'Ready to find your next collaborator?'}
             </p>
           </motion.div>
 
@@ -454,26 +437,33 @@ export function DashboardPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="grid sm:grid-cols-3 gap-4 mb-8"
+            className="grid sm:grid-cols-3 gap-4 mb-6"
           >
-            {stats.map((stat) => (
-              <div
-                key={stat.label}
-                onClick={stat.label === 'Projects' ? () => navigate('/projects') : undefined}
-                className={`bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-card${stat.label === 'Projects' ? ' cursor-pointer hover:ring-2 hover:ring-purple-400 transition-all' : ''}`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
-                    {stat.label}
-                  </span>
+            {stats.map((stat) => {
+              const topBorderColor = stat.label === 'Credits' ? 'bg-green-500' : stat.label === 'Reputation' ? 'bg-yellow-500' : 'bg-purple-500';
+              const contextText = stat.label === 'Credits' ? 'Earn by completing sessions' : stat.label === 'Reputation' ? 'Complete sessions to earn' : 'View all →';
+              return (
+                <div
+                  key={stat.label}
+                  onClick={stat.label === 'Projects' ? () => navigate('/projects') : undefined}
+                  className={`relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-card${stat.label === 'Projects' ? ' cursor-pointer hover:ring-2 hover:ring-purple-400 transition-all' : ''}`}
+                >
+                  <div className={`absolute top-0 left-0 right-0 h-[3px] ${topBorderColor}`} />
+                  <div className="flex items-center gap-3 mb-2">
+                    <stat.icon className={`w-5 h-5 ${stat.color}`} />
+                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                      {stat.label}
+                    </span>
+                  </div>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {stat.value}
+                  </p>
+                  <p className={`text-xs mt-1 ${stat.label === 'Projects' ? 'text-purple-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                    {contextText}
+                  </p>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {stat.value}
-                </p>
-              </div>
-            ))}
-
+              );
+            })}
           </motion.div>
 
           {/* Active Challenge Card (for 24hr/7day sessions) */}
@@ -581,9 +571,9 @@ export function DashboardPage() {
                     key={mode.id}
                     onClick={() => !isSearching && setSelectedMode(mode.id)}
                     disabled={isSearching}
-                    className={`p-6 rounded-2xl border-2 text-left transition-all ${isSelected
-                      ? 'border-pairon-accent bg-pairon-accent-light dark:bg-pairon-accent/10'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                    className={`p-6 rounded-2xl border-2 text-left transition-all duration-200 ${isSelected
+                      ? 'border-pairon-accent bg-pairon-accent-light dark:bg-pairon-accent/10 shadow-[0_0_20px_rgba(34,197,94,0.15)] scale-[1.02]'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:scale-[1.01] hover:shadow-md'
                       } ${isSearching ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <div
@@ -733,10 +723,25 @@ export function DashboardPage() {
             transition={{ delay: 0.3 }}
             className="bg-white dark:bg-gray-800 rounded-[28px] shadow-card p-8"
           >
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
               <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white">
                 Recent Sessions
               </h2>
+              <div className="flex items-center gap-1.5">
+                {(['all', 'completed', 'skipped', 'abandoned'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setSessionFilter(f)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                      sessionFilter === f
+                        ? 'bg-pairon-accent text-white'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {sessionHistory.length === 0 ? (
@@ -748,7 +753,13 @@ export function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {sessionHistory.map((sess: any) => {
+                {sessionHistory.filter((sess: any) => {
+                  if (sessionFilter === 'all') return true;
+                  if (sessionFilter === 'completed') return sess.status === 'completed';
+                  if (sessionFilter === 'skipped') return sess.status === 'partner_skipped';
+                  if (sessionFilter === 'abandoned') return sess.status === 'abandoned';
+                  return true;
+                }).map((sess: any) => {
                   const modeLabels: Record<string, string> = { sprint: 'Sprint', challenge: '24hr', build: '7-Day' };
                   const statusColors: Record<string, string> = {
                     active: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
@@ -783,13 +794,22 @@ export function DashboardPage() {
                   // Don't show continue for the person who force-quit
                   const canContinue = isActive && !(sess.status === 'partner_skipped' && sess.quitterId === user?.id);
 
+                  // Color-coded left border
+                  const leftBorderColor = displayStatus === 'completed' ? 'border-l-green-500' : displayStatus === 'partner_skipped' ? 'border-l-orange-500' : displayStatus === 'abandoned' ? 'border-l-red-500' : displayStatus === 'mutual_quit' ? 'border-l-yellow-500' : 'border-l-gray-500';
+                  const partnerInitial = sess.partnerName?.charAt(0)?.toUpperCase() || '?';
+                  const partnerColor = displayStatus === 'completed' ? 'bg-green-500/10 text-green-500' : displayStatus === 'partner_skipped' ? 'bg-orange-500/10 text-orange-500' : 'bg-gray-500/10 text-gray-400';
+
                   return (
                     <div
                       key={sess.sessionId}
-                      className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${isActive ? 'border-green-300 dark:border-green-700 bg-green-50/50 dark:bg-green-900/10' : 'border-gray-200 dark:border-gray-700 hover:border-pairon-accent/30 hover:bg-gray-50/50 dark:hover:bg-gray-700/30'} ${!isActive ? 'cursor-pointer' : ''}`}
+                      className={`flex items-center justify-between p-4 rounded-xl border-l-4 border border-gray-200 dark:border-gray-700 transition-all ${leftBorderColor} ${isActive ? 'bg-green-50/50 dark:bg-green-900/10' : 'hover:bg-gray-50/50 dark:hover:bg-gray-700/30'} ${!isActive ? 'cursor-pointer' : ''}`}
                       onClick={!isActive ? () => navigate('/projects') : undefined}
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
+                        {/* Partner avatar initial */}
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${partnerColor}`}>
+                          {partnerInitial}
+                        </div>
                         <div>
                           <div className="flex items-center gap-2 mb-0.5">
                             <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
@@ -812,8 +832,8 @@ export function DashboardPage() {
                       </div>
 
                       <div className="flex items-center gap-3 ml-3">
-                        <span className="text-xs text-gray-400 whitespace-nowrap">
-                          {new Date(sess.startedAt).toLocaleDateString()}
+                        <span className="text-xs text-gray-400 whitespace-nowrap" title={new Date(sess.startedAt).toLocaleString()}>
+                          {relativeDate(sess.startedAt)}
                         </span>
                         {canContinue && (
                           <Button
@@ -835,6 +855,17 @@ export function DashboardPage() {
               </div>
             )}
           </motion.div>
+          </div>
+
+          {/* Right sidebar */}
+          <div className="hidden lg:block w-72 flex-shrink-0 py-6 pr-6">
+            <div className="sticky top-20">
+              <DashboardRightSidebar
+                onlineCount={onlineCount}
+                totalDmUnread={totalDmUnread}
+              />
+            </div>
+          </div>
         </div>
       </main>
 
