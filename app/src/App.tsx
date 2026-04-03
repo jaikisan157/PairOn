@@ -86,13 +86,19 @@ function GlobalNotifier() {
   const [responding, setResponding] = useState<string | null>(null);
   const { add: addNotification } = useNotifications();
 
+  // Types that require user action — do NOT auto-dismiss
+  const PERSISTENT_TYPES = ['friend-request', 'collab-proposal', 'force-quit-partner'];
+
   const addToast = (t: Omit<Toast, 'id'>) => {
     const id = `toast-${Date.now()}`;
-    setToasts(prev => [...prev.slice(-2), { ...t, id }]); // max 3 toasts
-    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), 8000);
+    setToasts(prev => [...prev.slice(-4), { ...t, id }]); // max 5 toasts
+
+    // Only auto-dismiss non-actionable toasts
+    if (!PERSISTENT_TYPES.includes(t.type)) {
+      setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), 8000);
+    }
 
     // Also save to persistent notification store (bell icon)
-    // Only save types that matter when missed
     if (['friend-request', 'friend-accepted', 'friend-declined', 'dm', 'collab-proposal', 'collab-declined', 'force-quit-partner'].includes(t.type)) {
       addNotification({ type: t.type, title: t.title, body: t.body, data: t.data });
     }
