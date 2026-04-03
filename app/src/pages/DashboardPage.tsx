@@ -144,7 +144,7 @@ export function DashboardPage() {
       if (data?.activeSessions?.length > 0) {
         setActiveSessions(data.activeSessions);
         const first = data.activeSessions[0];
-        localStorage.setItem('challenge_session', JSON.stringify(first));
+        localStorage.setItem('challenge_session', JSON.stringify({ ...first, savedAt: Date.now() }));
       } else {
         setActiveSessions([]);
         localStorage.removeItem('challenge_session');
@@ -203,6 +203,7 @@ export function DashboardPage() {
         startedAt: data.startedAt,
         messages: data.messages || [],
         tasks: data.tasks || [],
+        savedAt: Date.now(),
       }));
 
       playMatchSound();

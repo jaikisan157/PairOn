@@ -210,6 +210,7 @@ export function QuickConnectPage() {
                     startedAt: data.startedAt,
                     messages: data.messages || [],
                     tasks: data.tasks || [],
+                    savedAt: Date.now(),
                 }));
                 navigate('/collaborate');
             });

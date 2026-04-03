@@ -81,6 +81,12 @@ export function CollaborationPage() {
   const navigate = useNavigate();
   const { user, updateProfile } = useAuth();
 
+  // Refs for rejoin guard — using refs (NOT sessionStorage) avoids React Strict Mode
+  // double-invoke creating two orphaned timeouts where only one gets cancelled.
+  const rejoinGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rejoinRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rejoinEmitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Core state (like QuickConnectPage pattern)
   const [status, setStatus] = useState<PageStatus>('idle');
   const [session, setSession] = useState<ChallengeSession | null>(null);
@@ -222,6 +228,7 @@ export function CollaborationPage() {
         projectIdea: data.projectIdea,
         endsAt: data.endsAt,
         startedAt: data.startedAt,
+        savedAt: Date.now(),
       }));
 
       // Start countdown
@@ -357,9 +364,12 @@ export function CollaborationPage() {
 
     // Rejoined after refresh
     socket.on('challenge:rejoined', (data: any) => {
-      // Cancel the rejoin guard timeout — backend confirmed this session is valid
-      const tid = sessionStorage.getItem('_rejoin_timeout_id');
-      if (tid) { clearTimeout(Number(tid)); sessionStorage.removeItem('_rejoin_timeout_id'); }
+      // Cancel ALL pending rejoin guard timers via refs (works even with React Strict Mode double-invoke)
+      if (rejoinGuardRef.current) { clearTimeout(rejoinGuardRef.current); rejoinGuardRef.current = null; }
+      if (rejoinRetryRef.current) { clearTimeout(rejoinRetryRef.current); rejoinRetryRef.current = null; }
+      if (rejoinEmitRef.current) { clearTimeout(rejoinEmitRef.current); rejoinEmitRef.current = null; }
+      // Also clear legacy sessionStorage entry just in case
+      sessionStorage.removeItem('_rejoin_timeout_id');
 
       setStatus('matched');
       setSession({
@@ -477,7 +487,7 @@ export function CollaborationPage() {
       const data = JSON.parse(saved);
 
       if (data.sessionId) {
-        // Set session state
+        // Set session state immediately from localStorage
         setStatus('matched');
         setSession({
           sessionId: data.sessionId,
@@ -501,32 +511,48 @@ export function CollaborationPage() {
           startCountdown(new Date(data.endsAt));
         }
 
-        // Rejoin socket rooms (both challenge room + session room used by IDE)
-        socketService.getSocket()?.emit('challenge:rejoin', data.sessionId);
-        socketService.getSocket()?.emit('user:join-session', data.sessionId);
-        // Request fresh IDE state from partner
-        socketService.getSocket()?.emit('ide:request-state', data.sessionId);
+        const doRejoin = () => {
+          socketService.getSocket()?.emit('challenge:rejoin', data.sessionId);
+          socketService.getSocket()?.emit('user:join-session', data.sessionId);
+          socketService.getSocket()?.emit('ide:request-state', data.sessionId);
+        };
 
-        // Guard: if backend doesn't confirm rejoin within 4s, the session is gone
-        // (partner_skipped, completed, etc.) — clear stale localStorage and go home
-        const rejoinTimeout = setTimeout(() => {
-          // challenge:rejoined would have cancelled this via clearTimeout
-          // If we're here, backend silently rejected the rejoin
-          localStorage.removeItem('challenge_session');
-          setStatus('idle');
-          setSession(null);
-          navigate('/dashboard');
-        }, 4000);
-        // Store so challenge:rejoined handler can cancel it
-        sessionStorage.setItem('_rejoin_timeout_id', String(rejoinTimeout));
+        // Clear any orphaned guard timers from a previous render (React Strict Mode protection)
+        if (rejoinGuardRef.current) { clearTimeout(rejoinGuardRef.current); rejoinGuardRef.current = null; }
+        if (rejoinRetryRef.current) { clearTimeout(rejoinRetryRef.current); rejoinRetryRef.current = null; }
+        if (rejoinEmitRef.current) { clearTimeout(rejoinEmitRef.current); rejoinEmitRef.current = null; }
 
-        // Restore active view from session storage — only if the session was already visited (resume)
-        // Fresh matches must always start on 'chat'
+        // Determine if this is a FRESH connect (session saved < 30s ago) vs a page refresh rejoin
+        const sessionAge = Date.now() - (data.savedAt || 0);
+        const isFreshConnect = sessionAge < 30_000;
+
+        // Always delay the first emit by 500ms so attachListeners polling can finish
+        // and challenge:rejoined listener is registered before the backend responds.
+        rejoinEmitRef.current = setTimeout(() => {
+          doRejoin();
+
+          if (!isFreshConnect) {
+            // True page-refresh rejoin: set a retry at 2.5s and a redirect guard at 12s
+            // Guard uses a ref so React Strict Mode double-invoke can't orphan a cancellable timer
+            rejoinRetryRef.current = setTimeout(doRejoin, 2500);
+            rejoinGuardRef.current = setTimeout(() => {
+              if (rejoinRetryRef.current) { clearTimeout(rejoinRetryRef.current); rejoinRetryRef.current = null; }
+              // Only navigate away for genuinely dead sessions (no challenge:rejoined received)
+              localStorage.removeItem('challenge_session');
+              setStatus('idle');
+              setSession(null);
+              navigate('/dashboard');
+            }, 12_000);
+          }
+          // For fresh connects: no guard needed — status is already 'matched' from localStorage
+        }, 500);
+
+        // Restore active view
         const savedView = sessionStorage.getItem(`collab_active_view_${data.sessionId}`);
         if (savedView === 'code') {
           setActiveView('code');
         } else {
-          setActiveView('chat'); // Always start on chat
+          setActiveView('chat');
         }
       } else {
         navigate('/dashboard');
@@ -535,6 +561,7 @@ export function CollaborationPage() {
       navigate('/dashboard');
     }
   }, [status, navigate]);
+
 
   // Persist active view per session
   useEffect(() => {

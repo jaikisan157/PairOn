@@ -16,6 +16,7 @@ import {
     useToasts, ToastContainer, Breadcrumb, usePanelResize, ResizeDivider,
     SearchPanel, PackageManagerPanel,
 } from './CollabIDEHelpers';
+import { CollabIDEMobile } from './CollabIDEMobile';
 
 // ===== Types =====
 interface FileNode { name: string; type: 'file' | 'directory'; children?: FileNode[]; }
@@ -200,20 +201,53 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [draggedPath, setDraggedPath] = useState<string | null>(null);
 
     // Panel resize
-    const sidebar = usePanelResize(200, 120, 400);
-    const preview = usePanelResize(350, 200, 600, 'horizontal', true);
-    const terminal = usePanelResize(200, 100, 500, 'vertical', true);
+    const previewMaxSize = typeof window !== 'undefined' ? Math.round(window.innerWidth * 0.75) : 900;
+    const sidebar = usePanelResize(200, 120, 400, 'horizontal', false, 'pairon_sidebar_size');
+    const preview = usePanelResize(350, 200, previewMaxSize, 'horizontal', true, 'pairon_preview_size');
+    const terminal = usePanelResize(200, 100, 500, 'vertical', true, 'pairon_terminal_size');
 
-    // Collapsible panel states — auto-collapse on small screens for mobile friendliness
+    // Collapsible panel states — persisted across refresh
     const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(isMobileScreen);
-    const [previewCollapsed, setPreviewCollapsed] = useState(isMobileScreen);
-    const [terminalCollapsed, setTerminalCollapsed] = useState(isMobileScreen);
+    const [sidebarCollapsed, setSidebarCollapsedRaw] = useState(() => {
+        const stored = localStorage.getItem('pairon_sidebar_collapsed');
+        return stored !== null ? stored === 'true' : isMobileScreen;
+    });
+    const [previewCollapsed, setPreviewCollapsedRaw] = useState(() => {
+        const stored = localStorage.getItem('pairon_preview_collapsed');
+        return stored !== null ? stored === 'true' : isMobileScreen;
+    });
+    const [terminalCollapsed, setTerminalCollapsedRaw] = useState(() => {
+        const stored = localStorage.getItem('pairon_terminal_collapsed');
+        return stored !== null ? stored === 'true' : isMobileScreen;
+    });
+
+    // Wrappers that persist collapse state
+    const setSidebarCollapsed = (v: boolean) => { setSidebarCollapsedRaw(v); localStorage.setItem('pairon_sidebar_collapsed', String(v)); };
+    const setPreviewCollapsed = (v: boolean) => { setPreviewCollapsedRaw(v); localStorage.setItem('pairon_preview_collapsed', String(v)); };
+    const setTerminalCollapsed = (v: boolean) => { setTerminalCollapsedRaw(v); localStorage.setItem('pairon_terminal_collapsed', String(v)); };
 
     // Monaco refs
     const editorRef = useRef<MonacoTypes.editor.IStandaloneCodeEditor | null>(null);
     const monacoRef = useRef<typeof MonacoTypes | null>(null);
     const modelsRef = useRef<Map<string, MonacoTypes.editor.ITextModel>>(new Map());
+
+    // Re-layout Monaco whenever panel collapse state changes — Monaco doesn't auto-detect CSS grid reflow
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            editorRef.current?.layout();
+        }, 50);
+        return () => clearTimeout(timer);
+    }, [sidebarCollapsed, previewCollapsed]);
+
+    // Re-fit xterm terminal when it expands — xterm doesn't auto-detect container height change
+    useEffect(() => {
+        if (!terminalCollapsed) {
+            const timer = setTimeout(() => {
+                try { fitAddonRef.current?.fit(); } catch { /* ignore */ }
+            }, 80);
+            return () => clearTimeout(timer);
+        }
+    }, [terminalCollapsed]);
 
     // Other refs
     const terminalRef = useRef<HTMLDivElement>(null);
@@ -2039,6 +2073,43 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const tree = buildTree();
     const activeFileLocked = isLockedByPartner(activeFile);
 
+    // ── Mobile layout ──
+    // Use a reactive state so rotation triggers re-render
+    const [isMobileLayout, setIsMobileLayout] = useState(() => window.innerWidth < 768);
+    useEffect(() => {
+        const onResize = () => setIsMobileLayout(window.innerWidth < 768);
+        window.addEventListener('resize', onResize);
+        window.addEventListener('orientationchange', () => setTimeout(onResize, 150));
+        return () => {
+            window.removeEventListener('resize', onResize);
+            window.removeEventListener('orientationchange', onResize as EventListener);
+        };
+    }, []);
+
+    if (isMobileLayout) {
+        return (
+            <CollabIDEMobile
+                sessionId={sessionId}
+                partnerId={_partnerId}
+                projectTitle={projectTitle}
+                userId={userId}
+                userName={userName}
+                messages={messages}
+                onSendMessage={onSendMessage}
+                lastSeenMessageCount={lastSeenMessageCount}
+                onMessagesSeen={onMessagesSeen}
+                files={files}
+                activeFile={activeFile}
+                onFileChange={(path, content) => {
+                    setFiles(prev => { const n = { ...prev, [path]: content }; return n; });
+                }}
+                onSwitchFile={switchToFile}
+                webcontainerRef={webcontainerRef}
+                previewUrl={previewUrl}
+            />
+        );
+    }
+
     return (
         <div className={`flex flex-col bg-[#0d1117] text-white ${isFullscreen ? 'fixed inset-0 z-50' : 'h-full'}`}>
             {/* Top bar */}
@@ -2225,11 +2296,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 gridTemplateColumns: sidebarCollapsed
                     ? (previewCollapsed ? '36px 0px 1fr 0px 36px' : `36px 0px 1fr 5px ${preview.size}px`)
                     : (previewCollapsed ? `${sidebar.size}px 5px 1fr 0px 36px` : `${sidebar.size}px 5px 1fr 5px ${preview.size}px`),
+                transition: 'grid-template-columns 0.15s ease',
                 minHeight: 0,
-            }
-            }>
+            }}>
                 {/* File explorer */}
-                <div className="bg-[#0d1117] border-r border-gray-800 flex flex-col min-w-0 overflow-hidden relative">
+                <div className="bg-[#0d1117] border-r border-gray-800 flex flex-col min-w-0 overflow-hidden relative" style={{ width: sidebarCollapsed ? 36 : undefined }}>
                     {sidebarCollapsed ? (
                         /* Collapsed sidebar — thin strip with expand button */
                         <div className="flex flex-col items-center py-2 h-full">
@@ -2332,8 +2403,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     )}
                     </>)}
                 </div>
-                {/* Sidebar resize divider */}
-                {!sidebarCollapsed && <ResizeDivider dividerRef={sidebar.dividerRef} />}
+                {/* Sidebar resize divider — always in DOM so grid column count stays constant */}
+                {sidebarCollapsed
+                    ? <div style={{ width: 0, overflow: 'hidden', pointerEvents: 'none' }} />
+                    : <ResizeDivider dividerRef={sidebar.dividerRef} />}
 
                 {/* Editor + Terminal */}
                 <div className="flex flex-col min-w-0 overflow-hidden">
@@ -2383,18 +2456,22 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             />
                         </div>
                     </div>
-                    {/* Terminal section — collapsible */}
-                    {terminalCollapsed ? (
+                    {/* Terminal section - collapsible via CSS height, NOT conditional render (xterm must stay in DOM) */}
+                    {/* Collapsed strip - shown when terminal is collapsed */}
+                    {terminalCollapsed && (
                         <div className="flex-shrink-0 border-t border-gray-800 bg-[#161b22] flex items-center px-2 py-1 cursor-pointer hover:bg-[#1e2030] transition-colors"
                             onClick={() => setTerminalCollapsed(false)}>
                             <ChevronUp className="w-3 h-3 text-gray-500 mr-1.5" />
                             <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Terminal</span>
                         </div>
-                    ) : (<>
-                    {/* Terminal resize handle */}
+                    )}
+                    {/* Terminal resize handle - always in DOM */}
                     <ResizeDivider dividerRef={terminal.dividerRef} direction="vertical" />
-                    <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117]" style={{ height: terminal.size }}>
-                        <div className="flex items-center justify-between px-2 py-1 bg-[#161b22] border-b border-gray-800">
+                    {/* Terminal panel - always mounted so xterm canvas never detaches */}
+                    <div className="flex-shrink-0 border-t border-gray-800 bg-[#0d1117] overflow-hidden flex flex-col"
+                        style={{ height: terminalCollapsed ? 0 : terminal.size, transition: 'height 0.15s ease' }}>
+                        {/* Terminal tab bar */}
+                        <div className="flex items-center justify-between px-2 py-1 bg-[#161b22] border-b border-gray-800 flex-shrink-0">
                             <div className="flex items-center gap-0 overflow-x-auto">
                                 <button onClick={() => setTerminalCollapsed(true)}
                                     className="p-0.5 text-gray-500 hover:text-blue-400 rounded transition-colors mr-1"
@@ -2410,10 +2487,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                             {locked && <span title={`${terminalLocks.get(tab.id)?.userName} is using this terminal`}><Lock className="w-2.5 h-2.5 text-yellow-400" /></span>}
                                             {tab.label}
                                             {terminalTabs.length > 1 && (
-                                                <span
-                                                    onClick={(e) => { e.stopPropagation(); closeTerminal(tab.id); }}
-                                                    className="p-0.5 rounded hover:bg-red-500/20 ml-0.5"
-                                                >
+                                                <span onClick={(e) => { e.stopPropagation(); closeTerminal(tab.id); }} className="p-0.5 rounded hover:bg-red-500/20 ml-0.5">
                                                     <X className="w-2.5 h-2.5" />
                                                 </span>
                                             )}
@@ -2425,39 +2499,29 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                         if (!terminalRef.current) return;
                                         const newId = `term-${Date.now()}`;
                                         const tabNum = terminalTabs.length + 1;
-                                        // Create DOM container for the new terminal
                                         const container = document.createElement('div');
                                         container.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;display:none';
                                         terminalRef.current.appendChild(container);
                                         const newTerm = new XTermTerminal({
                                             theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', selectionBackground: '#264f78' },
-                                            fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 13, cursorBlink: true, convertEol: true,
-                                            allowProposedApi: true,
+                                            fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 13, cursorBlink: true, convertEol: true, allowProposedApi: true,
                                         });
                                         const newFitAddon = new FitAddon();
                                         newTerm.loadAddon(newFitAddon);
                                         newTerm.open(container);
-                                        setTimeout(() => { try { newFitAddon.fit(); } catch { /* */ } }, 50);
-                                        const inst: TerminalInstance = {
-                                            id: newId, label: `bash ${tabNum}`,
-                                            term: newTerm, fitAddon: newFitAddon,
-                                            shellProcess: null, shellWriter: null, container,
-                                        };
+                                        setTimeout(() => { try { newFitAddon.fit(); } catch { /**/ } }, 50);
+                                        const inst: TerminalInstance = { id: newId, label: `bash ${tabNum}`, term: newTerm, fitAddon: newFitAddon, shellProcess: null, shellWriter: null, container };
                                         newTerm.onData((data: string) => {
                                             const active = terminalsRef.current.get(newId);
                                             if (active?.shellWriter) active.shellWriter.write(data);
                                             const socket = socketService.getSocket();
                                             socket?.emit('terminal:lock', sessionId, { terminalId: newId, userName });
                                             if (terminalUnlockTimerRef.current) clearTimeout(terminalUnlockTimerRef.current);
-                                            terminalUnlockTimerRef.current = setTimeout(() => {
-                                                socket?.emit('terminal:unlock', sessionId, { terminalId: newId });
-                                            }, 4000);
+                                            terminalUnlockTimerRef.current = setTimeout(() => { socket?.emit('terminal:unlock', sessionId, { terminalId: newId }); }, 4000);
                                         });
                                         terminalsRef.current.set(newId, inst);
                                         const tabLabel = `bash ${tabNum}`;
-                                        // Notify partner of new terminal
                                         socketService.getSocket()?.emit('terminal:create', sessionId, { terminalId: newId, label: tabLabel });
-                                        // Spawn shell if WC is booted
                                         if (webcontainerRef.current) {
                                             (async () => {
                                                 try {
@@ -2465,25 +2529,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                                     inst.shellProcess = shell;
                                                     const writer = shell.input.getWriter();
                                                     inst.shellWriter = writer;
-                                                    shell.output.pipeTo(new WritableStream({
-                                                        write(data) {
-                                                            newTerm.write(data);
-                                                            parseNpmOutput(data, newId);
-                                                            socketService.getSocket()?.emit('terminal:output', sessionId, { terminalId: newId, chunk: data, label: tabLabel });
-                                                        },
-                                                    }));
-                                                    // If this is still the active terminal, update global refs
+                                                    shell.output.pipeTo(new WritableStream({ write(data) { newTerm.write(data); parseNpmOutput(data, newId); socketService.getSocket()?.emit('terminal:output', sessionId, { terminalId: newId, chunk: data, label: tabLabel }); } }));
                                                     if (activeTerminalId === newId) shellWriterRef.current = writer;
-                                                } catch { /* WC not ready */ }
+                                                } catch { /**/ }
                                             })();
                                         }
                                         setTerminalTabs(prev => [...prev, { id: newId, label: tabLabel }]);
                                         setActiveTerminalId(newId);
                                         setActiveTermTab('shell');
-                                        // Show new, hide others
-                                        terminalsRef.current.forEach((t, tid) => {
-                                            if (t.container) t.container.style.display = tid === newId ? 'block' : 'none';
-                                        });
+                                        terminalsRef.current.forEach((t, tid) => { if (t.container) t.container.style.display = tid === newId ? 'block' : 'none'; });
                                     }} className="p-0.5 ml-1 text-gray-500 hover:text-white hover:bg-gray-700 rounded" title="New terminal">
                                         <Plus className="w-3 h-3" />
                                     </button>
@@ -2501,7 +2555,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                                 className={`flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors whitespace-nowrap ${activeTermTab === 'partner' && activePartnerTermId === tab.id ? 'text-green-300 border-b-2 border-green-500' : 'text-gray-500 hover:text-green-300'}`}
                                                 title="Partner's terminal (read-only)">
                                                 <Terminal className="w-3 h-3 text-green-500" />
-                                                👤 {tab.label}
+                                                {String.fromCodePoint(0x1F464)} {tab.label}
                                             </button>
                                         ))}
                                     </>
@@ -2516,12 +2570,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 </button>
                             </div>
                         </div>
-                        <div ref={terminalRef} className="h-[calc(100%-28px)] relative" style={{ display: activeTermTab === 'shell' ? 'block' : 'none' }}>
-                            {/* npm install progress bar */}
+                        {/* xterm shell view - always mounted */}
+                        <div ref={terminalRef} className="flex-1 relative" style={{ display: activeTermTab === 'shell' ? 'block' : 'none' }}>
                             {installProgress?.active && (
                                 <div className="absolute top-0 left-0 right-0 z-10 bg-[#0d1117]/95 backdrop-blur-sm border-b border-blue-500/30 px-3 py-1.5">
                                     <div className="flex items-center justify-between mb-1">
-                                        <span className="text-[10px] text-blue-300 font-medium">📦 {installProgress.phase}</span>
+                                        <span className="text-[10px] text-blue-300 font-medium">{String.fromCodePoint(0x1F4E6)} {installProgress.phase}</span>
                                         <span className="text-[10px] text-gray-400">
                                             {installProgress.percent}%
                                             {installProgress.percent < 100 && (() => {
@@ -2532,76 +2586,40 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                         </span>
                                     </div>
                                     <div className="w-full bg-gray-800 rounded-full h-1.5">
-                                        <div
-                                            className={`h-1.5 rounded-full transition-all duration-300 ${installProgress.percent === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
-                                            style={{ width: `${installProgress.percent}%` }}
-                                        />
+                                        <div className={`h-1.5 rounded-full transition-all duration-300 ${installProgress.percent === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                                            style={{ width: `${installProgress.percent}%` }} />
                                     </div>
                                 </div>
                             )}
                         </div>
-                        {/* Partner terminal (read-only view) */}
-                        <div
-                            ref={partnerTermContainerRef}
-                            className="h-[calc(100%-28px)] relative"
-                            style={{ display: activeTermTab === 'partner' ? 'block' : 'none' }}
-                        >
+                        {/* Partner terminal (read-only) */}
+                        <div ref={partnerTermContainerRef} className="flex-1 relative" style={{ display: activeTermTab === 'partner' ? 'block' : 'none' }}>
                             {partnerTermTabs.length === 0 && activeTermTab === 'partner' && (
                                 <div className="flex items-center justify-center h-full text-gray-600 text-xs">
                                     Partner hasn't opened a terminal yet
                                 </div>
                             )}
                         </div>
+                        {/* Output log */}
                         {activeTermTab === 'output' && (
-                            <div ref={outputRef} className="h-[calc(100%-28px)] overflow-y-auto p-2 font-mono text-xs text-gray-400">
+                            <div ref={outputRef} className="flex-1 overflow-y-auto p-2 font-mono text-xs text-gray-400">
                                 {outputLines.length === 0 ? (
-                                    <p className="text-gray-600 text-center py-4">Build & run output will appear here</p>
+                                    <p className="text-gray-600 text-center py-4">Build &amp; run output will appear here</p>
                                 ) : outputLines.map((line, i) => (
                                     <div key={i} className="py-0.5 border-b border-gray-800/30">{line}</div>
                                 ))}
                             </div>
                         )}
                     </div>
-                    </>)}
-
-                    {/* Inline Comment Panel */}
-                    {
-                        commentLine !== null && (
-                            <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#1e2030] border-t border-blue-500/30 p-2">
-                                <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                                    <span>💬 Comment on line {commentLine}</span>
-                                    <button onClick={() => { setCommentLine(null); setCommentText(''); }} className="ml-auto text-gray-500 hover:text-white"><X className="w-3 h-3" /></button>
-                                </div>
-                                {(comments[activeFile] || []).filter(c => c.line === commentLine).map(c => (
-                                    <div key={c.id} className="flex items-start gap-1.5 mb-1 text-xs">
-                                        <span className="text-blue-400 font-medium">{c.userName}:</span>
-                                        <span className="text-gray-300">{c.text}</span>
-                                    </div>
-                                ))}
-                                <form onSubmit={(e) => {
-                                    e.preventDefault();
-                                    if (!commentText.trim() || commentLine === null) return;
-                                    const newComment = { id: Date.now().toString(), line: commentLine, text: commentText, userId, userName, timestamp: Date.now() };
-                                    setComments(prev => ({ ...prev, [activeFile]: [...(prev[activeFile] || []), newComment] }));
-                                    const socket = socketService.getSocket();
-                                    socket?.emit('code:comment', { sessionId, filePath: activeFile, comment: newComment, senderId: socket?.id });
-                                    setCommentText('');
-                                    addToast('Comment added', 'success');
-                                }} className="flex gap-1 mt-1">
-                                    <input value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="Add a comment..."
-                                        className="flex-1 bg-[#0d1117] border border-gray-700 rounded px-2 py-1 text-[11px] text-white placeholder-gray-600 outline-none focus:border-blue-500" autoFocus />
-                                    <button type="submit" className="px-2 py-1 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-500">Add</button>
-                                </form>
-                            </div>
-                        )
-                    }
                 </div>
-
-                {/* Preview resize divider */}
-                {!previewCollapsed && <ResizeDivider dividerRef={preview.dividerRef} />}
+                {/* Preview resize divider — always in DOM so grid column count stays constant */}
+                {previewCollapsed
+                    ? <div style={{ width: 0, overflow: 'hidden', pointerEvents: 'none' }} />
+                    : <ResizeDivider dividerRef={preview.dividerRef} />}
 
                 {/* Preview + Mini Chat */}
-                <div className="border-l border-gray-800 bg-[#161b22] flex flex-col min-w-0 overflow-hidden" >
+                <div className="border-l border-gray-800 bg-[#161b22] flex flex-col overflow-hidden" style={{ width: previewCollapsed ? 36 : undefined, minWidth: previewCollapsed ? 36 : undefined }}>
+
                     {previewCollapsed ? (
                         /* Collapsed preview — thin strip with expand button + chat toggle */
                         <div className="flex flex-col items-center h-full">
@@ -2613,11 +2631,15 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             <span className="text-[9px] font-semibold text-gray-600 uppercase tracking-widest flex-1"
                                 style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>Preview</span>
                             {/* Chat toggle always accessible */}
-                            <button onClick={() => { setShowMiniChat(!showMiniChat); if (!showMiniChat) onMessagesSeen(messages.length); }}
+                            <button onClick={() => {
+                                    setPreviewCollapsed(false);
+                                    setShowMiniChat(true);
+                                    onMessagesSeen(messages.length);
+                                }}
                                 className="p-1.5 text-gray-500 hover:text-blue-400 rounded transition-colors my-2 relative"
-                                title="Toggle Chat">
+                                title="Open Chat">
                                 <MessageCircle className="w-4 h-4" />
-                                {!showMiniChat && unreadCount > 0 && (
+                                {unreadCount > 0 && (
                                     <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 text-white text-[7px] font-bold rounded-full flex items-center justify-center animate-pulse">{unreadCount > 9 ? '9+' : unreadCount}</span>
                                 )}
                             </button>

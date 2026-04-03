@@ -154,7 +154,7 @@ function GlobalNotifier() {
     // ── challenge:matched — navigate to /collaborate (handles friend collab accept) ──
     socket.on('challenge:matched', (data: any) => {
       if (data.sessionId) {
-        localStorage.setItem('challenge_session', JSON.stringify(data));
+        localStorage.setItem('challenge_session', JSON.stringify({ ...data, savedAt: Date.now() }));
         // Navigate to collaborate if not already there (use React Router, NOT window.location)
         if (window.location.pathname !== '/collaborate') {
           navigate('/collaborate');
