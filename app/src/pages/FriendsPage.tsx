@@ -214,7 +214,7 @@ export function FriendsPage() {
 
     return (
         <div className="min-h-screen bg-pairon-bg dark:bg-gray-900">
-            <div className="max-w-4xl mx-auto p-6">
+            <div className="max-w-4xl mx-auto p-3 sm:p-6">
                 {/* Header */}
                 <div className="flex items-center gap-4 mb-8">
                     <button
@@ -224,7 +224,7 @@ export function FriendsPage() {
                         <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                     </button>
                     <div>
-                        <h1 className="font-display text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <h1 className="font-display text-lg sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                             <Users className="w-6 h-6 text-pairon-accent" />
                             Friends
                         </h1>
@@ -235,25 +235,25 @@ export function FriendsPage() {
                 </div>
 
                 {/* Tabs */}
-                <div className="flex gap-2 mb-6">
+                <div className="flex gap-1.5 sm:gap-2 mb-4 sm:mb-6 overflow-x-auto">
                     <button
                         onClick={() => setActiveTab('friends')}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeTab === 'friends'
+                        className={`px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap flex-shrink-0 ${activeTab === 'friends'
                             ? 'bg-pairon-accent text-white shadow-md'
                             : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                             }`}
                     >
-                        <Users className="w-4 h-4 inline mr-1.5" />
+                        <Users className="w-4 h-4 inline mr-1" />
                         Friends ({friends.length})
                     </button>
                     <button
                         onClick={() => setActiveTab('requests')}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all relative ${activeTab === 'requests'
+                        className={`px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all relative whitespace-nowrap flex-shrink-0 ${activeTab === 'requests'
                             ? 'bg-pairon-accent text-white shadow-md'
                             : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                             }`}
                     >
-                        <UserPlus className="w-4 h-4 inline mr-1.5" />
+                        <UserPlus className="w-4 h-4 inline mr-1" />
                         Requests
                         {pending.length > 0 && (
                             <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
@@ -263,12 +263,12 @@ export function FriendsPage() {
                     </button>
                     <button
                         onClick={() => setActiveTab('search')}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeTab === 'search'
+                        className={`px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap flex-shrink-0 ${activeTab === 'search'
                             ? 'bg-pairon-accent text-white shadow-md'
                             : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                             }`}
                     >
-                        <Search className="w-4 h-4 inline mr-1.5" />
+                        <Search className="w-4 h-4 inline mr-1" />
                         Find People
                     </button>
                 </div>
@@ -314,35 +314,35 @@ export function FriendsPage() {
                                     initial={{ opacity: 0, y: 8 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: i * 0.04 }}
-                                    className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700"
+                                    className="flex items-center justify-between gap-2 p-3 sm:p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
                                 >
-                                    <div className="flex items-center gap-3">
-                                        <div className="relative">
-                                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-pairon-accent to-emerald-600 flex items-center justify-center text-white font-bold text-sm">
+                                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                                        <div className="relative flex-shrink-0">
+                                            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-br from-pairon-accent to-emerald-600 flex items-center justify-center text-white font-bold text-xs sm:text-sm">
                                                 {user.avatar ? (
                                                     <img src={user.avatar} alt="" className="w-full h-full rounded-full object-cover" />
                                                 ) : (
                                                     user.name.charAt(0).toUpperCase()
                                                 )}
                                             </div>
-                                            <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+                                            <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full border-2 border-white dark:border-gray-800 ${user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
                                         </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-white text-sm">{user.name}</p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                {user.email} · ⭐ {user.reputation} · <span className="capitalize">{user.experienceLevel}</span>
+                                        <div className="min-w-0">
+                                            <p className="font-semibold text-gray-900 dark:text-white text-xs sm:text-sm truncate">{user.name}</p>
+                                            <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                ⭐ {user.reputation} · <span className="capitalize">{user.experienceLevel}</span>
                                             </p>
                                         </div>
                                     </div>
-                                    <div>
+                                    <div className="flex-shrink-0">
                                         {status === 'friend' && (
-                                            <span className="text-xs text-pairon-accent font-medium px-3 py-1.5 bg-pairon-accent/10 rounded-full">Already friends</span>
+                                            <span className="text-[10px] sm:text-xs text-pairon-accent font-medium px-2 sm:px-3 py-1 sm:py-1.5 bg-pairon-accent/10 rounded-full whitespace-nowrap">Friends</span>
                                         )}
                                         {status === 'pending' && (
-                                            <span className="text-xs text-yellow-600 font-medium px-3 py-1.5 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">Pending</span>
+                                            <span className="text-[10px] sm:text-xs text-yellow-600 font-medium px-2 sm:px-3 py-1 sm:py-1.5 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">Pending</span>
                                         )}
                                         {status === 'sent' && (
-                                            <span className="text-xs text-emerald-600 font-medium px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center gap-1">
+                                            <span className="text-[10px] sm:text-xs text-emerald-600 font-medium px-2 sm:px-3 py-1 sm:py-1.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center gap-1">
                                                 <Check className="w-3 h-3" /> Sent
                                             </span>
                                         )}
@@ -351,12 +351,12 @@ export function FriendsPage() {
                                                 size="sm"
                                                 onClick={() => handleSendFriendRequest(user.id)}
                                                 disabled={sendingReqTo === user.id}
-                                                className="bg-pairon-accent hover:bg-pairon-accent/90 text-white h-8 rounded-xl"
+                                                className="bg-pairon-accent hover:bg-pairon-accent/90 text-white h-7 sm:h-8 rounded-xl text-xs"
                                             >
                                                 {sendingReqTo === user.id ? (
-                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                    <Loader2 className="w-3 h-3 animate-spin" />
                                                 ) : (
-                                                    <><UserPlus className="w-3.5 h-3.5 mr-1" /> Add Friend</>
+                                                    <><UserPlus className="w-3 h-3 mr-0.5" /> Add</>
                                                 )}
                                             </Button>
                                         )}
@@ -400,44 +400,44 @@ export function FriendsPage() {
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: i * 0.05 }}
-                                    className={`flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border transition-colors ${
+                                    className={`flex items-center justify-between gap-2 p-3 sm:p-4 bg-white dark:bg-gray-800 rounded-2xl border transition-colors overflow-hidden ${
                                         hasUnread
                                             ? 'border-indigo-400/60 dark:border-indigo-500/50 shadow-[0_0_0_1px_rgba(99,102,241,0.15)] border-l-4 border-l-indigo-500'
                                             : 'border-gray-200 dark:border-gray-700 hover:border-pairon-accent/30'
                                     }`}
                                 >
-                                    <div className="flex items-center gap-3">
-                                        <div className="relative cursor-pointer" onClick={() => navigate(`/users/${friend.id}`)}>
-                                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-pairon-accent to-purple-600 flex items-center justify-center text-white font-bold text-sm">
+                                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                                        <div className="relative cursor-pointer flex-shrink-0" onClick={() => navigate(`/users/${friend.id}`)}>
+                                            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-br from-pairon-accent to-purple-600 flex items-center justify-center text-white font-bold text-xs sm:text-sm">
                                                 {friend.avatar ? (
                                                     <img src={friend.avatar} alt="" className="w-full h-full rounded-full object-cover" />
                                                 ) : (
                                                     friend.name.charAt(0).toUpperCase()
                                                 )}
                                             </div>
-                                            <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 ${friend.isOnline ? 'bg-green-500' : 'bg-gray-400'
+                                            <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 rounded-full border-2 border-white dark:border-gray-800 ${friend.isOnline ? 'bg-green-500' : 'bg-gray-400'
                                                 }`} />
                                         </div>
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <p className="font-semibold text-gray-900 dark:text-white text-sm cursor-pointer hover:text-pairon-accent transition-colors" onClick={() => navigate(`/users/${friend.id}`)}>{friend.name}</p>
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-1.5 sm:gap-2">
+                                                <p className="font-semibold text-gray-900 dark:text-white text-xs sm:text-sm cursor-pointer hover:text-pairon-accent transition-colors truncate" onClick={() => navigate(`/users/${friend.id}`)}>{friend.name}</p>
                                                 {hasUnread && (
-                                                    <span className="flex items-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                                                    <span className="flex-shrink-0 flex items-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                                                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block" />
                                                         New
                                                     </span>
                                                 )}
                                             </div>
-                                            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                            <div className="flex items-center gap-1 sm:gap-2 text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">
                                                 <span>⭐ {friend.reputation}</span>
                                                 <span>·</span>
-                                                <span className="capitalize">{friend.experienceLevel}</span>
-                                                <span>·</span>
-                                                <span>{friend.isOnline ? '🟢 Online' : '⚫ Offline'}</span>
+                                                <span className="capitalize hidden sm:inline">{friend.experienceLevel}</span>
+                                                <span className="hidden sm:inline">·</span>
+                                                <span>{friend.isOnline ? 'Online' : 'Offline'}</span>
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
                                         <div className="relative">
                                             <Button
                                                 size="sm"
@@ -446,13 +446,13 @@ export function FriendsPage() {
                                                     setUnreadCounts(prev => ({ ...prev, [friend.id]: 0 }));
                                                     navigate(`/messages?friendId=${friend.id}&friendName=${encodeURIComponent(friend.name)}`);
                                                 }}
-                                                className="h-8 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                                className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                                                 title="Send Message"
                                             >
                                                 <MessageCircle className="w-3.5 h-3.5" />
                                             </Button>
                                             {(unreadCounts[friend.id] || 0) > 0 && (
-                                                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5 pointer-events-none">
+                                                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5 pointer-events-none">
                                                     {unreadCounts[friend.id] > 99 ? '99+' : unreadCounts[friend.id]}
                                                 </span>
                                             )}
@@ -462,20 +462,20 @@ export function FriendsPage() {
                                                 size="sm"
                                                 variant="outline"
                                                 onClick={() => setProposingToFriend(friend)}
-                                                className="h-8 text-pairon-accent hover:bg-pairon-accent/10"
+                                                className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-pairon-accent hover:bg-pairon-accent/10"
                                                 title="Propose Collaboration"
                                             >
                                                 <Handshake className="w-3.5 h-3.5" />
                                             </Button>
                                         )}
                                         {friendProposalSent === friend.id && (
-                                            <span className="text-xs text-green-500 px-2">Sent!</span>
+                                            <span className="text-[10px] text-green-500">Sent!</span>
                                         )}
                                         <Button
                                             size="sm"
                                             variant="outline"
                                             onClick={() => handleRemove(friend.friendshipId)}
-                                            className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 h-8"
+                                            className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 h-7 w-7 sm:h-8 sm:w-8 p-0"
                                         >
                                             <Trash2 className="w-3.5 h-3.5" />
                                         </Button>
@@ -506,34 +506,34 @@ export function FriendsPage() {
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: i * 0.05 }}
-                                    className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700"
+                                    className="flex items-center justify-between gap-2 p-3 sm:p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
                                 >
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm">
+                                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                                        <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xs sm:text-sm flex-shrink-0">
                                             {req.requesterName.charAt(0).toUpperCase()}
                                         </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-white text-sm">{req.requesterName}</p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                ⭐ {req.requesterReputation} · Sent {new Date(req.createdAt).toLocaleDateString()}
+                                        <div className="min-w-0">
+                                            <p className="font-semibold text-gray-900 dark:text-white text-xs sm:text-sm truncate">{req.requesterName}</p>
+                                            <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                ⭐ {req.requesterReputation} · {new Date(req.createdAt).toLocaleDateString()}
                                             </p>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
                                         <Button
                                             size="sm"
                                             onClick={() => handleAccept(req.friendshipId)}
-                                            className="bg-green-600 hover:bg-green-700 text-white h-8"
+                                            className="bg-green-600 hover:bg-green-700 text-white h-7 sm:h-8 text-xs px-2 sm:px-3"
                                         >
-                                            <Check className="w-3.5 h-3.5 mr-1" /> Accept
+                                            <Check className="w-3 h-3 sm:mr-1" /><span className="hidden sm:inline"> Accept</span>
                                         </Button>
                                         <Button
                                             size="sm"
                                             variant="outline"
                                             onClick={() => handleDecline(req.friendshipId)}
-                                            className="text-red-500 hover:text-red-600 h-8"
+                                            className="text-red-500 hover:text-red-600 h-7 sm:h-8 text-xs px-2 sm:px-3"
                                         >
-                                            <X className="w-3.5 h-3.5 mr-1" /> Decline
+                                            <X className="w-3 h-3 sm:mr-1" /><span className="hidden sm:inline"> Decline</span>
                                         </Button>
                                     </div>
                                 </motion.div>
