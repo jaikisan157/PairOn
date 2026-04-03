@@ -858,7 +858,7 @@ export function DashboardPage() {
           </div>
 
           {/* Right sidebar */}
-          <div className="hidden xl:block w-72 flex-shrink-0 py-6 pr-6">
+          <div className="hidden lg:block w-64 xl:w-72 flex-shrink-0 py-6 pr-4 xl:pr-6">
             <div className="sticky top-20">
               <DashboardRightSidebar
                 onlineCount={onlineCount}
