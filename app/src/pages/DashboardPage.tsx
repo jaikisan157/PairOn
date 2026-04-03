@@ -862,7 +862,7 @@ export function DashboardPage() {
             <div className="sticky top-20">
               <DashboardRightSidebar
                 onlineCount={onlineCount}
-                totalDmUnread={totalDmUnread}
+                sessionHistory={sessionHistory}
               />
             </div>
           </div>
