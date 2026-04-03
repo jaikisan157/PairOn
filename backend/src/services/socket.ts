@@ -661,6 +661,11 @@ export function setupSocketHandlers(io: Server) {
       socket.to(`session:${data.sessionId}`).emit('code:file-create', data);
     });
 
+    // Env entries sync (per-entry ownership)
+    socket.on('code:env-entries', (data: { sessionId: string; entries: any[]; senderId: string }) => {
+      socket.to(`session:${data.sessionId}`).emit('code:env-entries', data);
+    });
+
     // File delete
     socket.on('code:file-delete', (data: { sessionId: string; path: string; senderId: string }) => {
       socket.to(`session:${data.sessionId}`).emit('code:file-delete', data);
