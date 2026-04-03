@@ -913,8 +913,8 @@ export function CollaborationPage() {
 
   return (
     <div className="h-screen bg-pairon-bg dark:bg-gray-900 flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+      {/* Header — hidden on mobile, CollabIDEMobile has its own compact header */}
+      <header className="hidden md:block bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
@@ -1035,8 +1035,8 @@ export function CollaborationPage() {
 
         {/* IDE — always mounted so WebContainer/sockets/polling stay alive.
             Hidden with CSS when in chat view so it doesn't re-boot on tab switch. */}
-        <div className={`flex-1 flex flex-col${activeView !== 'code' ? ' hidden' : ''}`}>
-          <div className="flex-1 min-h-0">
+        <div className={`flex-1 flex flex-col h-full${activeView !== 'code' ? ' hidden' : ''}`}>
+          <div className="flex-1 min-h-0 h-full overflow-hidden">
             <CollabIDE
               sessionId={session.sessionId}
               partnerId={session.partnerId}

@@ -343,7 +343,7 @@ export function CollabIDEMobile({
     // ===== Landscape 2-Panel Layout =====
     if (isLandscape) {
         return (
-            <div className="flex flex-col w-full h-[100dvh] bg-[#0d1117] overflow-hidden">
+            <div className="flex flex-col w-full h-full bg-[#0d1117] overflow-hidden">
                 {/* Top bar */}
                 <div className="flex items-center justify-between px-3 py-1 bg-[#161b22] border-b border-gray-800 flex-shrink-0" style={{ minHeight: 36 }}>
                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider truncate max-w-[120px]">
@@ -474,7 +474,7 @@ export function CollabIDEMobile({
 
     // ===== Portrait / Small Screen Layout =====
     return (
-        <div className="flex flex-col w-full bg-[#0d1117] overflow-hidden" style={{ height: '100dvh' }}>
+        <div className="flex flex-col w-full bg-[#0d1117] overflow-hidden" style={{ height: '100%' }}>
             {/* ── Top Header (32px) ── */}
             <header className="flex items-center gap-2 px-3 bg-[#161b22] border-b border-gray-800 flex-shrink-0" style={{ height: 40 }}>
                 <span className="text-[10px] font-bold text-blue-400 truncate max-w-[80px]">
