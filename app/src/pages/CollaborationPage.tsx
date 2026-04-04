@@ -378,6 +378,24 @@ export function CollaborationPage() {
       } catch { /* ignore */ }
     });
 
+    // Partner submitted — put remaining user into solo mode
+    socket.on('challenge:partner-submitted', (data: { sessionId: string; submitterName: string }) => {
+      // Show the same partner-force-quit style popup reusing that state
+      setPartnerForceQuit({
+        creditsEarned: 0,
+        message: `${data.submitterName} submitted and left the session. You can continue working or submit your own version.`,
+      });
+      // Pre-mark solo in localStorage so refresh keeps them in solo mode
+      try {
+        const raw = localStorage.getItem('challenge_session');
+        if (raw) {
+          const saved = JSON.parse(raw);
+          saved.isSolo = true;
+          localStorage.setItem('challenge_session', JSON.stringify(saved));
+        }
+      } catch { /* ignore */ }
+    });
+
     // Exit requested by partner
     socket.on('challenge:exit-requested', (data: any) => {
       setIncomingExitRequest({
@@ -526,6 +544,7 @@ export function CollaborationPage() {
         s.removeAllListeners('challenge:time-up');
         s.removeAllListeners('challenge:partner-force-quit');
         s.removeAllListeners('challenge:now-solo');
+        s.removeAllListeners('challenge:partner-submitted');
         s.removeAllListeners('challenge:exit-requested');
         s.removeAllListeners('challenge:exit-request-sent');
         s.removeAllListeners('challenge:exit-declined');

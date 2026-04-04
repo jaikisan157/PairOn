@@ -515,28 +515,38 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
             if (!session) return;
             if (!session.participants.includes(userId)) return;
 
+            const partnerId = session.participants.find((p: string) => p !== userId);
+
             session.submission = {
                 link,
                 description,
                 submittedAt: new Date(),
                 submittedBy: userId,
             };
-            session.status = 'completed';
-            (session as any).endedAt = new Date();
+            // Mark as partner_skipped so the other user can still work
+            // but the submitter is done. If no partner, mark completed.
+            session.status = partnerId ? 'partner_skipped' : 'completed';
+            (session as any).endedAt = partnerId ? undefined : new Date();
             await session.save();
 
-            // Increment completedProjects for BOTH participants
-            for (const pid of session.participants) {
-                await User.findByIdAndUpdate(pid, { $inc: { completedProjects: 1 } });
-            }
+            // Award credits & increment completedProjects only for the submitter
+            await User.findByIdAndUpdate(userId, { $inc: { completedProjects: 1 } });
 
-            clearSessionTimer(sessionId);
+            // End session for the submitter
+            io.to(`user:${userId}`).emit('challenge:submitted', session.submission);
+            io.to(`user:${userId}`).emit('challenge:ended', sessionId);
+            socket.leave(`challenge:${sessionId}`);
 
-            io.to(`challenge:${sessionId}`).emit('challenge:submitted', session.submission);
-            // Also emit to individual user rooms (in case they navigated away)
-            for (const pid of session.participants) {
-                io.to(`user:${pid}`).emit('challenge:submitted', session.submission);
-                io.to(`user:${pid}`).emit('challenge:ended', sessionId);
+            // Put the partner into solo mode (they can keep working or submit their own)
+            if (partnerId) {
+                io.to(`user:${partnerId}`).emit('challenge:partner-submitted', {
+                    sessionId,
+                    submitterName: (await User.findById(userId).select('name').lean())?.name || 'Partner',
+                });
+                // Pre-persist isSolo flag via a system message (partner handles solo flag themselves)
+            } else {
+                // No partner — fully close the session
+                clearSessionTimer(sessionId);
             }
         } catch (error) {
             console.error('Challenge submit error:', error);
@@ -707,7 +717,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
     socket.on('challenge:rejoin', async (sessionId: string) => {
         try {
             const session = await CollaborationSession.findById(sessionId);
-            if (!session || session.status !== 'active') return;
+            if (!session || (session.status !== 'active' && session.status !== 'partner_skipped')) return;
             if (!session.participants.includes(userId)) return;
 
             // Rejoin the room
@@ -735,6 +745,7 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 partnerName: partner?.name || 'Partner',
                 projectIdea: match?.projectIdea || null,
                 mode: match?.mode || 'sprint',
+                isSolo: session.status === 'partner_skipped',
             });
 
             // Send pending exit request if exists
