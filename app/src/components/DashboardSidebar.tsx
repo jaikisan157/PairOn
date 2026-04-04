@@ -160,6 +160,14 @@ export function DashboardSidebar({ onLogout, expanded, onToggle }: DashboardSide
               </button>
             );
           })}
+          {/* Logout button */}
+          <button
+            onClick={onLogout}
+            className="relative flex flex-col items-center justify-center gap-0.5 flex-1 py-1 text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Logout</span>
+          </button>
         </div>
       </nav>
     </>

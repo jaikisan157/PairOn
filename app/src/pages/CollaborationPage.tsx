@@ -23,6 +23,8 @@ import {
   Phone,
   PhoneOff,
   Monitor,
+  UserPlus,
+  FolderOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +36,7 @@ import { playMessageSound, playSendSound } from '@/lib/audio';
 import { CollabIDE } from '@/components/CollabIDE';
 import { UserProfileModal } from '@/components/UserProfileModal';
 import type { TaskStatus } from '@/types';
+import { api } from '@/lib/api';
 
 
 
@@ -153,10 +156,15 @@ export function CollaborationPage() {
   // Notification banner for proposer (edit accepted/declined)
   const [projectEditNotification, setProjectEditNotification] = useState<{ type: 'accepted' | 'declined'; title?: string } | null>(null);
 
-  // Save-to-projects modal (shown when session ends)
-  const [showSaveToProjectsModal, setShowSaveToProjectsModal] = useState(false);
+  // Save-to-projects (auto-save flow)
   const [savedProjectSession, setSavedProjectSession] = useState<any>(null);
   const [savingProject, setSavingProject] = useState(false);
+  const [showSessionCompleteModal, setShowSessionCompleteModal] = useState(false);
+
+  // Add-as-friend suggestion
+  const [showAddFriendSuggestion, setShowAddFriendSuggestion] = useState(false);
+  const [friendRequestSent, setFriendRequestSent] = useState(false);
+  const [friendRequestLoading, setFriendRequestLoading] = useState(false);
 
   // Typing indicator
   const [partnerTyping, setPartnerTyping] = useState(false);
@@ -244,10 +252,13 @@ export function CollaborationPage() {
         savedAt: Date.now(),
       }));
 
-      // Start countdown
-      const remaining = Math.max(0, Math.floor((new Date(data.endsAt).getTime() - Date.now()) / 1000));
+      // Start countdown — TEST OVERRIDE: sprint = 10s
+      const matchedTestEndsAt = data.mode === 'sprint'
+        ? new Date(Date.now() + 10_000)
+        : new Date(data.endsAt);
+      const remaining = Math.max(0, Math.floor((matchedTestEndsAt.getTime() - Date.now()) / 1000));
       setTimeRemaining(remaining);
-      startCountdown(new Date(data.endsAt));
+      startCountdown(matchedTestEndsAt);
     });
 
     // Waiting
@@ -341,12 +352,30 @@ export function CollaborationPage() {
     // Partner force-quit — dedicated event with credits info
     socket.on('challenge:partner-force-quit', (data: { sessionId: string; creditsEarned: number; message: string }) => {
       setPartnerForceQuit({ creditsEarned: data.creditsEarned, message: data.message });
+      // Pre-mark solo in localStorage so that if user refreshes before clicking "Continue Alone" it's still solo
+      try {
+        const raw = localStorage.getItem('challenge_session');
+        if (raw) {
+          const saved = JSON.parse(raw);
+          saved.isSolo = true;
+          localStorage.setItem('challenge_session', JSON.stringify(saved));
+        }
+      } catch { /* ignore */ }
     });
 
-    // Now in solo mode
+    // Now in solo mode — persist so refresh keeps it
     socket.on('challenge:now-solo', () => {
       setIsSoloMode(true);
       setPartnerForceQuit(null);
+      // Write flag into localStorage so a refresh restores solo mode
+      try {
+        const raw = localStorage.getItem('challenge_session');
+        if (raw) {
+          const saved = JSON.parse(raw);
+          saved.isSolo = true;
+          localStorage.setItem('challenge_session', JSON.stringify(saved));
+        }
+      } catch { /* ignore */ }
     });
 
     // Exit requested by partner
@@ -400,9 +429,34 @@ export function CollaborationPage() {
         startedAt: data.session.startedAt,
       });
 
-      const remaining = Math.max(0, Math.floor((new Date(data.session.endsAt).getTime() - Date.now()) / 1000));
+      // Restore solo mode: check server data first, fall back to localStorage flag
+      const soloFromServer = data.isSolo || data.session?.isSolo || false;
+      const soloFromStorage = (() => {
+        try {
+          const raw = localStorage.getItem('challenge_session');
+          return raw ? JSON.parse(raw).isSolo === true : false;
+        } catch { return false; }
+      })();
+      if (soloFromServer || soloFromStorage) {
+        setIsSoloMode(true);
+        // Ensure flag is written back in case it came from server
+        try {
+          const raw = localStorage.getItem('challenge_session');
+          if (raw) {
+            const saved = JSON.parse(raw);
+            saved.isSolo = true;
+            localStorage.setItem('challenge_session', JSON.stringify(saved));
+          }
+        } catch { /* ignore */ }
+      }
+
+      // TEST OVERRIDE: sprint = 10s
+      const rejoinTestEndsAt = data.mode === 'sprint'
+        ? new Date(Date.now() + 10_000)
+        : new Date(data.session.endsAt);
+      const remaining = Math.max(0, Math.floor((rejoinTestEndsAt.getTime() - Date.now()) / 1000));
       setTimeRemaining(remaining);
-      startCountdown(new Date(data.session.endsAt));
+      startCountdown(rejoinTestEndsAt);
     });
 
     // (Force logout removed)
@@ -517,11 +571,18 @@ export function CollaborationPage() {
           startedAt: data.startedAt,
         });
 
+        // Restore solo mode flag from localStorage
+        if (data.isSolo) setIsSoloMode(true);
+
         // Start countdown
+        // TEST OVERRIDE: cap sprint sessions to 10 seconds for quick testing
         if (data.endsAt) {
-          const remaining = Math.max(0, Math.floor((new Date(data.endsAt).getTime() - Date.now()) / 1000));
+          const testEndsAt = data.mode === 'sprint'
+            ? new Date(Date.now() + 10_000) // 10s for sprint testing
+            : new Date(data.endsAt);
+          const remaining = Math.max(0, Math.floor((testEndsAt.getTime() - Date.now()) / 1000));
           setTimeRemaining(remaining);
-          startCountdown(new Date(data.endsAt));
+          startCountdown(testEndsAt);
         }
 
         const doRejoin = () => {
@@ -544,8 +605,8 @@ export function CollaborationPage() {
         rejoinEmitRef.current = setTimeout(() => {
           doRejoin();
 
-          if (!isFreshConnect) {
-            // True page-refresh rejoin: set a retry at 2.5s and a redirect guard at 12s
+          if (!isFreshConnect && !data.isSolo) {
+            // True page-refresh rejoin (non-solo): retry at 2.5s, redirect guard at 12s
             // Guard uses a ref so React Strict Mode double-invoke can't orphan a cancellable timer
             rejoinRetryRef.current = setTimeout(doRejoin, 2500);
             rejoinGuardRef.current = setTimeout(() => {
@@ -557,7 +618,7 @@ export function CollaborationPage() {
               navigate('/dashboard');
             }, 12_000);
           }
-          // For fresh connects: no guard needed — status is already 'matched' from localStorage
+          // Solo mode or fresh connects: no guard — session is self-sufficient from localStorage
         }, 500);
 
         // Restore active view
@@ -660,14 +721,23 @@ export function CollaborationPage() {
   // ===== Helpers =====
   function startCountdown(endsAt: Date) {
     if (timerRef.current) clearInterval(timerRef.current);
+    let timeUpFired = false;
     timerRef.current = setInterval(() => {
       const rem = Math.max(0, Math.floor((endsAt.getTime() - Date.now()) / 1000));
       setTimeRemaining(rem);
-      if (rem <= 0 && timerRef.current) clearInterval(timerRef.current);
+      if (rem <= 0 && timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+        // Show time-up modal directly from frontend (backend may be slower / test override)
+        if (!timeUpFired && !gracefulEndRef.current) {
+          timeUpFired = true;
+          setShowTimeUpModal(true);
+        }
+      }
     }, 1000);
   }
 
-  function handleSessionEnded() {
+  function handleSessionEnded(snapOverride?: any) {
     gracefulEndRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
     if (activityIntervalRef.current) clearInterval(activityIntervalRef.current);
@@ -675,18 +745,13 @@ export function CollaborationPage() {
     if (idleCheckRef.current) clearInterval(idleCheckRef.current);
     // End any active call when session ends
     try { globalEndCall(true); } catch { /* */ }
-    const snap = sessionRef.current;
+    const snap = snapOverride || sessionRef.current;
     setSession(null);
     setStatus('idle');
     setTimeRemaining(0);
     localStorage.removeItem('challenge_session');
-    // Show "save to projects" prompt if it was a real collaborative session
-    if (snap && snap.sessionId) {
-      setSavedProjectSession(snap);
-      setShowSaveToProjectsModal(true);
-    } else {
-      navigate('/dashboard');
-    }
+    // Navigate to dashboard — auto-save is handled at submission time
+    navigate('/dashboard');
   }
 
   function cleanupAndLeave() {
@@ -699,6 +764,49 @@ export function CollaborationPage() {
     setSession(null);
     setStatus('idle');
     localStorage.removeItem('challenge_session');
+  }
+
+  // ─── Auto-save project to My Projects (silent, no prompt) ───────────────
+  async function autoSaveToProjects(snap: any, submissionLink?: string, submissionDesc?: string) {
+    if (!snap?.sessionId) return;
+    try {
+      const socket = socketService.getSocket();
+      let files: Record<string, string> = {};
+      if (socket) {
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 3000);
+          socket.once('challenge:files-response', (data: any) => {
+            clearTimeout(timeout);
+            if (data.files) files = data.files;
+            resolve();
+          });
+          socket.emit('challenge:get-files', snap.sessionId);
+        });
+      }
+      const projectEntry = {
+        sessionId: snap.sessionId,
+        partnerName: snap.partnerName,
+        partnerId: snap.partnerId,
+        partnerReputation: snap.partnerReputation,
+        mode: snap.mode,
+        projectIdea: snap.projectIdea,
+        status: 'completed',
+        startedAt: snap.startedAt,
+        endsAt: snap.endsAt || new Date().toISOString(),
+        tasksTotal: snap.tasks?.length || 0,
+        tasksDone: snap.tasks?.filter((t: any) => t.status === 'done').length || 0,
+        submissionLink: submissionLink || snap.submission?.link || '',
+        submissionDesc: submissionDesc || snap.submission?.description || '',
+        savedAt: new Date().toISOString(),
+        files,
+      };
+      const existing = JSON.parse(localStorage.getItem('saved_projects') || '[]');
+      const filtered = existing.filter((p: any) => p.sessionId !== projectEntry.sessionId);
+      filtered.push(projectEntry);
+      localStorage.setItem('saved_projects', JSON.stringify(filtered));
+    } catch (err) {
+      console.error('[autoSave] Failed to save project:', err);
+    }
   }
 
   // ===== Session persistence on unmount =====
@@ -795,14 +903,21 @@ export function CollaborationPage() {
     socketService.getSocket()?.emit('challenge:update-task', session.sessionId, updated);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!session) return;
+    const snap = sessionRef.current;
     socketService.getSocket()?.emit('challenge:submit', session.sessionId, submissionLink, submissionDescription);
     setShowSubmitModal(false);
     setShowTimeUpModal(false);
-    // Refresh user stats so completedProjects updates in UI
     updateProfile({}).catch(() => {});
+    // Auto-save to My Projects silently
+    if (snap?.sessionId) {
+      autoSaveToProjects(snap, submissionLink, submissionDescription);
+      setSavedProjectSession(snap);
+      setFriendRequestSent(false);
+      setShowSessionCompleteModal(true);
+    }
   };
 
   // Continue alone after partner left
@@ -813,12 +928,17 @@ export function CollaborationPage() {
     setIsSoloMode(true);
   }, [session]);
 
-  // End session after time-up without submitting
-  const handleEndAfterTimeout = useCallback(() => {
+  // End session after time-up — auto-save and end
+  const handleEndAfterTimeout = useCallback(async () => {
     if (!session) return;
+    const snap = sessionRef.current;
     socketService.getSocket()?.emit('challenge:end-after-timeout', session.sessionId);
     setShowTimeUpModal(false);
-    handleSessionEnded();
+    // Auto-save if there's a submission, then end session
+    if (snap?.sessionId && snap?.submission) {
+      await autoSaveToProjects(snap);
+    }
+    handleSessionEnded(snap);
   }, [session]);
 
   // Submit via time-up modal (opens submit form first)
@@ -1654,17 +1774,31 @@ export function CollaborationPage() {
       {/* Solo Leave Confirm */}
       <AnimatePresence>
         {showSoloLeaveConfirm && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
-              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <LogOut className="w-6 h-6 text-orange-500" />
+              <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FolderOpen className="w-6 h-6 text-green-500" />
               </div>
-              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">End solo session?</h3>
-              <p className="text-sm text-gray-500 text-center mb-1">You are working alone. Leaving will <strong className="text-orange-500">end this session permanently</strong>.</p>
-              <p className="text-xs text-gray-400 text-center mb-4">Make sure to submit your project first if you want credit.</p>
-              <div className="flex gap-3">
-                <Button variant="outline" onClick={() => setShowSoloLeaveConfirm(false)} className="flex-1 rounded-xl">Cancel</Button>
-                <Button onClick={() => { setShowSoloLeaveConfirm(false); cleanupAndLeave(); navigate('/dashboard'); }} className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl">End Session</Button>
+              <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">Wrap up your session?</h3>
+              <p className="text-sm text-gray-500 text-center mb-1">Submit your project before leaving so your work is saved to <strong className="text-gray-700 dark:text-gray-200">My Projects</strong>.</p>
+              <p className="text-xs text-gray-400 text-center mb-5">You can also continue working in overtime.</p>
+              <div className="flex flex-col gap-2">
+                {!session.submission ? (
+                  <Button
+                    onClick={() => {
+                      setShowSoloLeaveConfirm(false);
+                      setShowSubmitModal(true);
+                    }}
+                    className="w-full bg-green-500 hover:bg-green-600 text-white rounded-xl"
+                  >
+                    <CheckCircle2 className="w-4 h-4 mr-2" /> Submit &amp; Save Project
+                  </Button>
+                ) : (
+                  <div className="py-2.5 px-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl text-green-600 dark:text-green-400 text-sm flex items-center justify-center gap-2 mb-1">
+                    <CheckCircle2 className="w-4 h-4" /> Project already submitted &amp; saved!
+                  </div>
+                )}
+                <Button variant="ghost" onClick={() => setShowSoloLeaveConfirm(false)} className="w-full rounded-xl text-gray-500">Continue Overtime</Button>
               </div>
             </motion.div>
           </motion.div>
@@ -1820,33 +1954,37 @@ export function CollaborationPage() {
       <AnimatePresence>
         {showTimeUpModal && session && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-[#161b22] border border-orange-500/30 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
-              <div className="w-16 h-16 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Clock className="w-8 h-8 text-orange-400" />
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.85, y: 30 }} animate={{ scale: 1, y: 0 }} transition={{ type: 'spring', damping: 20 }}
+              className="bg-[#161b22] border border-orange-500/40 rounded-3xl shadow-2xl w-full max-w-md p-8 text-center">
+              {/* Animated clock icon */}
+              <div className="relative w-20 h-20 mx-auto mb-5">
+                <div className="absolute inset-0 bg-orange-500/20 rounded-full animate-ping" />
+                <div className="relative w-20 h-20 bg-orange-500/10 border-2 border-orange-500/40 rounded-full flex items-center justify-center">
+                  <Clock className="w-9 h-9 text-orange-400" />
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">⏰ Time's Up!</h3>
-              <p className="text-gray-400 text-sm mb-6">
-                Your session time has ended. What would you like to do?
-              </p>
+              <h3 className="text-2xl font-bold text-white mb-2">⏰ Time's Up!</h3>
+              <p className="text-gray-400 text-sm mb-2">Your {session.mode === 'sprint' ? '3-hour sprint' : session.mode === 'challenge' ? '24-hour challenge' : '7-day build'} has ended.</p>
+              <p className="text-gray-500 text-xs mb-7">Submit your work or keep going in overtime.</p>
+
               <div className="flex flex-col gap-3">
-                {!session.submission && (
+                {/* Submit & Save — primary action */}
+                {!session.submission ? (
                   <button onClick={handleTimeUpSubmit}
-                    className="w-full py-3 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" /> Submit Project
+                    className="w-full py-3.5 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2 shadow-lg shadow-green-900/30">
+                    <CheckCircle2 className="w-4 h-4" /> Submit &amp; Save Project
                   </button>
+                ) : (
+                  <div className="py-2.5 px-4 bg-green-500/10 border border-green-500/30 rounded-xl text-green-400 text-sm flex items-center justify-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> Project already submitted &amp; saved!
+                  </div>
                 )}
-                {session.submission && (
-                  <div className="py-2 text-green-400 text-sm">✅ Project already submitted!</div>
-                )}
+
+                {/* Continue in overtime — secondary action */}
                 <button onClick={() => setShowTimeUpModal(false)}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-colors">
-                  Continue Working
-                </button>
-                <button onClick={handleEndAfterTimeout}
-                  className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white text-sm font-semibold rounded-xl transition-colors">
-                  End Without Submitting
+                  className="w-full py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/40 text-gray-300 hover:text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
+                  <Clock className="w-4 h-4 text-indigo-400" /> Continue Overtime
                 </button>
               </div>
             </motion.div>
@@ -1865,80 +2003,72 @@ export function CollaborationPage() {
         />
       )}
 
-      {/* Save to Projects Modal */}
+      {/* ── Session Complete Modal (shown after submission, auto-saved) ── */}
       <AnimatePresence>
-        {showSaveToProjectsModal && savedProjectSession && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
-            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-pairon-accent rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">📁</span>
+        {showSessionCompleteModal && savedProjectSession && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.85, y: 20 }} animate={{ scale: 1, y: 0 }} transition={{ type: 'spring', damping: 18 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+              {/* Success header */}
+              <div className="text-center mb-5">
+                <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-pairon-accent rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
+                  <CheckCircle2 className="w-9 h-9 text-white" />
+                </div>
+                <h3 className="font-display text-xl font-bold text-gray-900 dark:text-white mb-1">Project Submitted! 🎉</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <strong className="text-gray-800 dark:text-white">{savedProjectSession.projectIdea?.title || 'Your project'}</strong> has been submitted and saved to your Projects.
+                </p>
               </div>
-              <h3 className="font-display text-xl font-bold text-gray-900 dark:text-white text-center mb-1">
-                Session Complete!
-              </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-3">
-                Save <strong>{savedProjectSession.projectIdea?.title || 'this project'}</strong> to your Projects library?
-              </p>
-              <p className="text-xs text-gray-400 text-center mb-5">
-                A ZIP of all project files will be stored and downloadable from your Projects page.
-              </p>
-              <div className="space-y-3">
+
+              {/* Auto-saved badge */}
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl mb-4">
+                <FolderOpen className="w-4 h-4 text-green-500 flex-shrink-0" />
+                <p className="text-xs text-green-700 dark:text-green-300 font-medium">Automatically saved to <strong>My Projects</strong></p>
+              </div>
+
+              {/* Friend suggestion */}
+              {savedProjectSession.partnerId && savedProjectSession.partnerName && (
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                    <UserPlus className="w-4 h-4 text-blue-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">Add {savedProjectSession.partnerName} as a friend?</p>
+                    <p className="text-[11px] text-blue-500 dark:text-blue-400">You worked great together!</p>
+                  </div>
+                  {friendRequestSent ? (
+                    <span className="text-xs text-green-500 font-semibold whitespace-nowrap">✓ Sent!</span>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        setFriendRequestLoading(true);
+                        try {
+                          await api.sendFriendRequest(savedProjectSession.partnerId);
+                          setFriendRequestSent(true);
+                        } catch { setFriendRequestSent(true); }
+                        finally { setFriendRequestLoading(false); }
+                      }}
+                      disabled={friendRequestLoading}
+                      className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap disabled:opacity-60"
+                    >
+                      {friendRequestLoading ? '...' : 'Add Friend'}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
                 <Button
-                  onClick={async () => {
-                    setSavingProject(true);
-                    try {
-                      const socket = socketService.getSocket();
-                      let files: Record<string, string> = {};
-                      if (socket) {
-                        await new Promise<void>((resolve) => {
-                          const timeout = setTimeout(resolve, 3000);
-                          socket.once('challenge:files-response', (data: any) => {
-                            clearTimeout(timeout);
-                            if (data.files) files = data.files;
-                            resolve();
-                          });
-                          socket.emit('challenge:get-files', savedProjectSession.sessionId);
-                        });
-                      }
-                      const projectEntry = {
-                        sessionId: savedProjectSession.sessionId,
-                        partnerName: savedProjectSession.partnerName,
-                        partnerReputation: savedProjectSession.partnerReputation,
-                        mode: savedProjectSession.mode,
-                        projectIdea: savedProjectSession.projectIdea,
-                        status: 'completed',
-                        startedAt: savedProjectSession.startedAt,
-                        endsAt: savedProjectSession.endsAt || new Date().toISOString(),
-                        tasksTotal: savedProjectSession.tasks?.length || 0,
-                        tasksDone: savedProjectSession.tasks?.filter((t: any) => t.status === 'done').length || 0,
-                        submissionLink: savedProjectSession.submission?.link || '',
-                        submissionDesc: savedProjectSession.submission?.description || '',
-                        savedAt: new Date().toISOString(),
-                        files,
-                      };
-                      const existing = JSON.parse(localStorage.getItem('saved_projects') || '[]');
-                      const filtered = existing.filter((p: any) => p.sessionId !== projectEntry.sessionId);
-                      filtered.push(projectEntry);
-                      localStorage.setItem('saved_projects', JSON.stringify(filtered));
-                    } finally {
-                      setSavingProject(false);
-                      setShowSaveToProjectsModal(false);
-                      navigate('/projects');
-                    }
-                  }}
-                  disabled={savingProject}
-                  className="w-full bg-pairon-accent hover:bg-pairon-accent/90 text-white rounded-xl py-3 h-auto font-medium"
+                  onClick={() => { setShowSessionCompleteModal(false); setFriendRequestSent(false); navigate('/projects'); }}
+                  className="w-full bg-pairon-accent hover:bg-pairon-accent/90 text-white rounded-xl py-3 h-auto font-medium flex items-center justify-center gap-2"
                 >
-                  {savingProject
-                    ? <><span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin mr-2" />Saving...</>
-                    : '💾 Save to My Projects'}
+                  <FolderOpen className="w-4 h-4" /> View My Projects
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => { setShowSaveToProjectsModal(false); navigate('/dashboard'); }}
+                  onClick={() => { setShowSessionCompleteModal(false); setFriendRequestSent(false); navigate('/dashboard'); }}
                   className="w-full rounded-xl py-3 h-auto"
                 >
-                  Skip & Go to Dashboard
+                  Go to Dashboard
                 </Button>
               </div>
             </motion.div>

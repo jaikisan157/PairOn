@@ -119,6 +119,33 @@ export function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // On mount: immediately restore solo session from localStorage so the
+  // "Continue" card appears before the server's cleanup response arrives.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('challenge_session');
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data.isSolo && data.sessionId) {
+          setActiveSessions([{
+            sessionId: data.sessionId,
+            partnerId: data.partnerId || '',
+            partnerName: data.partnerName || 'Solo',
+            partnerReputation: data.partnerReputation || 0,
+            mode: data.mode || 'sprint',
+            projectIdea: data.projectIdea || null,
+            endsAt: data.endsAt || new Date(Date.now() + 86400000).toISOString(),
+            startedAt: data.startedAt || new Date().toISOString(),
+            tasksDone: 0,
+            tasksTotal: 0,
+            messagesCount: (data.messages || []).length,
+            isSolo: true,
+          }]);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // Listen for challenge events
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -141,13 +168,48 @@ export function DashboardPage() {
 
     // Receive active long-running sessions after cleanup
     socket.on('dashboard:cleanup-done', (data: { activeSessions: any[] }) => {
+      // Always check for a local solo session first
+      const getSoloSessionEntry = () => {
+        try {
+          const raw = localStorage.getItem('challenge_session');
+          if (!raw) return null;
+          const saved = JSON.parse(raw);
+          if (!saved.isSolo || !saved.sessionId) return null;
+          return {
+            sessionId: saved.sessionId,
+            partnerId: saved.partnerId || '',
+            partnerName: saved.partnerName || 'Solo',
+            partnerReputation: saved.partnerReputation || 0,
+            mode: saved.mode || 'sprint',
+            projectIdea: saved.projectIdea || null,
+            endsAt: saved.endsAt || new Date(Date.now() + 86400000).toISOString(),
+            startedAt: saved.startedAt || new Date().toISOString(),
+            tasksDone: 0,
+            tasksTotal: 0,
+            messagesCount: (saved.messages || []).length,
+            isSolo: true,
+          };
+        } catch { return null; }
+      };
+
       if (data?.activeSessions?.length > 0) {
-        setActiveSessions(data.activeSessions);
         const first = data.activeSessions[0];
-        localStorage.setItem('challenge_session', JSON.stringify({ ...first, savedAt: Date.now() }));
+        // Preserve isSolo flag if it was already set locally
+        const existingRaw = localStorage.getItem('challenge_session');
+        const existingIsSolo = existingRaw ? (() => { try { return JSON.parse(existingRaw).isSolo; } catch { return false; } })() : false;
+        localStorage.setItem('challenge_session', JSON.stringify({ ...first, savedAt: Date.now(), isSolo: existingIsSolo || false }));
+        setActiveSessions(data.activeSessions);
       } else {
-        setActiveSessions([]);
-        localStorage.removeItem('challenge_session');
+        // Server returned no active sessions — check if we have a local solo session
+        const soloEntry = getSoloSessionEntry();
+        if (soloEntry) {
+          // Keep the solo session alive and visible on the dashboard
+          setActiveSessions([soloEntry]);
+          // Don't touch localStorage — it's already correct with isSolo: true
+        } else {
+          setActiveSessions([]);
+          localStorage.removeItem('challenge_session');
+        }
       }
     });
 
@@ -474,32 +536,34 @@ export function DashboardPage() {
                 return (
                   <div
                     key={sess.sessionId}
-                    className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl shadow-card border-2 border-green-400 dark:border-green-500"
+                    className={`relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl shadow-card border-2 ${sess.isSolo ? 'border-yellow-400 dark:border-yellow-500' : 'border-green-400 dark:border-green-500'}`}
                   >
                     {/* Gradient accent bar */}
-                    <div className={`h-1.5 bg-gradient-to-r ${modeColors[sess.mode] || 'from-green-500 to-green-600'}`} />
+                    <div className={`h-1.5 bg-gradient-to-r ${sess.isSolo ? 'from-yellow-400 to-orange-500' : modeColors[sess.mode] || 'from-green-500 to-green-600'}`} />
 
                     <div className="p-5">
                       <div className="flex items-start justify-between mb-4">
                         <div>
                           <div className="flex items-center gap-2 mb-1">
-                            <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-                            <span className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">
-                              Active Session
+                            <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${sess.isSolo ? 'bg-yellow-500' : 'bg-green-500'}`} />
+                            <span className={`text-xs font-semibold uppercase tracking-wide ${sess.isSolo ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400'}`}>
+                              {sess.isSolo ? '⚡ Solo Mode' : 'Active Session'}
                             </span>
                           </div>
                           <h3 className="text-lg font-bold text-gray-900 dark:text-white">
                             {sess.projectIdea?.title || 'Untitled Project'}
                           </h3>
                           <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {modeLabels[sess.mode]} · with <strong>{sess.partnerName}</strong>
-                            <span className="text-yellow-500 ml-1">⭐ {sess.partnerReputation}</span>
+                            {modeLabels[sess.mode]}{sess.isSolo
+                              ? ' · Partner left — you can keep building'
+                              : <> · with <strong>{sess.partnerName}</strong><span className="text-yellow-500 ml-1">⭐ {sess.partnerReputation}</span></>
+                            }
                           </p>
                         </div>
 
                         <Button
                           onClick={() => navigate('/collaborate')}
-                          className="bg-green-600 hover:bg-green-700 text-white shadow-lg"
+                          className={`${sess.isSolo ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-green-600 hover:bg-green-700'} text-white shadow-lg`}
                         >
                           <Play className="w-4 h-4 mr-1 fill-current" /> Continue
                         </Button>

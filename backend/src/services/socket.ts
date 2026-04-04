@@ -938,7 +938,7 @@ async function findMatch(
   }
 
   // Create match
-  const duration = mode === 'sprint' ? 3 : mode === 'challenge' ? 48 : 168;
+  const duration = mode === 'sprint' ? (10 / 3600) : mode === 'challenge' ? 48 : 168; // TEST: sprint = 10s
   const projectIdea = generateProjectIdea(user, bestMatch.user);
 
   const match = new Match({
