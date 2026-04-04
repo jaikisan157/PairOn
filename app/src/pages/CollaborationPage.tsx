@@ -185,6 +185,8 @@ export function CollaborationPage() {
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gracefulEndRef = useRef(false);
   const sessionRef = useRef<ChallengeSession | null>(null);
+  // Track submit modal visibility in a ref so socket closures can read it
+  const sessionCompleteOpenRef = useRef(false);
   // Idle tracking for slide-to-verify
   const lastActivityRef = useRef<number>(Date.now());
   const idleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -203,6 +205,11 @@ export function CollaborationPage() {
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  // Keep sessionCompleteOpenRef in sync
+  useEffect(() => {
+    sessionCompleteOpenRef.current = showSessionCompleteModal;
+  }, [showSessionCompleteModal]);
 
   // ===== SOCKET LISTENERS (like QuickConnectPage) =====
   useEffect(() => {
@@ -342,7 +349,10 @@ export function CollaborationPage() {
     });
 
     // Session ended (approved exit, force quit, or kicked)
+    // If the user just submitted and the completion modal is showing, skip
+    // auto-navigation so they can read the modal and choose what to do.
     socket.on('challenge:ended', () => {
+      if (sessionCompleteOpenRef.current) return;
       handleSessionEnded();
     });
 
