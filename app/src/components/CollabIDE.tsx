@@ -309,6 +309,19 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const [editingEnvIdx, setEditingEnvIdx] = useState<number | null>(null);
     const myEnvVarsRef = useRef(myEnvVars);
     useEffect(() => { myEnvVarsRef.current = myEnvVars; }, [myEnvVars]);
+    // Partner's full env vars stored in memory only (never persisted — received fresh each session)
+    const partnerEnvVarsRef = useRef<{ key: string; value: string }[]>([]);
+    // Helper: merge both users' vars and write real .env to WebContainer
+    const writeEnvToWebContainer = useCallback((myVars: { key: string; value: string }[], partnerVars: { key: string; value: string }[]) => {
+        if (!webcontainerRef.current) return;
+        // Partner vars come first so myVars can override duplicates
+        const merged = new Map<string, string>();
+        for (const e of partnerVars) merged.set(e.key, e.value);
+        for (const e of myVars) merged.set(e.key, e.value);
+        if (merged.size === 0) return;
+        const content = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+        webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
+    }, []);
     // Track when the local user last edited a file (to skip remote model updates during active typing)
     const locallyEditingRef = useRef<{ path: string; time: number }>({ path: '', time: 0 });
     // Line authorship: Map<filePath, Map<lineNumber, 'local' | 'partner'>>
@@ -823,17 +836,23 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         socket.on('code:file-unlock', handleFileUnlock);
         socket.on('code:comment', handleComment);
 
-        // ── Env: receive partner's key names only ──────────────────────────
-        const handleEnvKeysSync = (data: { keys: string[] }) => {
-            setPartnerEnvKeys(data.keys ?? []);
+        // ── Env: receive partner's full vars (write to WebContainer, mask in UI) ────
+        const handleEnvVarsSync = (data: { vars: { key: string; value: string }[] }) => {
+            const vars = data.vars ?? [];
+            // Store full values in memory for WebContainer
+            partnerEnvVarsRef.current = vars;
+            // Update display state (key names only — values masked in UI)
+            setPartnerEnvKeys(vars.map(e => e.key));
+            // Write real .env with BOTH users' values so code can access everything
+            writeEnvToWebContainer(myEnvVarsRef.current, vars);
         };
-        socket.on('env:keys-sync', handleEnvKeysSync);
-        // Broadcast our own key names to partner on join
+        socket.on('env:vars-sync', handleEnvVarsSync);
+        // On join: broadcast our full vars so partner's WebContainer gets them
         const savedEnvVars: { key: string; value: string }[] = (() => {
             try { return JSON.parse(localStorage.getItem(ENV_STORE_KEY) || '[]'); } catch { return []; }
         })();
         if (savedEnvVars.length > 0) {
-            socket.emit('env:keys-sync', { sessionId, keys: savedEnvVars.map(e => e.key) });
+            socket.emit('env:vars-sync', { sessionId, vars: savedEnvVars });
         }
 
         // ===== IDE state sync handlers =====
@@ -940,7 +959,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             socket.off('code:file-lock', handleFileLock);
             socket.off('code:file-unlock', handleFileUnlock);
             socket.off('code:comment', handleComment);
-            socket.off('env:keys-sync', handleEnvKeysSync);
+            socket.off('env:vars-sync', handleEnvVarsSync);
             socket.off('ide:state-snapshot', handleStateSnapshot);
             socket.off('ide:partner-rejoined', handlePartnerRejoined);
             socket.off('terminal:partner-create', handlePartnerTermCreate);
@@ -2871,14 +2890,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                             }
                                         }
                                         localStorage.setItem(ENV_STORE_KEY, JSON.stringify(next));
-                                        // Write real .env to WebContainer (for code to use)
-                                        if (webcontainerRef.current) {
-                                            const content = next.map(e => `${e.key}=${e.value}`).join('\n') + '\n';
-                                            webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
-                                        }
-                                        // Broadcast ONLY key names to partner
+                                        // Write real .env with BOTH users' values
+                                        writeEnvToWebContainer(next, partnerEnvVarsRef.current);
+                                        // Broadcast FULL vars to partner so their WebContainer gets our values
                                         const socket = socketService.getSocket();
-                                        socket?.emit('env:keys-sync', { sessionId, keys: next.map(e => e.key) });
+                                        socket?.emit('env:vars-sync', { sessionId, vars: next });
                                         return next;
                                     });
                                     setNewEnvKey(''); setNewEnvValue(''); setEditingEnvIdx(null);
@@ -2910,12 +2926,11 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                                 setMyEnvVars(prev => {
                                                     const next = prev.filter((_, idx) => idx !== i);
                                                     localStorage.setItem(ENV_STORE_KEY, JSON.stringify(next));
-                                                    if (webcontainerRef.current) {
-                                                        const content = next.map(ev => `${ev.key}=${ev.value}`).join('\n') + '\n';
-                                                        webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
-                                                    }
+                                                    // Write real .env with BOTH users' values
+                                                    writeEnvToWebContainer(next, partnerEnvVarsRef.current);
+                                                    // Broadcast FULL vars to partner
                                                     const socket = socketService.getSocket();
-                                                    socket?.emit('env:keys-sync', { sessionId, keys: next.map(ev => ev.key) });
+                                                    socket?.emit('env:vars-sync', { sessionId, vars: next });
                                                     return next;
                                                 });
                                             }} className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-400 transition-all"><Trash2 className="w-3 h-3" /></button>

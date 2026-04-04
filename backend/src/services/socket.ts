@@ -661,9 +661,9 @@ export function setupSocketHandlers(io: Server) {
       socket.to(`session:${data.sessionId}`).emit('code:file-create', data);
     });
 
-    // Env entries sync (per-entry ownership)
-    socket.on('code:env-entries', (data: { sessionId: string; entries: any[]; senderId: string }) => {
-      socket.to(`session:${data.sessionId}`).emit('code:env-entries', data);
+    // Env vars sync — relays full {key,value}[] so partner's WebContainer can access all API keys
+    socket.on('env:vars-sync', (data: { sessionId: string; vars: { key: string; value: string }[] }) => {
+      socket.to(`session:${data.sessionId}`).emit('env:vars-sync', data);
     });
 
     // File delete
