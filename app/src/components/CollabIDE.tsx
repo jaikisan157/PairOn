@@ -306,6 +306,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     }
     const partnerEnvVarsRef = useRef<{ key: string; value: string }[]>([]);
     const [partnerEnvKeys, setPartnerEnvKeys] = useState<string[]>([]);
+    // Persist partner KEY NAMES across refreshes (values stay memory-only)
+    const PARTNER_KEYS_STORE = `pairon_partner_env_keys_${sessionId}`;
+    const envRevertingRef = useRef(false); // prevent recursion when reverting partner lines
+    const envEmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // debounce env emit
 
     /** Build the display text for .env in Monaco:
      *  - My lines: KEY=real_value  (editable)
@@ -577,24 +581,54 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             // ── Special handling for .env: parse MY vars, protect partner lines ──
             if (path === '.env') {
-                const partnerKeys = new Set(partnerEnvVarsRef.current.map(e => e.key));
-                const myVars = parseEnvMyVars(value, partnerKeys);
+                if (envRevertingRef.current) { envRevertingRef.current = false; return; } // guard against recursion
+
+                // Build the set of ALL partner keys (memory + persisted from localStorage for post-refresh)
+                const livePartnerKeys = new Set(partnerEnvVarsRef.current.map(e => e.key));
+                const storedPartnerKeys: string[] = (() => { try { return JSON.parse(localStorage.getItem(PARTNER_KEYS_STORE) || '[]'); } catch { return []; } })();
+                const allPartnerKeys = new Set([...livePartnerKeys, ...storedPartnerKeys]);
+
+                // Revert any partner row that the user tried to edit
+                const lines = currentModel.getLinesContent();
+                const edits: import('monaco-editor').editor.IIdentifiedSingleEditOperation[] = [];
+                lines.forEach((line, idx) => {
+                    const lineNum = idx + 1;
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.startsWith('#')) return;
+                    const eqIdx = line.indexOf('=');
+                    if (eqIdx < 0) return;
+                    const key = line.slice(0, eqIdx).trim();
+                    if (!allPartnerKeys.has(key)) return;
+                    const maskedLine = `${key}=${'\u2022'.repeat(12)}`;
+                    if (line !== maskedLine) {
+                        edits.push({ range: { startLineNumber: lineNum, startColumn: 1, endLineNumber: lineNum, endColumn: line.length + 1 }, text: maskedLine });
+                    }
+                });
+                if (edits.length > 0) {
+                    envRevertingRef.current = true;
+                    currentModel.pushEditOperations(editorRef.current?.getSelections() ?? [], edits, () => null);
+                    return; // the pushEditOperations fires onChange again, which exits early via envRevertingRef guard
+                }
+
+                // Parse MY vars (skip partner keys + masked lines)
+                const myVars = parseEnvMyVars(currentModel.getValue(), allPartnerKeys);
                 myEnvVarsRef.current = myVars;
                 localStorage.setItem(ENV_STORE_KEY, JSON.stringify(myVars));
-                // Write real combined .env to WebContainer
-                const merged = new Map<string, string>();
-                for (const e of partnerEnvVarsRef.current) merged.set(e.key, e.value);
-                for (const e of myVars) merged.set(e.key, e.value);
-                if (merged.size > 0 && webcontainerRef.current) {
-                    const realContent = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
-                    webcontainerRef.current.fs.writeFile('.env', realContent).catch(() => {});
-                }
-                // Emit full vars to partner
-                socketService.getSocket()?.emit('env:vars-sync', { sessionId, vars: myVars });
-                // Update files state (display version, NOT the real file content)
-                setFiles(prev => ({ ...prev, '.env': value }));
-                autosave({ ...filesRef.current, '.env': value });
-                return; // Skip normal file sync — .env is never sent via code:file-change
+
+                // Debounce: write to WebContainer + emit to partner (avoid flooding on every keystroke)
+                if (envEmitTimerRef.current) clearTimeout(envEmitTimerRef.current);
+                envEmitTimerRef.current = setTimeout(() => {
+                    const merged = new Map<string, string>();
+                    for (const e of partnerEnvVarsRef.current) merged.set(e.key, e.value);
+                    for (const e of myVars) merged.set(e.key, e.value);
+                    if (merged.size > 0 && webcontainerRef.current) {
+                        const real = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+                        webcontainerRef.current.fs.writeFile('.env', real).catch(() => {});
+                    }
+                    socketService.getSocket()?.emit('env:vars-sync', { sessionId, vars: myVars });
+                }, 500);
+
+                return; // .env is never sent via code:file-change
             }
             // Mark this file as locally edited RIGHT NOW
             locallyEditingRef.current = { path, time: Date.now() };
@@ -894,12 +928,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const handleEnvVarsSync = (data: { vars: { key: string; value: string }[] }) => {
             const vars = data.vars ?? [];
             partnerEnvVarsRef.current = vars;
+            // Persist partner KEY NAMES to localStorage so they survive page refresh
+            localStorage.setItem(PARTNER_KEYS_STORE, JSON.stringify(vars.map(e => e.key)));
             setPartnerEnvKeys(vars.map(e => e.key));
             // Write real .env so both users' process.env values are accessible
             writeEnvToWC(myEnvVarsRef.current, vars);
             // Rebuild the .env display in Monaco (my real values + partner masked)
+            // Only update Monaco model if values section actually changed (avoid disrupting active typing)
             const displayContent = rebuildEnvDisplay(myEnvVarsRef.current, vars);
-            setFiles(prev => ({ ...prev, '.env': displayContent }));
             filesRef.current['.env'] = displayContent;
             const model = modelsRef.current.get('.env');
             if (model && !model.isDisposed() && model.getValue() !== displayContent) {
@@ -916,8 +952,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (savedEnvVars.length > 0) {
             socket.emit('env:vars-sync', { sessionId, vars: savedEnvVars });
         }
-        // Inject .env into files state so it appears in the editor
-        const initialDisplay = rebuildEnvDisplay(savedEnvVars, []);
+        // Inject .env into files state — include saved partner key names from localStorage so they survive refresh
+        const savedPartnerKeyNames: string[] = (() => { try { return JSON.parse(localStorage.getItem(PARTNER_KEYS_STORE) || '[]'); } catch { return []; } })();
+        // Build fake partner entries for display (masked, real values will come when partner reconnects)
+        const fakePartnerEntries = savedPartnerKeyNames.map(k => ({ key: k, value: '\u2022'.repeat(12) }));
+        if (savedPartnerKeyNames.length > 0) setPartnerEnvKeys(savedPartnerKeyNames);
+        const initialDisplay = rebuildEnvDisplay(savedEnvVars, fakePartnerEntries);
         setFiles(prev => ({ ...prev, '.env': initialDisplay }));
         filesRef.current['.env'] = initialDisplay;
 
