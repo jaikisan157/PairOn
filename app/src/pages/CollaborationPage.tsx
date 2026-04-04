@@ -106,6 +106,8 @@ export function CollaborationPage() {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submissionLink, setSubmissionLink] = useState('');
   const [submissionDescription, setSubmissionDescription] = useState('');
+  // Per-user local submission — independent of partner's submission
+  const [mySubmission, setMySubmission] = useState<{ link: string; description: string } | null>(null);
 
   // Exit request state
   const [showExitModal, setShowExitModal] = useState(false);
@@ -332,9 +334,11 @@ export function CollaborationPage() {
       setTimeRemaining(remaining);
     });
 
-    // Project submitted
-    socket.on('challenge:submitted', (submission: any) => {
-      setSession(prev => prev ? { ...prev, submission } : prev);
+    // Project submitted — only update OUR local submission, not a shared field
+    // (so each user's submission is independent and editable)
+    socket.on('challenge:submitted', (_submission: any) => {
+      // The submitter's own submission is already set via handleSubmit → setMySubmission.
+      // We intentionally do NOT push the partner's submission into our state.
     });
 
     // Session ended (approved exit, force quit, or kicked)
@@ -937,6 +941,9 @@ export function CollaborationPage() {
     e.preventDefault();
     if (!session) return;
     const snap = sessionRef.current;
+    // Store MY submission locally — independent of partner
+    const sub = { link: submissionLink, description: submissionDescription };
+    setMySubmission(sub);
     socketService.getSocket()?.emit('challenge:submit', session.sessionId, submissionLink, submissionDescription);
     setShowSubmitModal(false);
     setShowTimeUpModal(false);
@@ -1438,11 +1445,13 @@ export function CollaborationPage() {
                 {/* Submission */}
                 <div className="px-4 py-3">
                   <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Submission</p>
-                  {session.submission ? (
+                  {mySubmission ? (
                     <div className="p-2.5 bg-green-50 dark:bg-green-900/20 rounded-xl">
                       <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
-                      <a href={session.submission.link} target="_blank" rel="noopener noreferrer"
-                        className="text-[10px] text-pairon-accent hover:underline break-all">{session.submission.link}</a>
+                      <a href={mySubmission.link} target="_blank" rel="noopener noreferrer"
+                        className="text-[10px] text-pairon-accent hover:underline break-all">{mySubmission.link}</a>
+                      <button onClick={() => { setSubmissionLink(mySubmission.link); setSubmissionDescription(mySubmission.description); setShowSubmitModal(true); }}
+                        className="text-[10px] text-gray-400 hover:text-pairon-accent mt-1 block">Edit submission</button>
                     </div>
                   ) : (
                     <button
@@ -1709,11 +1718,13 @@ export function CollaborationPage() {
 
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Submission</h3>
-              {session.submission ? (
+              {mySubmission ? (
                 <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
                   <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
-                  <a href={session.submission.link} target="_blank" rel="noopener noreferrer"
-                    className="text-xs text-pairon-accent hover:underline break-all">{session.submission.link}</a>
+                  <a href={mySubmission.link} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-pairon-accent hover:underline break-all">{mySubmission.link}</a>
+                  <button onClick={() => { setSubmissionLink(mySubmission.link); setSubmissionDescription(mySubmission.description); setShowSubmitModal(true); }}
+                    className="text-xs text-gray-400 hover:text-pairon-accent mt-1 block">Edit submission</button>
                 </div>
               ) : (
                 <Button onClick={() => setShowSubmitModal(true)} className="w-full pairon-btn-primary">
@@ -1813,7 +1824,7 @@ export function CollaborationPage() {
               <p className="text-sm text-gray-500 text-center mb-1">Submit your project before leaving so your work is saved to <strong className="text-gray-700 dark:text-gray-200">My Projects</strong>.</p>
               <p className="text-xs text-gray-400 text-center mb-5">You can also continue working in overtime.</p>
               <div className="flex flex-col gap-2">
-                {!session.submission ? (
+                {!mySubmission ? (
                   <Button
                     onClick={() => {
                       setShowSoloLeaveConfirm(false);
@@ -1829,6 +1840,13 @@ export function CollaborationPage() {
                   </div>
                 )}
                 <Button variant="ghost" onClick={() => setShowSoloLeaveConfirm(false)} className="w-full rounded-xl text-gray-500">Continue Overtime</Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => { setShowSoloLeaveConfirm(false); cleanupAndLeave(); navigate('/dashboard'); }}
+                  className="w-full rounded-xl text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm"
+                >
+                  <LogOut className="w-4 h-4 mr-2" /> Leave without submitting
+                </Button>
               </div>
             </motion.div>
           </motion.div>
@@ -2000,7 +2018,7 @@ export function CollaborationPage() {
 
               <div className="flex flex-col gap-3">
                 {/* Submit & Save — primary action */}
-                {!session.submission ? (
+                {!mySubmission ? (
                   <button onClick={handleTimeUpSubmit}
                     className="w-full py-3.5 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2 shadow-lg shadow-green-900/30">
                     <CheckCircle2 className="w-4 h-4" /> Submit &amp; Save Project
