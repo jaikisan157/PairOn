@@ -296,31 +296,54 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const previewUrlRef = useRef<string>('');
     const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // ── Secure Env Manager ──────────────────────────────────────────────────
-    // Values are NEVER put in shared `files` or sent over the socket.
-    // Only key names are broadcast to the partner.
+    // My vars: stored in localStorage. Partner's vars: in memory only (received via socket).
+    // The .env file is a REAL file in the Monaco editor — we just control what each side sees.
     const ENV_STORE_KEY = `pairon_env_vars_${sessionId}_${userId}`;
-    const [myEnvVars, setMyEnvVars] = useState<{ key: string; value: string }[]>(() => {
-        try { return JSON.parse(localStorage.getItem(ENV_STORE_KEY) || '[]'); } catch { return []; }
-    });
-    const [partnerEnvKeys, setPartnerEnvKeys] = useState<string[]>([]);
-    const [showEnvModal, setShowEnvModal] = useState(false);
-    const [newEnvKey, setNewEnvKey] = useState('');
-    const [newEnvValue, setNewEnvValue] = useState('');
-    const [editingEnvIdx, setEditingEnvIdx] = useState<number | null>(null);
-    const myEnvVarsRef = useRef(myEnvVars);
-    useEffect(() => { myEnvVarsRef.current = myEnvVars; }, [myEnvVars]);
-    // Partner's full env vars stored in memory only (never persisted — received fresh each session)
+    const myEnvVarsRef = useRef<{ key: string; value: string }[]>([]);
+    // Initialize from localStorage once
+    if (myEnvVarsRef.current.length === 0) {
+        try { myEnvVarsRef.current = JSON.parse(localStorage.getItem(ENV_STORE_KEY) || '[]'); } catch { /* keep [] */ }
+    }
     const partnerEnvVarsRef = useRef<{ key: string; value: string }[]>([]);
-    // Helper: merge both users' vars and write real .env to WebContainer
-    const writeEnvToWebContainer = useCallback((myVars: { key: string; value: string }[], partnerVars: { key: string; value: string }[]) => {
-        if (!webcontainerRef.current) return;
-        // Partner vars come first so myVars can override duplicates
-        const merged = new Map<string, string>();
-        for (const e of partnerVars) merged.set(e.key, e.value);
-        for (const e of myVars) merged.set(e.key, e.value);
-        if (merged.size === 0) return;
-        const content = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
-        webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
+    const [partnerEnvKeys, setPartnerEnvKeys] = useState<string[]>([]);
+
+    /** Build the display text for .env in Monaco:
+     *  - My lines: KEY=real_value  (editable)
+     *  - Partner lines: KEY=••••••••••••  (visually read-only via masking) */
+    const rebuildEnvDisplay = useCallback((myVars: { key: string; value: string }[], partnerVars: { key: string; value: string }[]): string => {
+        const lines: string[] = [];
+        if (myVars.length > 0) {
+            lines.push('# My variables (private — only you can see the values)');
+            for (const { key, value } of myVars) lines.push(`${key}=${value}`);
+        }
+        if (partnerVars.length > 0) {
+            if (lines.length > 0) lines.push('');
+            lines.push("# Partner's variables (values hidden for privacy)");
+            for (const { key } of partnerVars) lines.push(`${key}=${'•'.repeat(12)}`);
+        }
+        if (lines.length === 0) {
+            lines.push('# Add your environment variables below');
+            lines.push('# Format: KEY=value');
+            lines.push('# Example: VITE_API_KEY=your_api_key_here');
+        }
+        return lines.join('\n') + '\n';
+    }, []);
+
+    /** Parse .env content typed by the user — extract only MY keys (skip partner's masked lines) */
+    const parseEnvMyVars = useCallback((content: string, partnerKeys: Set<string>): { key: string; value: string }[] => {
+        const result: { key: string; value: string }[] = [];
+        for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const eqIdx = trimmed.indexOf('=');
+            if (eqIdx < 0) continue;
+            const key = trimmed.slice(0, eqIdx).trim();
+            const value = trimmed.slice(eqIdx + 1); // keep value as-is
+            if (!key || partnerKeys.has(key)) continue; // skip partner's keys
+            if (value.startsWith('•')) continue; // skip masked lines (partner lines)
+            result.push({ key, value });
+        }
+        return result;
     }, []);
     // Track when the local user last edited a file (to skip remote model updates during active typing)
     const locallyEditingRef = useRef<{ path: string; time: number }>({ path: '', time: 0 });
@@ -551,6 +574,28 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             if (!currentModel) return;
             const path = currentModel.uri.path.slice(1); // Remove leading /
             const value = currentModel.getValue();
+
+            // ── Special handling for .env: parse MY vars, protect partner lines ──
+            if (path === '.env') {
+                const partnerKeys = new Set(partnerEnvVarsRef.current.map(e => e.key));
+                const myVars = parseEnvMyVars(value, partnerKeys);
+                myEnvVarsRef.current = myVars;
+                localStorage.setItem(ENV_STORE_KEY, JSON.stringify(myVars));
+                // Write real combined .env to WebContainer
+                const merged = new Map<string, string>();
+                for (const e of partnerEnvVarsRef.current) merged.set(e.key, e.value);
+                for (const e of myVars) merged.set(e.key, e.value);
+                if (merged.size > 0 && webcontainerRef.current) {
+                    const realContent = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+                    webcontainerRef.current.fs.writeFile('.env', realContent).catch(() => {});
+                }
+                // Emit full vars to partner
+                socketService.getSocket()?.emit('env:vars-sync', { sessionId, vars: myVars });
+                // Update files state (display version, NOT the real file content)
+                setFiles(prev => ({ ...prev, '.env': value }));
+                autosave({ ...filesRef.current, '.env': value });
+                return; // Skip normal file sync — .env is never sent via code:file-change
+            }
             // Mark this file as locally edited RIGHT NOW
             locallyEditingRef.current = { path, time: Date.now() };
             // Track line authorship for typing indicator
@@ -836,15 +881,32 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         socket.on('code:file-unlock', handleFileUnlock);
         socket.on('code:comment', handleComment);
 
-        // ── Env: receive partner's full vars (write to WebContainer, mask in UI) ────
+        // ── Env: receive partner's full vars (write to WebContainer, update .env display) ──
+        const writeEnvToWC = (myVars: { key: string; value: string }[], partnerVars: { key: string; value: string }[]) => {
+            if (!webcontainerRef.current) return;
+            const merged = new Map<string, string>();
+            for (const e of partnerVars) merged.set(e.key, e.value);
+            for (const e of myVars) merged.set(e.key, e.value);
+            if (merged.size === 0) return;
+            const content = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+            webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
+        };
         const handleEnvVarsSync = (data: { vars: { key: string; value: string }[] }) => {
             const vars = data.vars ?? [];
-            // Store full values in memory for WebContainer
             partnerEnvVarsRef.current = vars;
-            // Update display state (key names only — values masked in UI)
             setPartnerEnvKeys(vars.map(e => e.key));
-            // Write real .env with BOTH users' values so code can access everything
-            writeEnvToWebContainer(myEnvVarsRef.current, vars);
+            // Write real .env so both users' process.env values are accessible
+            writeEnvToWC(myEnvVarsRef.current, vars);
+            // Rebuild the .env display in Monaco (my real values + partner masked)
+            const displayContent = rebuildEnvDisplay(myEnvVarsRef.current, vars);
+            setFiles(prev => ({ ...prev, '.env': displayContent }));
+            filesRef.current['.env'] = displayContent;
+            const model = modelsRef.current.get('.env');
+            if (model && !model.isDisposed() && model.getValue() !== displayContent) {
+                suppressSyncRef.current = true;
+                model.setValue(displayContent);
+                suppressSyncRef.current = false;
+            }
         };
         socket.on('env:vars-sync', handleEnvVarsSync);
         // On join: broadcast our full vars so partner's WebContainer gets them
@@ -854,6 +916,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (savedEnvVars.length > 0) {
             socket.emit('env:vars-sync', { sessionId, vars: savedEnvVars });
         }
+        // Inject .env into files state so it appears in the editor
+        const initialDisplay = rebuildEnvDisplay(savedEnvVars, []);
+        setFiles(prev => ({ ...prev, '.env': initialDisplay }));
+        filesRef.current['.env'] = initialDisplay;
 
         // ===== IDE state sync handlers =====
         const handleStateSnapshot = (data: { files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
@@ -2192,9 +2258,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <Package className="w-3.5 h-3.5" />
                     </button>
                     {/* Project Templates button removed — use terminal instead */}
-                    {/* Secure Env Manager */}
-                    <button onClick={() => setShowEnvModal(true)}
-                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Manage ENV variables (private)">
+                    {/* .env — open in Monaco directly (values are private, partner sees masked) */}
+                    <button onClick={() => {
+                        const displayContent = rebuildEnvDisplay(myEnvVarsRef.current, partnerEnvVarsRef.current);
+                        if (!files['.env']) {
+                            setFiles(prev => ({ ...prev, '.env': displayContent }));
+                            filesRef.current['.env'] = displayContent;
+                        }
+                        if (!openTabs.includes('.env')) setOpenTabs(prev => [...prev, '.env']);
+                        switchToFile('.env');
+                    }}
+                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Open .env file (your values private)">
                         <Settings2 className="w-3.5 h-3.5" />
                     </button>
                     {/* Separator */}
@@ -2843,125 +2917,12 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             )}
 
 
-            {/* EnvVarsPanel removed — .env is managed via Env Manager modal */}
+            {/* .env is now a real Monaco file — no separate modal needed */}
 
-            {/* ===== Secure Env Manager Modal ===== */}
-            {showEnvModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowEnvModal(false)}>
-                    <div className="w-full max-w-lg bg-[#161b22] border border-gray-700 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
-                        {/* Header */}
-                        <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
-                                <Lock className="w-4 h-4 text-green-400" />
-                                <span className="text-white font-semibold">ENV Variables</span>
-                            </div>
-                            <button onClick={() => setShowEnvModal(false)} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
-                        </div>
-                        <p className="text-xs text-gray-500 mb-4">Your values are <strong className="text-green-400">private</strong> — only key names are shared with your partner. Values are stored locally and included in your download.</p>
 
-                        {/* Add / Edit row */}
-                        <div className="flex gap-2 mb-4">
-                            <input
-                                value={newEnvKey}
-                                onChange={e => setNewEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
-                                placeholder="KEY_NAME"
-                                className="flex-1 bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 focus:border-green-500 outline-none"
-                            />
-                            <input
-                                value={newEnvValue}
-                                onChange={e => setNewEnvValue(e.target.value)}
-                                placeholder="value"
-                                type="text"
-                                className="flex-1 bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 focus:border-green-500 outline-none"
-                            />
-                            <button
-                                onClick={() => {
-                                    if (!newEnvKey.trim()) return;
-                                    setMyEnvVars(prev => {
-                                        let next: { key: string; value: string }[];
-                                        if (editingEnvIdx !== null) {
-                                            next = prev.map((e, i) => i === editingEnvIdx ? { key: newEnvKey, value: newEnvValue } : e);
-                                        } else {
-                                            const existing = prev.findIndex(e => e.key === newEnvKey);
-                                            if (existing >= 0) {
-                                                next = prev.map((e, i) => i === existing ? { key: newEnvKey, value: newEnvValue } : e);
-                                            } else {
-                                                next = [...prev, { key: newEnvKey, value: newEnvValue }];
-                                            }
-                                        }
-                                        localStorage.setItem(ENV_STORE_KEY, JSON.stringify(next));
-                                        // Write real .env with BOTH users' values
-                                        writeEnvToWebContainer(next, partnerEnvVarsRef.current);
-                                        // Broadcast FULL vars to partner so their WebContainer gets our values
-                                        const socket = socketService.getSocket();
-                                        socket?.emit('env:vars-sync', { sessionId, vars: next });
-                                        return next;
-                                    });
-                                    setNewEnvKey(''); setNewEnvValue(''); setEditingEnvIdx(null);
-                                }}
-                                disabled={!newEnvKey.trim()}
-                                className="px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap"
-                            >
-                                {editingEnvIdx !== null ? 'Update' : 'Add'}
-                            </button>
-                            {editingEnvIdx !== null && (
-                                <button onClick={() => { setEditingEnvIdx(null); setNewEnvKey(''); setNewEnvValue(''); }}
-                                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">Cancel</button>
-                            )}
-                        </div>
 
-                        {/* My vars */}
-                        {myEnvVars.length > 0 && (
-                            <div className="mb-4">
-                                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">🔑 My Variables ({myEnvVars.length})</p>
-                                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                                    {myEnvVars.map((e, i) => (
-                                        <div key={i} className="flex items-center gap-2 bg-[#0d1117] border border-gray-800 rounded-lg px-3 py-2 group">
-                                            <span className="text-green-400 font-mono text-xs flex-shrink-0">{e.key}</span>
-                                            <span className="text-gray-500 text-xs">=</span>
-                                            <span className="text-gray-300 font-mono text-xs flex-1 truncate">{e.value || <em className="text-gray-600">empty</em>}</span>
-                                            <button onClick={() => { setEditingEnvIdx(i); setNewEnvKey(e.key); setNewEnvValue(e.value); }}
-                                                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-400 transition-all"><Pencil className="w-3 h-3" /></button>
-                                            <button onClick={() => {
-                                                setMyEnvVars(prev => {
-                                                    const next = prev.filter((_, idx) => idx !== i);
-                                                    localStorage.setItem(ENV_STORE_KEY, JSON.stringify(next));
-                                                    // Write real .env with BOTH users' values
-                                                    writeEnvToWebContainer(next, partnerEnvVarsRef.current);
-                                                    // Broadcast FULL vars to partner
-                                                    const socket = socketService.getSocket();
-                                                    socket?.emit('env:vars-sync', { sessionId, vars: next });
-                                                    return next;
-                                                });
-                                            }} className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-400 transition-all"><Trash2 className="w-3 h-3" /></button>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
 
-                        {/* Partner keys (read-only, values hidden) */}
-                        {partnerEnvKeys.length > 0 && (
-                            <div>
-                                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">🔒 Partner's Variables (keys only)</p>
-                                <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                                    {partnerEnvKeys.map((k, i) => (
-                                        <div key={i} className="flex items-center gap-2 bg-[#0d1117] border border-gray-800/50 rounded-lg px-3 py-2 opacity-60">
-                                            <span className="text-yellow-400 font-mono text-xs">{k}</span>
-                                            <span className="text-gray-600 text-xs">=</span>
-                                            <span className="text-gray-600 font-mono text-xs">{'•'.repeat(12)}</span>
-                                            <Lock className="w-3 h-3 text-gray-600 ml-auto" />
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
 
-                        {myEnvVars.length === 0 && partnerEnvKeys.length === 0 && (
-                            <p className="text-center text-xs text-gray-600 py-4">No env variables yet. Add your first key above.</p>
-                        )}
-                    </div>
-                </div>
             )}
 
             {/* ===== Push to GitHub Modal ===== */}
