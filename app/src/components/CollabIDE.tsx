@@ -307,7 +307,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const partnerEnvVarsRef = useRef<{ key: string; value: string }[]>([]);
     const [partnerEnvKeys, setPartnerEnvKeys] = useState<string[]>([]);
     // Persist partner KEY NAMES across refreshes (values stay memory-only)
-    const PARTNER_KEYS_STORE = `pairon_partner_env_keys_${sessionId}`;
+    // MUST include userId so two users on same browser don't overwrite each other's stored keys
+    const PARTNER_KEYS_STORE = `pairon_partner_env_keys_${sessionId}_${userId}`;
     const envRevertingRef = useRef(false); // prevent recursion when reverting partner lines
     const envEmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // debounce env emit
 
@@ -615,7 +616,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 myEnvVarsRef.current = myVars;
                 localStorage.setItem(ENV_STORE_KEY, JSON.stringify(myVars));
 
-                // Debounce: write to WebContainer + emit to partner (avoid flooding on every keystroke)
+                // Debounce: write to WebContainer + emit to partner (150ms for near-real-time feel)
                 if (envEmitTimerRef.current) clearTimeout(envEmitTimerRef.current);
                 envEmitTimerRef.current = setTimeout(() => {
                     const merged = new Map<string, string>();
@@ -626,7 +627,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         webcontainerRef.current.fs.writeFile('.env', real).catch(() => {});
                     }
                     socketService.getSocket()?.emit('env:vars-sync', { sessionId, vars: myVars });
-                }, 500);
+                }, 150);
 
                 return; // .env is never sent via code:file-change
             }
@@ -936,6 +937,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             // Rebuild the .env display in Monaco (my real values + partner masked)
             // Only update Monaco model if values section actually changed (avoid disrupting active typing)
             const displayContent = rebuildEnvDisplay(myEnvVarsRef.current, vars);
+            // Update React files state AND filesRef so both the file tree and model creation stay in sync
+            setFiles(prev => ({ ...prev, '.env': displayContent }));
             filesRef.current['.env'] = displayContent;
             const model = modelsRef.current.get('.env');
             if (model && !model.isDisposed() && model.getValue() !== displayContent) {
@@ -952,6 +955,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (savedEnvVars.length > 0) {
             socket.emit('env:vars-sync', { sessionId, vars: savedEnvVars });
         }
+        // Clean up old buggy key (no userId suffix) to prevent stale data from the old implementation
+        localStorage.removeItem(`pairon_partner_env_keys_${sessionId}`);
         // Inject .env into files state — include saved partner key names from localStorage so they survive refresh
         const savedPartnerKeyNames: string[] = (() => { try { return JSON.parse(localStorage.getItem(PARTNER_KEYS_STORE) || '[]'); } catch { return []; } })();
         // Build fake partner entries for display (masked, real values will come when partner reconnects)
@@ -963,8 +968,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
         // ===== IDE state sync handlers =====
         const handleStateSnapshot = (data: { files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
-            setFiles(data.files);
-            filesRef.current = data.files;
+            // Never let the shared snapshot overwrite .env — each user manages their own
+            const { '.env': _ignored, ...sharedFiles } = data.files;
+            setFiles(prev => ({ ...sharedFiles, '.env': prev['.env'] ?? '' }));
+            filesRef.current = { ...sharedFiles, '.env': filesRef.current['.env'] ?? '' };
             // Refresh Monaco models for changed files
             Object.entries(data.files).forEach(([path, content]) => {
                 const model = modelsRef.current.get(path);
