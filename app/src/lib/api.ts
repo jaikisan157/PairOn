@@ -260,6 +260,33 @@ class ApiService {
         });
         return this.handleResponse<{ users: any[] }>(response);
     }
+
+    // ===== Projects =====
+
+    async getProjects() {
+        const response = await fetch(`${this.baseUrl}/api/projects`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ projects: any[] }>(response);
+    }
+
+    async saveProject(project: Record<string, any>) {
+        const response = await fetch(`${this.baseUrl}/api/projects`, {
+            method: 'POST',
+            headers: this.getHeaders(),
+            body: JSON.stringify(project),
+        });
+        return this.handleResponse<{ project: any; message: string }>(response);
+    }
+
+    async deleteProject(sessionId: string) {
+        const response = await fetch(`${this.baseUrl}/api/projects/${encodeURIComponent(sessionId)}`, {
+            method: 'DELETE',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ message: string }>(response);
+    }
 }
 
 export const api = new ApiService();

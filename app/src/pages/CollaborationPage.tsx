@@ -785,7 +785,7 @@ export function CollaborationPage() {
     localStorage.removeItem('challenge_session');
   }
 
-  // ─── Auto-save project to My Projects (silent, no prompt) ───────────────
+  // ─── Auto-save project to My Projects (DB-backed + localStorage cache) ────
   async function autoSaveToProjects(snap: any, submissionLink?: string, submissionDesc?: string) {
     if (!snap?.sessionId) return;
     try {
@@ -819,10 +819,21 @@ export function CollaborationPage() {
         savedAt: new Date().toISOString(),
         files,
       };
-      const existing = JSON.parse(localStorage.getItem('saved_projects') || '[]');
-      const filtered = existing.filter((p: any) => p.sessionId !== projectEntry.sessionId);
-      filtered.push(projectEntry);
-      localStorage.setItem('saved_projects', JSON.stringify(filtered));
+
+      // ── Primary: save to DB (per-user, cross-device) ──
+      try {
+        await api.saveProject(projectEntry);
+      } catch (dbErr) {
+        console.warn('[autoSave] DB save failed, falling back to localStorage only:', dbErr);
+      }
+
+      // ── Secondary: also write to localStorage as local cache ──
+      try {
+        const existing = JSON.parse(localStorage.getItem('saved_projects') || '[]');
+        const filtered = existing.filter((p: any) => p.sessionId !== projectEntry.sessionId);
+        filtered.push(projectEntry);
+        localStorage.setItem('saved_projects', JSON.stringify(filtered));
+      } catch { /* ignore localStorage errors */ }
     } catch (err) {
       console.error('[autoSave] Failed to save project:', err);
     }

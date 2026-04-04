@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, FolderOpen, CheckCircle, Clock, Download, ExternalLink, Users, Trash2 } from 'lucide-react';
+import { ArrowLeft, FolderOpen, CheckCircle, Clock, Download, ExternalLink, Users, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { api } from '@/lib/api';
 import JSZip from 'jszip';
 
 interface SavedProject {
+  id?: string;
   sessionId: string;
   partnerName: string;
   partnerReputation: number;
@@ -32,13 +34,48 @@ export function ProjectsPage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadProjects = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // ── Primary: fetch from DB ──
+      const { projects: dbProjects } = await api.getProjects();
+      setProjects(dbProjects);
+
+      // Also merge any local-only projects (saved offline / before DB migration)
+      // into the DB so they're persisted going forward.
+      try {
+        const local = JSON.parse(localStorage.getItem('saved_projects') || '[]') as SavedProject[];
+        const dbSessionIds = new Set(dbProjects.map((p: SavedProject) => p.sessionId));
+        const missingLocally = local.filter(lp => !dbSessionIds.has(lp.sessionId));
+        for (const lp of missingLocally) {
+          await api.saveProject(lp).catch(() => { /* non-critical */ });
+        }
+        if (missingLocally.length > 0) {
+          // Re-fetch to include the newly migrated projects
+          const { projects: refreshed } = await api.getProjects();
+          setProjects(refreshed);
+          // Clear localStorage now that everything is in the DB
+          localStorage.removeItem('saved_projects');
+        }
+      } catch { /* ignore local migration errors */ }
+    } catch (err) {
+      // ── Fallback: load from localStorage if API fails ──
+      console.warn('[ProjectsPage] DB fetch failed, using localStorage fallback:', err);
+      setError('Could not load from server. Showing locally cached projects.');
+      const saved = JSON.parse(localStorage.getItem('saved_projects') || '[]') as SavedProject[];
+      saved.sort((a, b) => new Date(b.savedAt || b.endsAt).getTime() - new Date(a.savedAt || a.endsAt).getTime());
+      setProjects(saved);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Load only explicitly-saved projects from localStorage
-    const saved = JSON.parse(localStorage.getItem('saved_projects') || '[]') as SavedProject[];
-    // Sort newest first
-    saved.sort((a, b) => new Date(b.savedAt || b.endsAt).getTime() - new Date(a.savedAt || a.endsAt).getTime());
-    setProjects(saved);
+    loadProjects();
   }, []);
 
   const downloadProject = async (project: SavedProject) => {
@@ -49,14 +86,11 @@ export function ProjectsPage() {
       const hasFiles = Object.keys(files).length > 0;
 
       if (hasFiles) {
-        // Add all IDE files to the zip
         for (const [path, content] of Object.entries(files)) {
-          // Remove leading slash if present
           const cleanPath = path.startsWith('/') ? path.slice(1) : path;
           zip.file(cleanPath, content);
         }
       } else {
-        // No files — create a README with project info
         const readme = [
           `# ${project.projectIdea?.title || 'Untitled Project'}`,
           '',
@@ -88,10 +122,21 @@ export function ProjectsPage() {
     }
   };
 
-  const deleteProject = (sessionId: string) => {
-    const updated = projects.filter(p => p.sessionId !== sessionId);
-    setProjects(updated);
-    localStorage.setItem('saved_projects', JSON.stringify(updated));
+  const deleteProject = async (sessionId: string) => {
+    // Optimistic update
+    setProjects(prev => prev.filter(p => p.sessionId !== sessionId));
+    try {
+      await api.deleteProject(sessionId);
+      // Also remove from localStorage cache
+      try {
+        const local = JSON.parse(localStorage.getItem('saved_projects') || '[]');
+        localStorage.setItem('saved_projects', JSON.stringify(local.filter((p: any) => p.sessionId !== sessionId)));
+      } catch { /* ignore */ }
+    } catch (err) {
+      console.error('[ProjectsPage] Delete failed:', err);
+      // Revert on failure
+      loadProjects();
+    }
   };
 
   return (
@@ -100,21 +145,41 @@ export function ProjectsPage() {
         <button onClick={() => navigate('/dashboard')} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
           <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="font-display font-semibold text-gray-900 dark:text-white">My Projects</h1>
-          <p className="text-xs text-gray-500">{projects.length} saved project{projects.length !== 1 ? 's' : ''}</p>
+          <p className="text-xs text-gray-500">
+            {loading ? 'Loading…' : `${projects.length} saved project${projects.length !== 1 ? 's' : ''}`}
+          </p>
         </div>
+        <button
+          onClick={loadProjects}
+          disabled={loading}
+          className="p-2 text-gray-400 hover:text-pairon-accent rounded-lg hover:bg-pairon-accent/10 transition-colors disabled:opacity-40"
+          title="Refresh"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
-        {projects.length === 0 ? (
+        {error && (
+          <div className="mb-4 px-4 py-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl text-sm text-yellow-700 dark:text-yellow-400">
+            ⚠️ {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <div className="w-8 h-8 border-2 border-pairon-accent/30 border-t-pairon-accent rounded-full animate-spin" />
+          </div>
+        ) : projects.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
             <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
               <FolderOpen className="w-8 h-8 text-gray-400" />
             </div>
             <h3 className="font-display text-lg font-semibold text-gray-900 dark:text-white mb-2">No saved projects yet</h3>
-            <p className="text-gray-500 text-sm mb-2">Complete a session and choose to save your project when prompted.</p>
-            <p className="text-gray-400 text-xs mb-6">Projects are saved when you click "Save to My Projects" at the end of a session.</p>
+            <p className="text-gray-500 text-sm mb-2">Complete a session and submit your project to save it here.</p>
+            <p className="text-gray-400 text-xs mb-6">Projects are stored in the cloud and accessible from any device.</p>
             <Button onClick={() => navigate('/dashboard')} className="bg-pairon-accent hover:bg-pairon-accent/90 text-white rounded-xl">
               Find a Partner
             </Button>
