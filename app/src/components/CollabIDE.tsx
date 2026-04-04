@@ -295,9 +295,20 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const foldersRef = useRef<Set<string>>(new Set());
     const previewUrlRef = useRef<string>('');
     const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    // Track who created .env file (by userId). Creator sees real values, partner sees masked.
-    const ENV_CREATOR_KEY = `pairon_env_creator_${sessionId}`;
-    const envCreatorRef = useRef<string>(localStorage.getItem(ENV_CREATOR_KEY) || '');
+    // ── Secure Env Manager ──────────────────────────────────────────────────
+    // Values are NEVER put in shared `files` or sent over the socket.
+    // Only key names are broadcast to the partner.
+    const ENV_STORE_KEY = `pairon_env_vars_${sessionId}_${userId}`;
+    const [myEnvVars, setMyEnvVars] = useState<{ key: string; value: string }[]>(() => {
+        try { return JSON.parse(localStorage.getItem(ENV_STORE_KEY) || '[]'); } catch { return []; }
+    });
+    const [partnerEnvKeys, setPartnerEnvKeys] = useState<string[]>([]);
+    const [showEnvModal, setShowEnvModal] = useState(false);
+    const [newEnvKey, setNewEnvKey] = useState('');
+    const [newEnvValue, setNewEnvValue] = useState('');
+    const [editingEnvIdx, setEditingEnvIdx] = useState<number | null>(null);
+    const myEnvVarsRef = useRef(myEnvVars);
+    useEffect(() => { myEnvVarsRef.current = myEnvVars; }, [myEnvVars]);
     // Track when the local user last edited a file (to skip remote model updates during active typing)
     const locallyEditingRef = useRef<{ path: string; time: number }>({ path: '', time: 0 });
     // Line authorship: Map<filePath, Map<lineNumber, 'local' | 'partner'>>
@@ -400,9 +411,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         return line.slice(0, eqIdx + 1) + '\u2022'.repeat(Math.max(8, line.length - eqIdx - 1));
     }).join('\n'), []);
 
-    const isPartnerEnv = useCallback((path: string) =>
-        (path === '.env' || path.startsWith('.env.')) && envCreatorRef.current !== '' && envCreatorRef.current !== userId
-    , [userId]);
+    // With the new env manager, .env files are never in the shared files object.
+    // This helper is kept as a no-op to avoid breaking any call sites.
+    const isPartnerEnv = useCallback((_path: string) => false, []);
 
     const switchToFile = useCallback((path: string) => {
         const editor = editorRef.current;
@@ -682,7 +693,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             return line.slice(0, eqIdx + 1) + '\u2022'.repeat(Math.max(8, line.length - eqIdx - 1));
         }).join('\n');
 
-        const isPartnerEnvFile = (path: string) => (path === '.env' || path.startsWith('.env.')) && envCreatorRef.current !== '' && envCreatorRef.current !== userId;
+        // .env files are no longer in the shared files object — env is managed via Env Manager.
+        const isPartnerEnvFile = (_path: string) => false;
 
         const handleFileChange = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
@@ -735,23 +747,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         };
         const handleFileCreate = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
-            // Track .env creator: if partner creates .env, they own it
-            if (data.path === '.env' || data.path.startsWith('.env.')) {
-                if (!envCreatorRef.current) {
-                    envCreatorRef.current = 'partner'; // We know WE didn't create it
-                    localStorage.setItem(ENV_CREATOR_KEY, 'partner');
-                }
-            }
+            // .env files are managed via the secure Env Manager — never shared as files
+            if (data.path === '.env' || data.path.startsWith('.env.')) return;
             setFiles(prev => { const next = { ...prev, [data.path]: data.content }; autosave(next); return next; });
-            // If this is partner's .env, mask it in the Monaco model but keep real values in WebContainer
-            if (isPartnerEnvFile(data.path)) {
-                const model = modelsRef.current.get(data.path);
-                if (model && !model.isDisposed()) {
-                    suppressSyncRef.current = true;
-                    model.setValue(maskEnvValues(data.content));
-                    suppressSyncRef.current = false;
-                }
-            }
             if (webcontainerRef.current) {
                 const dir = data.path.split('/').slice(0, -1).join('/');
                 if (dir) webcontainerRef.current.fs.mkdir(dir, { recursive: true }).catch(() => { });
@@ -825,7 +823,18 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         socket.on('code:file-unlock', handleFileUnlock);
         socket.on('code:comment', handleComment);
 
-        // (env entries are now tracked via envCreatorRef — no separate handler needed)
+        // ── Env: receive partner's key names only ──────────────────────────
+        const handleEnvKeysSync = (data: { keys: string[] }) => {
+            setPartnerEnvKeys(data.keys ?? []);
+        };
+        socket.on('env:keys-sync', handleEnvKeysSync);
+        // Broadcast our own key names to partner on join
+        const savedEnvVars: { key: string; value: string }[] = (() => {
+            try { return JSON.parse(localStorage.getItem(ENV_STORE_KEY) || '[]'); } catch { return []; }
+        })();
+        if (savedEnvVars.length > 0) {
+            socket.emit('env:keys-sync', { sessionId, keys: savedEnvVars.map(e => e.key) });
+        }
 
         // ===== IDE state sync handlers =====
         const handleStateSnapshot = (data: { files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
@@ -931,6 +940,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             socket.off('code:file-lock', handleFileLock);
             socket.off('code:file-unlock', handleFileUnlock);
             socket.off('code:comment', handleComment);
+            socket.off('env:keys-sync', handleEnvKeysSync);
             socket.off('ide:state-snapshot', handleStateSnapshot);
             socket.off('ide:partner-rejoined', handlePartnerRejoined);
             socket.off('terminal:partner-create', handlePartnerTermCreate);
@@ -1463,16 +1473,22 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const downloadZip = useCallback(async () => {
         const { default: JSZip } = await import('jszip');
         const zip = new JSZip();
-        // Never include .env in the download — security
+        // Include all project files (never .env — handled separately below)
         Object.entries(files).forEach(([p, c]) => {
             if (p === '.env' || p.startsWith('.env.')) return;
             zip.file(p, c);
         });
+        // Include owner's own .env values (never partner's)
+        const ownEnv = myEnvVarsRef.current;
+        if (ownEnv.length > 0) {
+            const envContent = ownEnv.map(e => `${e.key}=${e.value}`).join('\n') + '\n';
+            zip.file('.env', envContent);
+        }
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${projectTitle.replace(/\s+/g, '-').toLowerCase()}.zip`; a.click();
         URL.revokeObjectURL(url);
-        addToast('Project downloaded as ZIP (⚠️ .env excluded for security)', 'success');
+        addToast('Project downloaded as ZIP (.env included with your values only)', 'success');
     }, [files, projectTitle, addToast]);
 
     // ===== Import Files =====
@@ -1961,9 +1977,8 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         return sorted.map(node => {
             const fullPath = prefix ? `${prefix}/${node.name}` : node.name;
             // Detect .env files and whether this file belongs to the partner
-            const isEnvFile = fullPath === '.env' || fullPath.startsWith('.env.');
-            // isPartnerEnv = true when partner created the .env file
-            const isPartnerEnv = isEnvFile && envCreatorRef.current !== '' && envCreatorRef.current !== userId;
+            const isEnvFile = false; // .env no longer lives in shared files
+            const isPartnerEnv = false;
 
             // Renaming mode
             if (renamingPath === fullPath) {
@@ -2158,23 +2173,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                         <Package className="w-3.5 h-3.5" />
                     </button>
                     {/* Project Templates button removed — use terminal instead */}
-                    {/* Create / Open .env file */}
-                    <button onClick={() => {
-                        // Create .env if it doesn't exist, then open it
-                        if (!files['.env']) {
-                            const defaultEnv = '# Environment Variables\n# Add your keys below (KEY=value)\n';
-                            setFiles(prev => { const next = { ...prev, '.env': defaultEnv }; autosave(next); return next; });
-                            if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', defaultEnv).catch(() => { });
-                            const socket = socketService.getSocket();
-                            socket?.emit('code:file-create', { sessionId, path: '.env', content: defaultEnv, senderId: socket.id });
-                            // Mark this user as the creator
-                            envCreatorRef.current = userId;
-                            localStorage.setItem(ENV_CREATOR_KEY, userId);
-                        }
-                        if (!openTabs.includes('.env')) setOpenTabs(prev => [...prev, '.env']);
-                        switchToFile('.env');
-                    }}
-                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Create / Open .env file">
+                    {/* Secure Env Manager */}
+                    <button onClick={() => setShowEnvModal(true)}
+                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Manage ENV variables (private)">
                         <Settings2 className="w-3.5 h-3.5" />
                     </button>
                     {/* Separator */}
@@ -2823,7 +2824,130 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             )}
 
 
-            {/* EnvVarsPanel removed — .env is edited like any normal file */}
+            {/* EnvVarsPanel removed — .env is managed via Env Manager modal */}
+
+            {/* ===== Secure Env Manager Modal ===== */}
+            {showEnvModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowEnvModal(false)}>
+                    <div className="w-full max-w-lg bg-[#161b22] border border-gray-700 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+                        {/* Header */}
+                        <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                                <Lock className="w-4 h-4 text-green-400" />
+                                <span className="text-white font-semibold">ENV Variables</span>
+                            </div>
+                            <button onClick={() => setShowEnvModal(false)} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
+                        </div>
+                        <p className="text-xs text-gray-500 mb-4">Your values are <strong className="text-green-400">private</strong> — only key names are shared with your partner. Values are stored locally and included in your download.</p>
+
+                        {/* Add / Edit row */}
+                        <div className="flex gap-2 mb-4">
+                            <input
+                                value={newEnvKey}
+                                onChange={e => setNewEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                                placeholder="KEY_NAME"
+                                className="flex-1 bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 focus:border-green-500 outline-none"
+                            />
+                            <input
+                                value={newEnvValue}
+                                onChange={e => setNewEnvValue(e.target.value)}
+                                placeholder="value"
+                                type="text"
+                                className="flex-1 bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 focus:border-green-500 outline-none"
+                            />
+                            <button
+                                onClick={() => {
+                                    if (!newEnvKey.trim()) return;
+                                    setMyEnvVars(prev => {
+                                        let next: { key: string; value: string }[];
+                                        if (editingEnvIdx !== null) {
+                                            next = prev.map((e, i) => i === editingEnvIdx ? { key: newEnvKey, value: newEnvValue } : e);
+                                        } else {
+                                            const existing = prev.findIndex(e => e.key === newEnvKey);
+                                            if (existing >= 0) {
+                                                next = prev.map((e, i) => i === existing ? { key: newEnvKey, value: newEnvValue } : e);
+                                            } else {
+                                                next = [...prev, { key: newEnvKey, value: newEnvValue }];
+                                            }
+                                        }
+                                        localStorage.setItem(ENV_STORE_KEY, JSON.stringify(next));
+                                        // Write real .env to WebContainer (for code to use)
+                                        if (webcontainerRef.current) {
+                                            const content = next.map(e => `${e.key}=${e.value}`).join('\n') + '\n';
+                                            webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
+                                        }
+                                        // Broadcast ONLY key names to partner
+                                        const socket = socketService.getSocket();
+                                        socket?.emit('env:keys-sync', { sessionId, keys: next.map(e => e.key) });
+                                        return next;
+                                    });
+                                    setNewEnvKey(''); setNewEnvValue(''); setEditingEnvIdx(null);
+                                }}
+                                disabled={!newEnvKey.trim()}
+                                className="px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap"
+                            >
+                                {editingEnvIdx !== null ? 'Update' : 'Add'}
+                            </button>
+                            {editingEnvIdx !== null && (
+                                <button onClick={() => { setEditingEnvIdx(null); setNewEnvKey(''); setNewEnvValue(''); }}
+                                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg">Cancel</button>
+                            )}
+                        </div>
+
+                        {/* My vars */}
+                        {myEnvVars.length > 0 && (
+                            <div className="mb-4">
+                                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">🔑 My Variables ({myEnvVars.length})</p>
+                                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                    {myEnvVars.map((e, i) => (
+                                        <div key={i} className="flex items-center gap-2 bg-[#0d1117] border border-gray-800 rounded-lg px-3 py-2 group">
+                                            <span className="text-green-400 font-mono text-xs flex-shrink-0">{e.key}</span>
+                                            <span className="text-gray-500 text-xs">=</span>
+                                            <span className="text-gray-300 font-mono text-xs flex-1 truncate">{e.value || <em className="text-gray-600">empty</em>}</span>
+                                            <button onClick={() => { setEditingEnvIdx(i); setNewEnvKey(e.key); setNewEnvValue(e.value); }}
+                                                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-400 transition-all"><Pencil className="w-3 h-3" /></button>
+                                            <button onClick={() => {
+                                                setMyEnvVars(prev => {
+                                                    const next = prev.filter((_, idx) => idx !== i);
+                                                    localStorage.setItem(ENV_STORE_KEY, JSON.stringify(next));
+                                                    if (webcontainerRef.current) {
+                                                        const content = next.map(ev => `${ev.key}=${ev.value}`).join('\n') + '\n';
+                                                        webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
+                                                    }
+                                                    const socket = socketService.getSocket();
+                                                    socket?.emit('env:keys-sync', { sessionId, keys: next.map(ev => ev.key) });
+                                                    return next;
+                                                });
+                                            }} className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-400 transition-all"><Trash2 className="w-3 h-3" /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Partner keys (read-only, values hidden) */}
+                        {partnerEnvKeys.length > 0 && (
+                            <div>
+                                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">🔒 Partner's Variables (keys only)</p>
+                                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                                    {partnerEnvKeys.map((k, i) => (
+                                        <div key={i} className="flex items-center gap-2 bg-[#0d1117] border border-gray-800/50 rounded-lg px-3 py-2 opacity-60">
+                                            <span className="text-yellow-400 font-mono text-xs">{k}</span>
+                                            <span className="text-gray-600 text-xs">=</span>
+                                            <span className="text-gray-600 font-mono text-xs">{'•'.repeat(12)}</span>
+                                            <Lock className="w-3 h-3 text-gray-600 ml-auto" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {myEnvVars.length === 0 && partnerEnvKeys.length === 0 && (
+                            <p className="text-center text-xs text-gray-600 py-4">No env variables yet. Add your first key above.</p>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* ===== Push to GitHub Modal ===== */}
             {showGithubModal && (
