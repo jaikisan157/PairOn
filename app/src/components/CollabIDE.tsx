@@ -2923,9 +2923,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
 
 
-            )}
-
-            {/* ===== Push to GitHub Modal ===== */}
             {showGithubModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => !githubPushing && setShowGithubModal(false)}>
                     <div className="w-full max-w-md bg-[#161b22] border border-gray-700 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
