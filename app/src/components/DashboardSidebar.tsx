@@ -9,6 +9,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  MessageSquare,
 } from 'lucide-react';
 
 interface DashboardSidebarProps {
@@ -22,6 +23,7 @@ const navItems = [
   { icon: Zap, label: 'Quick Connect', path: '/quick-connect' },
   { icon: Users, label: 'Friends', path: '/friends' },
   { icon: FolderOpen, label: 'Projects', path: '/projects' },
+  { icon: MessageSquare, label: 'Community', path: '/community' },
   { icon: Award, label: 'Credits', path: '/credits' },
 ];
 
@@ -30,6 +32,7 @@ const mobileNavItems = [
   { icon: LayoutDashboard, label: 'Home', path: '/dashboard' },
   { icon: Zap, label: 'Connect', path: '/quick-connect' },
   { icon: Users, label: 'Friends', path: '/friends' },
+  { icon: MessageSquare, label: 'Community', path: '/community' },
   { icon: FolderOpen, label: 'Projects', path: '/projects' },
   { icon: User, label: 'Profile', path: '/profile' },
 ];
@@ -160,14 +163,6 @@ export function DashboardSidebar({ onLogout, expanded, onToggle }: DashboardSide
               </button>
             );
           })}
-          {/* Logout button */}
-          <button
-            onClick={onLogout}
-            className="relative flex flex-col items-center justify-center gap-0.5 flex-1 py-1 text-gray-400 hover:text-red-500 transition-colors"
-          >
-            <LogOut className="w-5 h-5" />
-            <span className="text-[10px] font-medium">Logout</span>
-          </button>
         </div>
       </nav>
     </>

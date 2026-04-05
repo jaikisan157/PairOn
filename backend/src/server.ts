@@ -36,6 +36,7 @@ import creditRoutes from './routes/credits';
 import friendRoutes from './routes/friends';
 import dmRoutes from './routes/dm';
 import projectRoutes from './routes/projects';
+import feedbackRoutes from './routes/feedback';
 
 // Import socket handler
 import { setupSocketHandlers } from './services/socket';
@@ -100,6 +101,7 @@ app.use('/api/users', apiLimiter, userRoutes);
 app.use('/api/friends', apiLimiter, friendRoutes);
 app.use('/api/dm', apiLimiter, dmRoutes);
 app.use('/api/projects', apiLimiter, projectRoutes);
+app.use('/api/feedback', apiLimiter, feedbackRoutes);
 app.use('/api', apiLimiter, creditRoutes);
 
 // Health check

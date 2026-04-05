@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, UserPlus, UserCheck, Clock, Star, Loader2, UserX } from 'lucide-react';
+import { X, UserPlus, UserCheck, Clock, Star, Loader2, UserX, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface UserProfileModalProps {
@@ -206,6 +206,38 @@ export function UserProfileModal({ userId, userName, userReputation, isOnline, o
                             {message && (
                                 <p className="text-center text-xs text-gray-500 dark:text-gray-400 mt-2">{message}</p>
                             )}
+
+                            {/* Report User functionality */}
+                            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                                <button
+                                    onClick={async () => {
+                                        if (!confirm('Are you sure you want to report this user to moderation?')) return;
+                                        setActionLoading(true);
+                                        try {
+                                            const token = localStorage.getItem('pairon_token');
+                                            await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/feedback`, {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                                body: JSON.stringify({
+                                                    title: `[USER REPORT] ${userName}`,
+                                                    description: `User ID: ${userId}\nReason: Disruptive behavior / Abuse during collaboration.`,
+                                                    category: 'general'
+                                                })
+                                            });
+                                            setMessage('User reported to moderation.');
+                                        } catch (err) {
+                                            setMessage('Failed to report user.');
+                                        } finally {
+                                            setActionLoading(false);
+                                        }
+                                    }}
+                                    disabled={actionLoading}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 font-medium rounded-xl transition-colors text-xs"
+                                >
+                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                    Report Partner
+                                </button>
+                            </div>
                         </>
                     )}
                 </div>

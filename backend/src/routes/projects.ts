@@ -38,6 +38,37 @@ router.get('/', authMiddleware, async (req: any, res: any) => {
   }
 });
 
+// GET /api/projects/user/:userId — fetch public projects for a specific user
+router.get('/user/:userId', authMiddleware, async (req: any, res: any) => {
+  try {
+    const { userId } = req.params;
+    const projects = await Project.find({ userId })
+      .sort({ savedAt: -1 })
+      .limit(10)
+      .lean();
+
+    res.json({
+      projects: projects.map((p: any) => ({
+        id: p._id.toString(),
+        sessionId: p.sessionId,
+        partnerName: p.partnerName,
+        partnerId: p.partnerId,
+        mode: p.mode,
+        projectIdea: p.projectIdea,
+        status: p.status,
+        startedAt: p.startedAt,
+        endsAt: p.endsAt,
+        submissionLink: p.submissionLink,
+        submissionDesc: p.submissionDesc,
+        savedAt: p.savedAt,
+      })),
+    });
+  } catch (error) {
+    console.error('[Projects] GET user projects error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // POST /api/projects — save or upsert a project for the logged-in user
 router.post('/', authMiddleware, async (req: any, res: any) => {
   try {

@@ -47,14 +47,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setThemeState(newTheme);
   }, []);
 
-  // Prevent flash of wrong theme
-  if (!mounted) {
-    return <>{children}</>;
-  }
-
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
-      {children}
+      <div style={{ visibility: !mounted ? 'hidden' : 'visible' }} className="contents">
+        {children}
+      </div>
     </ThemeContext.Provider>
   );
 }

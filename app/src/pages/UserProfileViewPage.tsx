@@ -31,6 +31,8 @@ export function UserProfileViewPage() {
   const [isFriend, setIsFriend] = useState(false);
   const [friendRequestSent, setFriendRequestSent] = useState(false);
   const [sendingRequest, setSendingRequest] = useState(false);
+  const [profileProjects, setProfileProjects] = useState<any[]>([]);
+  const [profileProjectsLoading, setProfileProjectsLoading] = useState(true);
 
   useEffect(() => {
     if (!userId) return;
@@ -44,6 +46,18 @@ export function UserProfileViewPage() {
       .then(r => r.json())
       .then(data => { setProfile(data); setLoading(false); })
       .catch(() => { setError('Could not load profile.'); setLoading(false); });
+
+    // Fetch user public projects
+    api.getUserProjects(userId)
+      .then(data => {
+        setProfileProjects(data.projects || []);
+      })
+      .catch(() => {
+        setProfileProjects([]);
+      })
+      .finally(() => {
+        setProfileProjectsLoading(false);
+      });
 
     // Check if already friends
     api.getFriends().then(data => {
@@ -233,6 +247,53 @@ export function UserProfileViewPage() {
             </div>
           </motion.div>
         )}
+
+        {/* Public Projects */}
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white dark:bg-gray-800 rounded-2xl sm:rounded-[24px] shadow-card p-5 sm:p-6">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <CheckCircle className="w-3.5 h-3.5" /> Recent Projects
+          </h3>
+          <div className="space-y-4">
+            {profileProjectsLoading ? (
+              <div className="flex justify-center py-4">
+                <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+              </div>
+            ) : profileProjects.length > 0 ? (
+              profileProjects.map((proj) => (
+                <div key={proj.id} className="p-4 rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-gray-900 dark:text-white truncate">
+                      {proj.projectIdea?.title || 'Untitled Project'}
+                    </h4>
+                    {proj.projectIdea?.description && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-1 mt-1">
+                        {proj.projectIdea.description}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="bg-pairon-bg dark:bg-gray-700 px-2 py-0.5 rounded-full capitalize">
+                        {proj.mode}
+                      </span>
+                      <span>• Built with {proj.partnerName || 'Unknown'}</span>
+                    </div>
+                  </div>
+                  {proj.submissionLink && (
+                    <a
+                      href={proj.submissionLink?.match(/^https?:\/\//i) ? proj.submissionLink : `https://${proj.submissionLink}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 bg-pairon-accent hover:bg-pairon-accent/90 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+                    >
+                      View Code
+                    </a>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-gray-400 dark:text-gray-500 italic">No public projects to display yet</p>
+            )}
+          </div>
+        </motion.div>
       </main>
     </div>
   );

@@ -12,3 +12,4 @@ export { FriendsPage } from './FriendsPage';
 export { MessagesPage } from './MessagesPage';
 export { UserProfileViewPage } from './UserProfileViewPage';
 export { ProjectsPage } from './ProjectsPage';
+export { CommunityPage } from './CommunityPage';

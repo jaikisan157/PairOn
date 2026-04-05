@@ -11,6 +11,8 @@ import {
     MoreVertical, Search, Package, Settings2, RotateCcw, Upload,
 } from 'lucide-react';
 import { socketService } from '@/lib/socket';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import type * as MonacoTypes from 'monaco-editor';
 import {
     useToasts, ToastContainer, Breadcrumb, usePanelResize, ResizeDivider,
@@ -86,7 +88,7 @@ const DEFAULT_FILES: Record<string, string> = {
     'tsconfig.json': JSON.stringify({ compilerOptions: { target: 'ES2020', useDefineForClassFields: true, lib: ['ES2020', 'DOM', 'DOM.Iterable'], module: 'ESNext', skipLibCheck: true, moduleResolution: 'bundler', allowImportingTsExtensions: true, resolveJsonModule: true, isolatedModules: true, noEmit: true, jsx: 'react-jsx', strict: true }, include: ['src'] }, null, 2),
     'vite.config.ts': `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n})`,
     'src/main.tsx': `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App'\nimport './index.css'\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n)`,
-    'src/App.tsx': `import { useState } from 'react'\n\nfunction App() {\n  const [count, setCount] = useState(0)\n  return (\n    <div style={{ fontFamily: 'system-ui', padding: '2rem', textAlign: 'center' }}>\n      <h1>🚀 PairOn Project</h1>\n      <p>Start building together!</p>\n      <button onClick={() => setCount(c => c + 1)} style={{ padding: '0.5rem 1rem', fontSize: '1rem', cursor: 'pointer' }}>\n        Count: {count}\n      </button>\n    </div>\n  )\n}\nexport default App`,
+    'src/App.tsx': `import { useState } from \'react\'\n\nfunction App() {\n  const [count, setCount] = useState(0)\n  return (\n    <div style={{ fontFamily: \'system-ui\', padding: \'2rem\', textAlign: \'center\' }}>\n      <h1>🚀 PairOn Project</h1>\n      <p>Start building together!</p>\n      <button onClick={() => setCount(c => c + 1)} style={{ padding: \'0.5rem 1rem\', fontSize: \'1rem\', cursor: \'pointer\' }}>\n        Count: {count}\n      </button>\n    </div>\n  )\n}\nexport default App`,
     'src/index.css': `* { margin: 0; padding: 0; box-sizing: border-box; }\nbody { font-family: system-ui, -apple-system, sans-serif; background: #0f0f1a; color: #e2e8f0; }\n`,
 };
 
@@ -295,61 +297,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const foldersRef = useRef<Set<string>>(new Set());
     const previewUrlRef = useRef<string>('');
     const stateUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    // ── Secure Env Manager ──────────────────────────────────────────────────
-    // My vars: stored in localStorage. Partner's vars: in memory only (received via socket).
-    // The .env file is a REAL file in the Monaco editor — we just control what each side sees.
-    const ENV_STORE_KEY = `pairon_env_vars_${sessionId}_${userId}`;
-    const myEnvVarsRef = useRef<{ key: string; value: string }[]>([]);
-    // Initialize from localStorage once
-    if (myEnvVarsRef.current.length === 0) {
-        try { myEnvVarsRef.current = JSON.parse(localStorage.getItem(ENV_STORE_KEY) || '[]'); } catch { /* keep [] */ }
-    }
-    const partnerEnvVarsRef = useRef<{ key: string; value: string }[]>([]);
-    const [partnerEnvKeys, setPartnerEnvKeys] = useState<string[]>([]);
-    // Persist partner KEY NAMES across refreshes (values stay memory-only)
-    // MUST include userId so two users on same browser don't overwrite each other's stored keys
-    const PARTNER_KEYS_STORE = `pairon_partner_env_keys_${sessionId}_${userId}`;
-    const envRevertingRef = useRef(false); // prevent recursion when reverting partner lines
-    const envEmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // debounce env emit
 
-    /** Build the display text for .env in Monaco:
-     *  - My lines: KEY=real_value  (editable)
-     *  - Partner lines: KEY=••••••••••••  (visually read-only via masking) */
-    const rebuildEnvDisplay = useCallback((myVars: { key: string; value: string }[], partnerVars: { key: string; value: string }[]): string => {
-        const lines: string[] = [];
-        if (myVars.length > 0) {
-            lines.push('# My variables (private — only you can see the values)');
-            for (const { key, value } of myVars) lines.push(`${key}=${value}`);
-        }
-        if (partnerVars.length > 0) {
-            if (lines.length > 0) lines.push('');
-            lines.push("# Partner's variables (values hidden for privacy)");
-            for (const { key } of partnerVars) lines.push(`${key}=${'•'.repeat(12)}`);
-        }
-        if (lines.length === 0) {
-            lines.push('# Add your environment variables below');
-            lines.push('# Format: KEY=value');
-            lines.push('# Example: VITE_API_KEY=your_api_key_here');
-        }
-        return lines.join('\n') + '\n';
-    }, []);
-
-    /** Parse .env content typed by the user — extract only MY keys (skip partner's masked lines) */
-    const parseEnvMyVars = useCallback((content: string, partnerKeys: Set<string>): { key: string; value: string }[] => {
-        const result: { key: string; value: string }[] = [];
-        for (const line of content.split('\n')) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) continue;
-            const eqIdx = trimmed.indexOf('=');
-            if (eqIdx < 0) continue;
-            const key = trimmed.slice(0, eqIdx).trim();
-            const value = trimmed.slice(eqIdx + 1); // keep value as-is
-            if (!key || partnerKeys.has(key)) continue; // skip partner's keys
-            if (value.startsWith('•')) continue; // skip masked lines (partner lines)
-            result.push({ key, value });
-        }
-        return result;
-    }, []);
     // Track when the local user last edited a file (to skip remote model updates during active typing)
     const locallyEditingRef = useRef<{ path: string; time: number }>({ path: '', time: 0 });
     // Line authorship: Map<filePath, Map<lineNumber, 'local' | 'partner'>>
@@ -444,50 +392,61 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         return model;
     }, []);
 
-    // Helper to mask .env values (used in switchToFile and handleFileChange)
-    const maskEnvContent = useCallback((content: string) => content.split('\n').map(line => {
-        if (!line.trim() || line.startsWith('#')) return line;
-        const eqIdx = line.indexOf('=');
-        if (eqIdx < 0) return line;
-        return line.slice(0, eqIdx + 1) + '\u2022'.repeat(Math.max(8, line.length - eqIdx - 1));
-    }).join('\n'), []);
 
-    // With the new env manager, .env files are never in the shared files object.
-    // This helper is kept as a no-op to avoid breaking any call sites.
-    const isPartnerEnv = useCallback((_path: string) => false, []);
 
     const switchToFile = useCallback((path: string) => {
         const editor = editorRef.current;
         const rawContent = filesRef.current[path] ?? '';
-        // If this is partner's .env, show masked values
-        const isPartnerEnvFile = isPartnerEnv(path);
-        const displayContent = isPartnerEnvFile ? maskEnvContent(rawContent) : rawContent;
-        const model = getOrCreateModel(path, displayContent);
+        const model = getOrCreateModel(path, rawContent);
         if (editor && model) {
             editor.setModel(model);
-            if (model.getValue() !== displayContent) { suppressSyncRef.current = true; model.setValue(displayContent); suppressSyncRef.current = false; }
-            // Make editor read-only for partner's .env
-            editor.updateOptions({ readOnly: isPartnerEnvFile });
+            if (model.getValue() !== rawContent) { suppressSyncRef.current = true; model.setValue(rawContent); suppressSyncRef.current = false; }
         }
         setActiveFile(path);
         if (!openTabs.includes(path)) setOpenTabs(prev => [...prev, path]);
-    }, [getOrCreateModel, openTabs, isPartnerEnv, maskEnvContent]);
+    }, [getOrCreateModel, openTabs]);
 
     // ===== Line authorship decorations (typing indicator) =====
     const updateLineDecorations = useCallback((editor: MonacoTypes.editor.IStandaloneCodeEditor, filePath: string) => {
         const authors = lineAuthorsRef.current.get(filePath);
-        if (!authors || authors.size === 0) { decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []); return; }
         const newDecorations: MonacoTypes.editor.IModelDeltaDecoration[] = [];
-        authors.forEach((author, line) => {
-            newDecorations.push({
-                range: { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: 1 },
-                options: {
-                    isWholeLine: true,
-                    linesDecorationsClassName: author === 'local' ? 'line-author-local' : 'line-author-partner',
-                    overviewRuler: { color: author === 'local' ? '#3b82f6' : '#22c55e', position: 1 },
-                },
+        
+        if (authors && authors.size > 0) {
+            authors.forEach((author, line) => {
+                newDecorations.push({
+                    range: { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: 1 },
+                    options: {
+                        isWholeLine: true,
+                        linesDecorationsClassName: author === 'local' ? 'line-author-local' : 'line-author-partner',
+                        overviewRuler: { color: author === 'local' ? '#3b82f6' : '#22c55e', position: 1 },
+                    },
+                });
             });
-        });
+        }
+
+        // Add row locks for .env partner lines
+        if (filePath === '.env') {
+            const model = editor.getModel();
+            if (model) {
+                const lines = model.getLinesContent();
+                lines.forEach((text, i) => {
+                    // Check if value is purely dots
+                    const eqIdx = text.indexOf('=');
+                    if (eqIdx > 0 && text.slice(eqIdx + 1).trim() === '••••••••••••') {
+                        const line = i + 1;
+                        newDecorations.push({
+                            range: { startLineNumber: line, endLineNumber: line, startColumn: 1, endColumn: text.length + 1 },
+                            options: {
+                                isWholeLine: true,
+                                inlineClassName: 'opacity-50 select-none cursor-not-allowed',
+                                className: 'bg-yellow-500/10'
+                            }
+                        });
+                    }
+                });
+            }
+        }
+        
         decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
     }, []);
 
@@ -580,57 +539,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             const path = currentModel.uri.path.slice(1); // Remove leading /
             const value = currentModel.getValue();
 
-            // ── Special handling for .env: parse MY vars, protect partner lines ──
-            if (path === '.env') {
-                if (envRevertingRef.current) { envRevertingRef.current = false; return; } // guard against recursion
-
-                // Build the set of ALL partner keys (memory + persisted from localStorage for post-refresh)
-                const livePartnerKeys = new Set(partnerEnvVarsRef.current.map(e => e.key));
-                const storedPartnerKeys: string[] = (() => { try { return JSON.parse(localStorage.getItem(PARTNER_KEYS_STORE) || '[]'); } catch { return []; } })();
-                const allPartnerKeys = new Set([...livePartnerKeys, ...storedPartnerKeys]);
-
-                // Revert any partner row that the user tried to edit
-                const lines = currentModel.getLinesContent();
-                const edits: import('monaco-editor').editor.IIdentifiedSingleEditOperation[] = [];
-                lines.forEach((line, idx) => {
-                    const lineNum = idx + 1;
-                    const trimmed = line.trim();
-                    if (!trimmed || trimmed.startsWith('#')) return;
-                    const eqIdx = line.indexOf('=');
-                    if (eqIdx < 0) return;
-                    const key = line.slice(0, eqIdx).trim();
-                    if (!allPartnerKeys.has(key)) return;
-                    const maskedLine = `${key}=${'\u2022'.repeat(12)}`;
-                    if (line !== maskedLine) {
-                        edits.push({ range: { startLineNumber: lineNum, startColumn: 1, endLineNumber: lineNum, endColumn: line.length + 1 }, text: maskedLine });
-                    }
-                });
-                if (edits.length > 0) {
-                    envRevertingRef.current = true;
-                    currentModel.pushEditOperations(editorRef.current?.getSelections() ?? [], edits, () => null);
-                    return; // the pushEditOperations fires onChange again, which exits early via envRevertingRef guard
-                }
-
-                // Parse MY vars (skip partner keys + masked lines)
-                const myVars = parseEnvMyVars(currentModel.getValue(), allPartnerKeys);
-                myEnvVarsRef.current = myVars;
-                localStorage.setItem(ENV_STORE_KEY, JSON.stringify(myVars));
-
-                // Debounce: write to WebContainer + emit to partner (150ms for near-real-time feel)
-                if (envEmitTimerRef.current) clearTimeout(envEmitTimerRef.current);
-                envEmitTimerRef.current = setTimeout(() => {
-                    const merged = new Map<string, string>();
-                    for (const e of partnerEnvVarsRef.current) merged.set(e.key, e.value);
-                    for (const e of myVars) merged.set(e.key, e.value);
-                    if (merged.size > 0 && webcontainerRef.current) {
-                        const real = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
-                        webcontainerRef.current.fs.writeFile('.env', real).catch(() => {});
-                    }
-                    socketService.getSocket()?.emit('env:vars-sync', { sessionId, vars: myVars });
-                }, 150);
-
-                return; // .env is never sent via code:file-change
-            }
             // Mark this file as locally edited RIGHT NOW
             locallyEditingRef.current = { path, time: Date.now() };
             // Track line authorship for typing indicator
@@ -653,6 +561,33 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             socket?.emit('code:file-change', { sessionId, path, content: value, senderId: socket.id });
             // Lock file
             lockFile(path);
+        });
+
+        editor.onKeyDown((e) => {
+            const currentModel = editor.getModel();
+            if (currentModel?.uri.path.slice(1) === '.env') {
+                const pos = editor.getPosition();
+                if (pos) {
+                    const text = currentModel.getLineContent(pos.lineNumber);
+                    const eqIdx = text.indexOf('=');
+                    if (eqIdx > 0 && text.slice(eqIdx + 1).trim() === '••••••••••••') {
+                        // Prevent backspace, delete, enter, and typical character inputs
+                        // Standard movement keys are allowed
+                        const allowed = [
+                            monaco.KeyCode.UpArrow, monaco.KeyCode.DownArrow, 
+                            monaco.KeyCode.LeftArrow, monaco.KeyCode.RightArrow,
+                            monaco.KeyCode.Home, monaco.KeyCode.End,
+                            monaco.KeyCode.PageUp, monaco.KeyCode.PageDown,
+                            monaco.KeyCode.Escape, monaco.KeyCode.Ctrl, monaco.KeyCode.Alt,
+                            monaco.KeyCode.Shift, monaco.KeyCode.Meta
+                        ];
+                        if (!allowed.includes(e.keyCode) && !e.ctrlKey && !e.metaKey) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                    }
+                }
+            }
         });
 
         // Add "Comment on Line" action to editor context menu
@@ -686,9 +621,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.open(container);
         setTimeout(() => { try { fitAddon.fit(); } catch { /* */ } }, 100);
         xtermRef.current = term; fitAddonRef.current = fitAddon;
-        term.writeln('\x1b[1;35m╔══════════════════════════════════════════════════╗\x1b[0m');
+        term.writeln('\x1b[1;35m╔══════════════════════════════════════════════════════════════════════╗\x1b[0m');
         term.writeln('\x1b[1;35m║        🚀 PairOn Collaborative IDE          ║\x1b[0m');
-        term.writeln('\x1b[1;35m╚══════════════════════════════════════════════════╝\x1b[0m');
+        term.writeln('\x1b[1;35m╚══════════════════════════════════════════════════════════════════════╝\x1b[0m');
         term.writeln('');
         term.writeln('\x1b[1;37m  This IDE runs Node.js in the browser (WebContainers).\x1b[0m');
         term.writeln('\x1b[1;37m  It only supports HTTP connections — no raw TCP sockets.\x1b[0m');
@@ -696,9 +631,9 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         term.writeln('\x1b[1;32m  ✅ WILL WORK:\x1b[0m JS, TS, React, Vue, Svelte, Next.js, Express');
         term.writeln('\x1b[1;31m  ❌ WON\'T WORK:\x1b[0m Python, Java, Go, MongoDB, PostgreSQL (need TCP)');
         term.writeln('');
-        term.writeln('\x1b[1;36m  ⌨  Shortcuts:\x1b[0m Ctrl+S = Format  │  Ctrl+Shift+F = Search  │  Ctrl+P = Quick Open');
+        term.writeln('\x1b[1;36m  ⌨️  Shortcuts:\x1b[0m Ctrl+S = Format  │  Ctrl+Shift+F = Search  │  Ctrl+P = Quick Open');
         term.writeln('\x1b[1;36m  📦 Packages:\x1b[0m  Click the package icon in the toolbar to manage npm dependencies');
-        term.writeln('\x1b[33m  Click ▶ Run or type commands below.\x1b[0m');
+        term.writeln('\x1b[33m  Click ▶️ Run or type commands below.\x1b[0m');
         term.writeln('');
 
         // Pipe keyboard input to the active shell process, and emit lock to partner
@@ -778,16 +713,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const socket = socketService.getSocket();
         if (!socket) return;
 
-        // Helper: mask .env values (keeps key names, replaces values with dots)
-        const maskEnvValues = (content: string) => content.split('\n').map(line => {
-            if (!line.trim() || line.startsWith('#')) return line;
-            const eqIdx = line.indexOf('=');
-            if (eqIdx < 0) return line;
-            return line.slice(0, eqIdx + 1) + '\u2022'.repeat(Math.max(8, line.length - eqIdx - 1));
-        }).join('\n');
-
-        // .env files are no longer in the shared files object — env is managed via Env Manager.
-        const isPartnerEnvFile = (_path: string) => false;
 
         const handleFileChange = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
@@ -818,17 +743,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 }
             }
 
-            // Safe to update model — file is not being locally edited
-            // For partner's .env, show masked values in the editor
-            const displayContent = isPartnerEnvFile(data.path) ? maskEnvValues(data.content) : data.content;
-            if (model && !model.isDisposed() && model.getValue() !== displayContent) {
+            if (model && !model.isDisposed() && model.getValue() !== data.content) {
                 suppressSyncRef.current = true;
                 const editor = editorRef.current;
                 const isActiveModel = editor?.getModel() === model;
                 const savedPosition = isActiveModel ? editor?.getPosition() : null;
                 const savedScroll = isActiveModel ? editor?.getScrollTop() : null;
                 const fullRange = model.getFullModelRange();
-                model.pushEditOperations([], [{ range: fullRange, text: displayContent, forceMoveMarkers: false }], () => null);
+                model.pushEditOperations([], [{ range: fullRange, text: data.content, forceMoveMarkers: false }], () => null);
                 if (isActiveModel && editor) {
                     if (savedPosition) editor.setPosition(savedPosition);
                     if (savedScroll !== null) editor.setScrollTop(savedScroll);
@@ -838,10 +760,58 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
             }
             if (webcontainerRef.current) webcontainerRef.current.fs.writeFile(data.path, data.content).catch(() => { });
         };
+
+        const handleEnvUpdate = (data: { path: string; maskedContent: string; primalContent: string; senderId: string; sessionId: string }) => {
+            // Write true primal value to WebContainer for execution (so process.env works)
+            if (webcontainerRef.current) webcontainerRef.current.fs.writeFile('.env', data.primalContent).catch(() => { });
+            
+            // If we are actively editing, don't brutally overwrite the Monaco model unless it's genuinely out of sync, 
+            // but we DO save the maskedContent to files so it's correct.
+            setFiles(prev => ({ ...prev, ['.env']: data.maskedContent }));
+            filesRef.current = { ...filesRef.current, ['.env']: data.maskedContent };
+            
+            // For the sender, avoid overwriting Monaco right while they are typing (unless they're no longer typing).
+            // Actually, we must overwrite if they illegally modified a masked row. We will handle that via onKeyDown to prevent illegal edits,
+            // so here we ONLY overwrite if wait > 500ms since last local edit, OR it's from partner.
+            const isLocalSender = data.senderId === socket.id;
+            const timeSinceLastEdit = Date.now() - locallyEditingRef.current.time;
+            if (isLocalSender && timeSinceLastEdit < 1000) return; // let them type
+            
+            const model = modelsRef.current.get('.env');
+            if (model && !model.isDisposed() && model.getValue() !== data.maskedContent) {
+                suppressSyncRef.current = true;
+                const editor = editorRef.current;
+                const isActiveModel = editor?.getModel() === model;
+                const savedPosition = isActiveModel ? editor?.getPosition() : null;
+                const savedScroll = isActiveModel ? editor?.getScrollTop() : null;
+                const fullRange = model.getFullModelRange();
+                model.pushEditOperations([], [{ range: fullRange, text: data.maskedContent, forceMoveMarkers: false }], () => null);
+                
+                // Track remote authorship for typing indicator perception
+                if (!isLocalSender) {
+                    if (!lineAuthorsRef.current.has('.env')) lineAuthorsRef.current.set('.env', new Map());
+                    const authors = lineAuthorsRef.current.get('.env')!;
+                    // Simplified: Since we replaced the file, mark lines differing from what was typed locally?
+                    // Actually, for simplicity and UX, let's just mark the locked rows as 'partner' so they glow green and pulse
+                    const lines = data.maskedContent.split('\n');
+                    lines.forEach((text, i) => {
+                        const eqIdx = text.indexOf('=');
+                        if (eqIdx > 0 && text.slice(eqIdx + 1).trim() === '••••••••••••') {
+                            authors.set(i + 1, 'partner');
+                        }
+                    });
+                }
+
+                if (isActiveModel && editor) {
+                    if (savedPosition) editor.setPosition(savedPosition);
+                    if (savedScroll !== null) editor.setScrollTop(savedScroll);
+                    updateLineDecorations(editor, '.env');
+                }
+                suppressSyncRef.current = false;
+            }
+        };
         const handleFileCreate = (data: { path: string; content: string; senderId: string }) => {
             if (data.senderId === socket.id) return;
-            // .env files are managed via the secure Env Manager — never shared as files
-            if (data.path === '.env' || data.path.startsWith('.env.')) return;
             setFiles(prev => { const next = { ...prev, [data.path]: data.content }; autosave(next); return next; });
             if (webcontainerRef.current) {
                 const dir = data.path.split('/').slice(0, -1).join('/');
@@ -909,6 +879,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         };
 
         socket.on('code:file-change', handleFileChange);
+        socket.on('code:env-update', handleEnvUpdate);
         socket.on('code:file-create', handleFileCreate);
         socket.on('code:file-delete', handleFileDelete);
         socket.on('code:file-rename', handleFileRename);
@@ -916,62 +887,17 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         socket.on('code:file-unlock', handleFileUnlock);
         socket.on('code:comment', handleComment);
 
-        // ── Env: receive partner's full vars (write to WebContainer, update .env display) ──
-        const writeEnvToWC = (myVars: { key: string; value: string }[], partnerVars: { key: string; value: string }[]) => {
-            if (!webcontainerRef.current) return;
-            const merged = new Map<string, string>();
-            for (const e of partnerVars) merged.set(e.key, e.value);
-            for (const e of myVars) merged.set(e.key, e.value);
-            if (merged.size === 0) return;
-            const content = [...merged.entries()].map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
-            webcontainerRef.current.fs.writeFile('.env', content).catch(() => {});
-        };
-        const handleEnvVarsSync = (data: { vars: { key: string; value: string }[] }) => {
-            const vars = data.vars ?? [];
-            partnerEnvVarsRef.current = vars;
-            // Persist partner KEY NAMES to localStorage so they survive page refresh
-            localStorage.setItem(PARTNER_KEYS_STORE, JSON.stringify(vars.map(e => e.key)));
-            setPartnerEnvKeys(vars.map(e => e.key));
-            // Write real .env so both users' process.env values are accessible
-            writeEnvToWC(myEnvVarsRef.current, vars);
-            // Rebuild the .env display in Monaco (my real values + partner masked)
-            // Only update Monaco model if values section actually changed (avoid disrupting active typing)
-            const displayContent = rebuildEnvDisplay(myEnvVarsRef.current, vars);
-            // Update React files state AND filesRef so both the file tree and model creation stay in sync
-            setFiles(prev => ({ ...prev, '.env': displayContent }));
-            filesRef.current['.env'] = displayContent;
-            const model = modelsRef.current.get('.env');
-            if (model && !model.isDisposed() && model.getValue() !== displayContent) {
-                suppressSyncRef.current = true;
-                model.setValue(displayContent);
-                suppressSyncRef.current = false;
-            }
-        };
-        socket.on('env:vars-sync', handleEnvVarsSync);
-        // On join: broadcast our full vars so partner's WebContainer gets them
-        const savedEnvVars: { key: string; value: string }[] = (() => {
-            try { return JSON.parse(localStorage.getItem(ENV_STORE_KEY) || '[]'); } catch { return []; }
-        })();
-        if (savedEnvVars.length > 0) {
-            socket.emit('env:vars-sync', { sessionId, vars: savedEnvVars });
-        }
-        // Clean up old buggy key (no userId suffix) to prevent stale data from the old implementation
-        localStorage.removeItem(`pairon_partner_env_keys_${sessionId}`);
-        // Inject .env into files state — include saved partner key names from localStorage so they survive refresh
-        const savedPartnerKeyNames: string[] = (() => { try { return JSON.parse(localStorage.getItem(PARTNER_KEYS_STORE) || '[]'); } catch { return []; } })();
-        // Build fake partner entries for display (masked, real values will come when partner reconnects)
-        const fakePartnerEntries = savedPartnerKeyNames.map(k => ({ key: k, value: '\u2022'.repeat(12) }));
-        if (savedPartnerKeyNames.length > 0) setPartnerEnvKeys(savedPartnerKeyNames);
-        const initialDisplay = rebuildEnvDisplay(savedEnvVars, fakePartnerEntries);
-        setFiles(prev => ({ ...prev, '.env': initialDisplay }));
-        filesRef.current['.env'] = initialDisplay;
-
         // ===== IDE state sync handlers =====
         const handleStateSnapshot = (data: { files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
-            // Never let the shared snapshot overwrite .env — each user manages their own
-            const { '.env': _ignored, ...sharedFiles } = data.files;
-            setFiles(prev => ({ ...sharedFiles, '.env': prev['.env'] ?? '' }));
-            filesRef.current = { ...sharedFiles, '.env': filesRef.current['.env'] ?? '' };
+            setFiles(prev => {
+                const newFiles = { ...data.files };
+                if (prev['.env'] !== undefined && newFiles['.env'] === undefined) {
+                    newFiles['.env'] = prev['.env'];
+                }
+                filesRef.current = newFiles;
+                return newFiles;
+            });
+            
             // Refresh Monaco models for changed files
             Object.entries(data.files).forEach(([path, content]) => {
                 const model = modelsRef.current.get(path);
@@ -1066,13 +992,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
         return () => {
             socket.off('code:file-change', handleFileChange);
+            socket.off('code:env-update', handleEnvUpdate);
             socket.off('code:file-create', handleFileCreate);
             socket.off('code:file-delete', handleFileDelete);
             socket.off('code:file-rename', handleFileRename);
             socket.off('code:file-lock', handleFileLock);
             socket.off('code:file-unlock', handleFileUnlock);
             socket.off('code:comment', handleComment);
-            socket.off('env:vars-sync', handleEnvVarsSync);
+
             socket.off('ide:state-snapshot', handleStateSnapshot);
             socket.off('ide:partner-rejoined', handlePartnerRejoined);
             socket.off('terminal:partner-create', handlePartnerTermCreate);
@@ -1371,7 +1298,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (!filename.trim()) return;
         if (isBlockedExtension(filename)) {
             const ext = filename.split('.').pop()?.toUpperCase();
-            addToast(`❌ .${ext} files are not supported. This IDE runs on Node.js — only JS/TS/web files are supported.`, 'error');
+            addToast(`⚠️ .${ext} files are not supported. This IDE runs on Node.js — only JS/TS/web files are supported.`, 'error');
             setShowNewFile(false); setNewFileName(''); setNewFileParent('');
             return;
         }
@@ -1412,7 +1339,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
         if (Object.keys(snapshot).length > 0) {
             deletionHistoryRef.current = [...deletionHistoryRef.current.slice(-19), snapshot];
-            addToast(`🗑 Deleted — press Ctrl+Z to undo`, 'info');
+            addToast(`🗑️ Deleted — press Ctrl+Z to undo`, 'info');
         }
 
         // Dispose models
@@ -1511,7 +1438,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         }
 
         setShowClearConfirm(false);
-        addToast('🗑 Workspace cleared — press Ctrl+Z to undo', 'info');
+        addToast('🗑️ Workspace cleared — press Ctrl+Z to undo', 'info');
     }, [sessionId, addToast]);
 
 
@@ -1519,7 +1446,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         if (!newName.trim()) { setRenamingPath(null); return; }
         if (isBlockedExtension(newName)) {
             const ext = newName.split('.').pop()?.toUpperCase();
-            addToast(`❌ .${ext} files are not supported. Only JS/TS/web files are allowed.`, 'error');
+            addToast(`⚠️ .${ext} files are not supported. Only JS/TS/web files are allowed.`, 'error');
             setRenamingPath(null); return;
         }
         const parts = oldPath.split('/');
@@ -1605,22 +1532,14 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const downloadZip = useCallback(async () => {
         const { default: JSZip } = await import('jszip');
         const zip = new JSZip();
-        // Include all project files (never .env — handled separately below)
         Object.entries(files).forEach(([p, c]) => {
-            if (p === '.env' || p.startsWith('.env.')) return;
             zip.file(p, c);
         });
-        // Include owner's own .env values (never partner's)
-        const ownEnv = myEnvVarsRef.current;
-        if (ownEnv.length > 0) {
-            const envContent = ownEnv.map(e => `${e.key}=${e.value}`).join('\n') + '\n';
-            zip.file('.env', envContent);
-        }
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${projectTitle.replace(/\s+/g, '-').toLowerCase()}.zip`; a.click();
         URL.revokeObjectURL(url);
-        addToast('Project downloaded as ZIP (.env included with your values only)', 'success');
+        addToast('Project downloaded as ZIP', 'success');
     }, [files, projectTitle, addToast]);
 
     // ===== Import Files =====
@@ -1904,10 +1823,10 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
     const buildProject = useCallback(async () => {
         if (!webcontainerRef.current) { addToast('Boot the dev environment first', 'error'); return; }
         const term = xtermRef.current;
-        if (term) term.writeln('\n\x1b[36m🔨 Building project (npm run build)...\x1b[0m');
+        if (term) term.writeln('\n\x1b[36m🏆¨ Building project (npm run build)...\x1b[0m');
         addToast('Building project...', 'info');
         setActiveTermTab('output');
-        setOutputLines(prev => [...prev, '🔨 Building project (npm run build)...']);
+        setOutputLines(prev => [...prev, '🏆¨ Building project (npm run build)...']);
         const build = await webcontainerRef.current.spawn('npm', ['run', 'build']);
         build.output.pipeTo(new WritableStream({ write(d) { if (term) term.write(d); setOutputLines(prev => [...prev, d]); } }));
         const code = await build.exit;
@@ -1957,7 +1876,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
     // ===== Package install/uninstall =====
     const installPackage = useCallback((pkg: string, isDev = false) => {
-        if (!shellWriterRef.current) { addToast('Boot the dev environment first (click ▶ Run)', 'error'); return; }
+        if (!shellWriterRef.current) { addToast('Boot the dev environment first (click ▶️ Run)', 'error'); return; }
         const cmd = `npm install ${isDev ? '--save-dev ' : ''}${pkg}\n`;
         shellWriterRef.current.write(cmd);
         setActiveTermTab('shell');
@@ -2026,7 +1945,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 ? `npx -y tsx ${filePath}\n`
                 : `node ${filePath}\n`;
             shellWriterRef.current.write(cmd);
-            addToast(`▶ Running ${filePath}...`, 'info');
+            addToast(`▶️ Running ${filePath}...`, 'info');
         }
     }, [bootWebContainer, addToast]);
     const moveFile = useCallback((fromPath: string, toDir: string) => {
@@ -2108,9 +2027,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
         const sorted = [...nodes].sort((a, b) => { if (a.type !== b.type) return a.type === 'directory' ? -1 : 1; return a.name.localeCompare(b.name); });
         return sorted.map(node => {
             const fullPath = prefix ? `${prefix}/${node.name}` : node.name;
-            // Detect .env files and whether this file belongs to the partner
-            const isEnvFile = false; // .env no longer lives in shared files
-            const isPartnerEnv = false;
 
             // Renaming mode
             if (renamingPath === fullPath) {
@@ -2179,20 +2095,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
 
             const locked = isLockedByPartner(fullPath);
 
-            // 🔒 Partner's .env — open normally but with masked values (read-only)
-            if (isPartnerEnv) {
-                return (
-                    <div key={fullPath}
-                        className="flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer text-yellow-500 hover:bg-yellow-400/10 transition-colors"
-                        onClick={() => switchToFile(fullPath)}
-                        title="Partner's .env (values hidden, read-only)"
-                    >
-                        <Lock className="w-3.5 h-3.5 text-yellow-500" />
-                        <span className="truncate flex-1">{node.name}</span>
-                        <span className="text-[9px] text-yellow-600 bg-yellow-400/10 px-1 rounded">🔒</span>
-                    </div>
-                );
-            }
 
             return (
                 <div key={fullPath}
@@ -2247,7 +2149,16 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                 files={files}
                 activeFile={activeFile}
                 onFileChange={(path, content) => {
-                    setFiles(prev => { const n = { ...prev, [path]: content }; return n; });
+                    setFiles(prev => { const n = { ...prev, [path]: content }; filesRef.current = n; return n; });
+                    const socket = socketService.getSocket();
+                    if (socket) {
+                        locallyEditingRef.current = { time: Date.now(), path };
+                        socket.emit('code:file-change', { sessionId, path, content, senderId: socket.id });
+                    }
+                    if (webcontainerRef.current && path !== '.env') {
+                        webcontainerRef.current.fs.writeFile(path, content).catch(() => {});
+                    }
+                    autosave({ ...filesRef.current, [path]: content });
                 }}
                 onSwitchFile={switchToFile}
                 webcontainerRef={webcontainerRef}
@@ -2303,20 +2214,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <button onClick={() => setShowPackageManager(true)}
                         className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded transition-colors" title="Package Manager (npm)">
                         <Package className="w-3.5 h-3.5" />
-                    </button>
-                    {/* Project Templates button removed — use terminal instead */}
-                    {/* .env — open in Monaco directly (values are private, partner sees masked) */}
-                    <button onClick={() => {
-                        const displayContent = rebuildEnvDisplay(myEnvVarsRef.current, partnerEnvVarsRef.current);
-                        if (!files['.env']) {
-                            setFiles(prev => ({ ...prev, '.env': displayContent }));
-                            filesRef.current['.env'] = displayContent;
-                        }
-                        if (!openTabs.includes('.env')) setOpenTabs(prev => [...prev, '.env']);
-                        switchToFile('.env');
-                    }}
-                        className="flex items-center gap-1 p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-400/10 rounded transition-colors" title="Open .env file (your values private)">
-                        <Settings2 className="w-3.5 h-3.5" />
                     </button>
                     {/* Separator */}
                     <div className="w-px h-4 bg-gray-700 mx-0.5" />
@@ -2814,7 +2711,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                             <div className="flex items-center justify-center h-full bg-[#0d1117]">
                                 <div className="text-center">
                                     <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3"><Play className="w-5 h-5 text-gray-600" /></div>
-                                    <p className="text-xs text-gray-600">Click <strong className="text-green-500">▶ Run</strong> to see preview</p>
+                                    <p className="text-xs text-gray-600">Click <strong className="text-green-500">▶️ Run</strong> to see preview</p>
                                 </div>
                             </div>
                         )}
@@ -2922,7 +2819,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setShowQuickOpen(false)}>
                         <div className="bg-[#1e2030] border border-gray-700 rounded-xl shadow-2xl w-[420px] overflow-hidden" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700">
-                                <span className="text-[11px]">🔍</span>
+                                <span className="text-[11px]">🏆</span>
                                 <input ref={quickOpenInputRef} autoFocus value={quickOpenQuery} onChange={(e) => setQuickOpenQuery(e.target.value)}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Escape') setShowQuickOpen(false);
@@ -2962,12 +2859,6 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                     onClose={() => setShowPackageManager(false)}
                 />
             )}
-
-
-            {/* .env is now a real Monaco file — no separate modal needed */}
-
-
-
 
 
             {showGithubModal && (
@@ -3094,7 +2985,7 @@ export function CollabIDE({ sessionId, partnerId: _partnerId, projectTitle, user
                                 {/* Info */}
                                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
                                     <p className="text-[10px] text-blue-300">
-                                        ℹ️ A <strong>public</strong> repo will be created (or updated) on your GitHub. All project files (except .env) will be pushed. Your partner will receive a collaborator invite.
+                                        ℹï¸ A <strong>public</strong> repo will be created (or updated) on your GitHub. All project files (except .env) will be pushed. Your partner will receive a collaborator invite.
                                     </p>
                                 </div>
 

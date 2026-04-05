@@ -142,19 +142,19 @@ export function NotificationBell() {
                 notifications.map(n => (
                   <div
                     key={n.id}
-                    onClick={() => handleNotifClick(n)}
-                    className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors border-b border-gray-50 dark:border-gray-700/50 last:border-0
+                    className={`flex flex-col px-4 py-3 cursor-pointer transition-colors border-b border-gray-50 dark:border-gray-700/50 last:border-0
                       ${n.read
                         ? 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
                         : 'bg-pairon-accent/5 hover:bg-pairon-accent/10'
                       }`}
                   >
+                   <div className="flex items-start gap-3" onClick={() => handleNotifClick(n)}>
                     {/* Icon */}
                     <div className={`w-8 h-8 rounded-full ${getNotifColor(n.type)} flex items-center justify-center flex-shrink-0 mt-0.5`}>
                       {getNotifIcon(n.type)}
                     </div>
                     {/* Content */}
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 pointer-events-none">
                       <p className={`text-sm leading-snug ${n.read ? 'text-gray-600 dark:text-gray-400' : 'text-gray-900 dark:text-white font-medium'}`}>
                         {n.title}
                       </p>
@@ -165,8 +165,72 @@ export function NotificationBell() {
                     </div>
                     {/* Unread dot */}
                     {!n.read && (
-                      <div className="w-2 h-2 rounded-full bg-pairon-accent flex-shrink-0 mt-2" />
+                      <div className="w-2 h-2 rounded-full bg-pairon-accent flex-shrink-0 mt-2 pointer-events-none" />
                     )}
+                   </div>
+                   
+                   {/* Inline Actions */}
+                   {n.type === 'friend-request' && !n.read && (
+                     <div className="flex gap-2 mt-3 ml-11">
+                       <button 
+                         onClick={async (e) => {
+                           e.stopPropagation();
+                           try {
+                             const token = localStorage.getItem('pairon_token') || '';
+                             const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+                             await fetch(`${API}/api/friends/${n.data?.friendshipId}/accept`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }});
+                             markRead(n.id);
+                           } catch { /* best effort */ }
+                         }}
+                         className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium rounded-lg transition-colors"
+                       >
+                         Accept
+                       </button>
+                       <button 
+                         onClick={async (e) => {
+                           e.stopPropagation();
+                           try {
+                             const token = localStorage.getItem('pairon_token') || '';
+                             const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+                             await fetch(`${API}/api/friends/${n.data?.friendshipId}/decline`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }});
+                             markRead(n.id);
+                           } catch { /* best effort */ }
+                         }}
+                         className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-medium rounded-lg transition-colors"
+                       >
+                         Decline
+                       </button>
+                     </div>
+                   )}
+
+                   {n.type === 'collab-proposal' && !n.read && (
+                     <div className="flex gap-2 mt-3 ml-11">
+                       <button 
+                         onClick={async (e) => {
+                           e.stopPropagation();
+                           const { socketService } = await import('@/lib/socket');
+                           const socket = socketService.getSocket();
+                           if (socket) socket.emit('collab:accept', n.data?.id);
+                           markRead(n.id);
+                         }}
+                         className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium rounded-lg transition-colors"
+                       >
+                         Accept
+                       </button>
+                       <button 
+                         onClick={async (e) => {
+                           e.stopPropagation();
+                           const { socketService } = await import('@/lib/socket');
+                           const socket = socketService.getSocket();
+                           if (socket) socket.emit('collab:decline', n.data?.id);
+                           markRead(n.id);
+                         }}
+                         className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-xs font-medium rounded-lg transition-colors"
+                       >
+                         Decline
+                       </button>
+                     </div>
+                   )}
                   </div>
                 ))
               )}

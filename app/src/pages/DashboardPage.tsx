@@ -442,18 +442,14 @@ export function DashboardPage() {
                 {user?.credits} credits
               </span>
             </div>
-            <div className="w-px h-6 bg-gray-200 dark:bg-gray-700" />
+            <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 hidden sm:block" />
             <NotificationBell />
             <button
-              onClick={toggleTheme}
-              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+              onClick={() => setShowLogoutConfirm(true)}
+              className="sm:hidden p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
+              title="Log out"
             >
-              {theme === 'light' ? (
-                <Moon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              ) : (
-                <Sun className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              )}
+              <LogOut className="w-5 h-5 text-gray-600 dark:text-gray-400 group-hover:text-red-500" />
             </button>
           </div>
         </div>

@@ -31,7 +31,21 @@ function loadNotifications(): Notification[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    
+    // Apply TTL rules on load
+    const now = Date.now();
+    return parsed.filter(n => {
+      // 5-min TTL for actionable invites
+      if (n.type === 'collab-proposal' && !n.read && (now - n.timestamp > 5 * 60 * 1000)) {
+        return false;
+      }
+      // 30-day purge for read notifications
+      if (n.read && (now - n.timestamp > 30 * 24 * 60 * 60 * 1000)) {
+        return false;
+      }
+      return true;
+    });
   } catch {
     return [];
   }
@@ -48,6 +62,23 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveNotifications(notifications);
   }, [notifications]);
+
+  // Periodic TTL cleanup for active sessions
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNotifications(prev => {
+        const now = Date.now();
+        const filtered = prev.filter(n => {
+          if (n.type === 'collab-proposal' && !n.read && (now - n.timestamp > 5 * 60 * 1000)) return false;
+          if (n.read && (now - n.timestamp > 30 * 24 * 60 * 60 * 1000)) return false;
+          return true;
+        });
+        // Only return new array if length changed to prevent unnecessary renders
+        return filtered.length !== prev.length ? filtered : prev;
+      });
+    }, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
 
   const add = useCallback((n: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
     const newNotif: Notification = {

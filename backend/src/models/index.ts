@@ -7,3 +7,4 @@ export { Certificate } from './Certificate';
 export { Friendship } from './Friend';
 
 export { DirectMessage } from './DirectMessage';
+export { Feedback } from './Feedback';

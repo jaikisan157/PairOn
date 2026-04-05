@@ -271,6 +271,14 @@ class ApiService {
         return this.handleResponse<{ projects: any[] }>(response);
     }
 
+    async getUserProjects(userId: string) {
+        const response = await fetch(`${this.baseUrl}/api/projects/user/${userId}`, {
+            method: 'GET',
+            headers: this.getHeaders(),
+        });
+        return this.handleResponse<{ projects: any[] }>(response);
+    }
+
     async saveProject(project: Record<string, any>) {
         const response = await fetch(`${this.baseUrl}/api/projects`, {
             method: 'POST',

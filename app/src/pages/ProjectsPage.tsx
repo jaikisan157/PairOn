@@ -238,7 +238,7 @@ export function ProjectsPage() {
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {project.submissionLink && (
                         <a
-                          href={project.submissionLink}
+                          href={project.submissionLink?.match(/^https?:\/\//i) ? project.submissionLink : `https://${project.submissionLink}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="p-2 text-gray-400 hover:text-pairon-accent rounded-lg hover:bg-pairon-accent/10 transition-colors"

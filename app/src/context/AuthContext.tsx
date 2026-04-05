@@ -20,6 +20,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: true,
   });
 
+  const [terminatedReason, setTerminatedReason] = useState<string | null>(null);
+
   // Check for existing session on mount
   useEffect(() => {
     const token = localStorage.getItem('pairon_token');
@@ -55,7 +57,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const handleConnectError = (err: Error) => {
       if (err.message === 'SESSION_EXPIRED') {
-        alert('⚠️ Session terminated: You logged in from another device.');
         socketService.disconnect();
         localStorage.removeItem('pairon_token');
         localStorage.removeItem('pairon_user');
@@ -66,11 +67,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isAuthenticated: false,
           isLoading: false,
         });
-        window.location.href = '/login';
+        setTerminatedReason('You logged in from another device. To prevent conflicts, this session has been disconnected.');
       }
     };
 
+    const handleForceTerminate = () => {
+      socketService.disconnect();
+      localStorage.removeItem('pairon_token');
+      localStorage.removeItem('pairon_user');
+      localStorage.removeItem('challenge_session');
+      setState({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          isLoading: false,
+      });
+      setTerminatedReason('A new tab or device connected to this session. To prevent conflicts, this old session has been disconnected.');
+    };
+
     socketService.onConnectError(handleConnectError);
+    // Bind force_terminate here instead of GlobalNotifier
+    const socket = socketService.getSocket();
+    if (socket) {
+      socket.on('force_terminate', handleForceTerminate);
+    } else {
+      // wait until connected
+      const checkSocket = setInterval(() => {
+        const s = socketService.getSocket();
+        if (s) {
+          s.on('force_terminate', handleForceTerminate);
+          clearInterval(checkSocket);
+        }
+      }, 500);
+      return () => {
+        clearInterval(checkSocket);
+        const s = socketService.getSocket();
+        if (s) s.off('force_terminate', handleForceTerminate);
+      };
+    }
+
+    return () => {
+      const s = socketService.getSocket();
+      if (s) s.off('force_terminate', handleForceTerminate);
+    };
   }, [state.isAuthenticated]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
@@ -148,6 +187,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         updateProfile,
       }}
     >
+      {terminatedReason && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000, background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(8px)' }}>
+           <div style={{ background: '#1e2030', padding: 40, borderRadius: 24, border: '1px solid rgba(239, 68, 68, 0.4)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', maxWidth: 420, textAlign: 'center', animation: 'scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)', zIndex: 100001 }}>
+               <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, margin: '0 auto 20px' }}>⚠️</div>
+               <h2 style={{ color: 'white', fontSize: 24, margin: '0 0 12px', fontWeight: 700 }}>Session Terminated</h2>
+               <p style={{ color: '#9ca3af', fontSize: 15, margin: '0 0 24px', lineHeight: 1.5 }}>{terminatedReason}</p>
+               <button onClick={() => { setTerminatedReason(null); window.location.href = '/login'; }} style={{ background: '#6366f1', color: 'white', border: 'none', padding: '12px 24px', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer', width: '100%', transition: 'all 0.2s' }}>Return to Login</button>
+           </div>
+        </div>
+      )}
       {children}
     </AuthContext.Provider>
   );

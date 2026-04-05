@@ -25,6 +25,7 @@ import {
   Monitor,
   UserPlus,
   FolderOpen,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -261,10 +262,8 @@ export function CollaborationPage() {
         savedAt: Date.now(),
       }));
 
-      // Start countdown — TEST OVERRIDE: sprint = 10s
-      const matchedTestEndsAt = data.mode === 'sprint'
-        ? new Date(Date.now() + 10_000)
-        : new Date(data.endsAt);
+      // Start countdown
+      const matchedTestEndsAt = new Date(data.endsAt);
       const remaining = Math.max(0, Math.floor((matchedTestEndsAt.getTime() - Date.now()) / 1000));
       setTimeRemaining(remaining);
       startCountdown(matchedTestEndsAt);
@@ -482,10 +481,8 @@ export function CollaborationPage() {
         } catch { /* ignore */ }
       }
 
-      // TEST OVERRIDE: sprint = 10s
-      const rejoinTestEndsAt = data.mode === 'sprint'
-        ? new Date(Date.now() + 10_000)
-        : new Date(data.session.endsAt);
+      // Start countdown
+      const rejoinTestEndsAt = new Date(data.session.endsAt);
       const remaining = Math.max(0, Math.floor((rejoinTestEndsAt.getTime() - Date.now()) / 1000));
       setTimeRemaining(remaining);
       startCountdown(rejoinTestEndsAt);
@@ -608,11 +605,8 @@ export function CollaborationPage() {
         if (data.isSolo) setIsSoloMode(true);
 
         // Start countdown
-        // TEST OVERRIDE: cap sprint sessions to 10 seconds for quick testing
         if (data.endsAt) {
-          const testEndsAt = data.mode === 'sprint'
-            ? new Date(Date.now() + 10_000) // 10s for sprint testing
-            : new Date(data.endsAt);
+          const testEndsAt = new Date(data.endsAt);
           const remaining = Math.max(0, Math.floor((testEndsAt.getTime() - Date.now()) / 1000));
           setTimeRemaining(remaining);
           startCountdown(testEndsAt);
@@ -1246,7 +1240,7 @@ export function CollaborationPage() {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeView === 'code' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
               >
-                <span className="text-sm">ðŸ’»</span> Code
+                <span className="text-sm">💻</span> Code
               </button>
             </div>
 
@@ -1917,7 +1911,7 @@ export function CollaborationPage() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">âœ️</span>
+                <span className="text-2xl">📝</span>
               </div>
               <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">Project Edit Proposal</h3>
               <p className="text-sm text-gray-500 text-center mb-3">
@@ -2115,6 +2109,27 @@ export function CollaborationPage() {
               )}
 
               <div className="flex flex-col gap-2">
+                <Button
+                  onClick={async () => {
+                    if (!savedProjectSession) return;
+                    const filesJson = localStorage.getItem(`pairon_ide_${savedProjectSession.sessionId}`);
+                    if (!filesJson) return;
+                    try {
+                      const { default: JSZip } = await import('jszip');
+                      const files = JSON.parse(filesJson);
+                      const zip = new JSZip();
+                      Object.entries(files).forEach(([p, c]) => zip.file(p, c as string));
+                      const blob = await zip.generateAsync({ type: 'blob' });
+                      const projectName = savedProjectSession.projectIdea?.title || 'pairon-project';
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a'); a.href = url; a.download = `${projectName.replace(/\s+/g, '-').toLowerCase()}.zip`; a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (err) {}
+                  }}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-3 h-auto font-medium flex items-center justify-center gap-2 mb-1"
+                >
+                  <Download className="w-4 h-4" /> Download Code (.zip)
+                </Button>
                 <Button
                   onClick={() => { setShowSessionCompleteModal(false); setFriendRequestSent(false); navigate('/projects'); }}
                   className="w-full bg-pairon-accent hover:bg-pairon-accent/90 text-white rounded-xl py-3 h-auto font-medium flex items-center justify-center gap-2"

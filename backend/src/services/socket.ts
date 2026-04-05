@@ -29,6 +29,17 @@ interface ActiveCall {
 }
 const activeCalls: Map<string, ActiveCall> = new Map();
 
+// ── Environment Variable Secure Store (Primal String & Ownership) ────────
+interface EnvRealStore {
+  ownership: Map<string, string>; // KEY -> userId
+  values: Map<string, string>;    // KEY -> raw unmasked value
+  primalContent: string;          // Full text layout
+}
+const sessionEnvStore = new Map<string, EnvRealStore>();
+
+// ── Active User Sockets (userId -> socketId) ────────
+const userSockets: Map<string, string> = new Map();
+
 export function setupSocketHandlers(io: Server) {
   // Start quickchat inactivity checker (5 min timeout)
   startQuickChatInactivityChecker(io);
@@ -72,6 +83,21 @@ export function setupSocketHandlers(io: Server) {
   io.on('connection', (socket: Socket) => {
     const userId = socket.data.userId;
     console.log('User connected:', socket.id, '| userId:', userId);
+
+    // Track active user sockets for single-session enforcement
+    const previousSocketId = userSockets.get(userId);
+    if (previousSocketId && previousSocketId !== socket.id) {
+      // Force terminate the older socket
+      io.to(previousSocketId).emit('force_terminate', { reason: 'CONCURRENT_LOGIN' });
+      // Disconnect it forcefully from server side too
+      const oldSocket = io.sockets.sockets.get(previousSocketId);
+      if (oldSocket) {
+        oldSocket.disconnect(true);
+      }
+    }
+    
+    // Register new socket
+    userSockets.set(userId, socket.id);
 
     // Auto-join user's personal room and set online
     socket.join(`user:${userId}`);
@@ -652,7 +678,91 @@ export function setupSocketHandlers(io: Server) {
     // =========================================================
 
     // File content change — relay immediately to session room (excluding sender)
-    socket.on('code:file-change', (data: { sessionId: string; path: string; content: string; senderId: string }) => {
+    socket.on('code:file-change', async (data: { sessionId: string; path: string; content: string; senderId: string }) => {
+      if (data.path === '.env') {
+        let store = sessionEnvStore.get(data.sessionId);
+        if (!store) {
+          store = { ownership: new Map(), values: new Map(), primalContent: '' };
+          sessionEnvStore.set(data.sessionId, store);
+        }
+        // Tell TS that store is definitely defined
+        const activeStore = store!;
+
+        const lines = data.content.split('\n');
+        const primalLines: string[] = [];
+        const seenKeys = new Set<string>();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) {
+            primalLines.push(line);
+            continue;
+          }
+          const eqIdx = line.indexOf('=');
+          if (eqIdx < 0) {
+            primalLines.push(line);
+            continue;
+          }
+          const key = line.slice(0, eqIdx).trim();
+          const value = line.slice(eqIdx + 1);
+          seenKeys.add(key);
+
+          if (value === '••••••••••••') {
+            const real = activeStore.values.get(key) || '';
+            primalLines.push(`${key}=${real}`);
+          } else {
+            const owner = activeStore.ownership.get(key);
+            if (owner && owner !== userId) {
+               // Revert malicious/accidental edit of someone else's property
+               const real = activeStore.values.get(key) || '';
+               primalLines.push(`${key}=${real}`);
+            } else {
+               activeStore.ownership.set(key, userId);
+               activeStore.values.set(key, value);
+               primalLines.push(`${key}=${value}`);
+            }
+          }
+        }
+
+        // Restore any partner keys that were maliciously or accidentally DELETED
+        for (const [key, owner] of activeStore.ownership.entries()) {
+            if (owner !== userId && !seenKeys.has(key)) {
+                const real = activeStore.values.get(key) || '';
+                primalLines.push(`${key}=${real}`);
+            }
+        }
+
+        const primalContent = primalLines.join('\n');
+        activeStore.primalContent = primalContent;
+
+        // Broadcast to everyone in the room (including sender, to fix any reverted fields immediately)
+        const socketsInRoom = await io.in(`session:${data.sessionId}`).fetchSockets();
+        for (const sock of socketsInRoom) {
+           const recipientUserId = sock.data.userId;
+           const maskedLines = primalLines.map(line => {
+             const eqIdx = line.indexOf('=');
+             if (eqIdx > 0 && !line.trim().startsWith('#')) {
+               const k = line.slice(0, eqIdx).trim();
+               const o = activeStore.ownership.get(k);
+               if (o && o !== recipientUserId) {
+                 return `${k}=••••••••••••`;
+               }
+             }
+             return line;
+           });
+           const maskedContent = maskedLines.join('\n');
+           
+           sock.emit('code:env-update', { 
+              sessionId: data.sessionId,
+              path: '.env',
+              senderId: data.senderId, // we keep original senderId just in case
+              maskedContent,
+              primalContent 
+           });
+        }
+        return; // Don't do standard file-change broadcast
+      }
+
       socket.to(`session:${data.sessionId}`).emit('code:file-change', data);
     });
 
@@ -661,10 +771,6 @@ export function setupSocketHandlers(io: Server) {
       socket.to(`session:${data.sessionId}`).emit('code:file-create', data);
     });
 
-    // Env vars sync — relays full {key,value}[] so partner's WebContainer can access all API keys
-    socket.on('env:vars-sync', (data: { sessionId: string; vars: { key: string; value: string }[] }) => {
-      socket.to(`session:${data.sessionId}`).emit('env:vars-sync', data);
-    });
 
     // File delete
     socket.on('code:file-delete', (data: { sessionId: string; path: string; senderId: string }) => {
@@ -811,19 +917,43 @@ export function setupSocketHandlers(io: Server) {
 
     socket.on('ide:state-update', (data: { sessionId: string; files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
       // Store state server-side ONLY — do NOT emit ide:partner-rejoined here.
-      // Doing so would create a feedback loop: autosave → state-update → partner-rejoined
-      // → partner pushes state back → state-snapshot → model.setValue() resets editor (the glitch).
+      if (data.files && data.files['.env']) delete data.files['.env']; // Never leak Env locally
       ideStateMap.set(data.sessionId, { files: data.files, folders: data.folders, previewUrl: data.previewUrl, ownerId: userId });
     });
 
     // Partner requests a full state push (e.g. they just loaded the page)
     socket.on('ide:request-state', (sessionId: string) => {
-      // Tell the other user to push their state
+      // 1. Tell the other user to push their standard state
       socket.to(`session:${sessionId}`).emit('ide:partner-rejoined');
+      
+      // 2. Fulfill the .env part using our secure Primal Store
+      const store = sessionEnvStore.get(sessionId);
+      if (store) {
+          const lines = store.primalContent.split('\n');
+          const maskedLines = lines.map(line => {
+             const eqIdx = line.indexOf('=');
+             if (eqIdx > 0 && !line.trim().startsWith('#')) {
+               const k = line.slice(0, eqIdx).trim();
+               const o = store.ownership.get(k);
+               if (o && o !== userId) {
+                 return `${k}=••••••••••••`;
+               }
+             }
+             return line;
+          });
+          socket.emit('code:env-update', { 
+              sessionId,
+              path: '.env',
+              senderId: 'server',
+              maskedContent: maskedLines.join('\n'),
+              primalContent: store.primalContent 
+          });
+      }
     });
 
     // Full state push — one user sends to the other who requested it
     socket.on('ide:push-state', (data: { sessionId: string; files: Record<string, string>; folders: string[]; previewUrl?: string }) => {
+      if (data.files && data.files['.env']) delete data.files['.env']; // Never leak Env P2P
       socket.to(`session:${data.sessionId}`).emit('ide:state-snapshot', {
         files: data.files,
         folders: data.folders,
@@ -844,6 +974,11 @@ export function setupSocketHandlers(io: Server) {
 
       // Remove from matchmaking queue
       matchmakingQueue.delete(userId);
+
+      // Clean up user socket
+      if (userSockets.get(userId) === socket.id) {
+        userSockets.delete(userId);
+      }
 
       // ── Handle active call graceful reconnection ──
       for (const [sessionId, call] of activeCalls.entries()) {
