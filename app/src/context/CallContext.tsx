@@ -16,7 +16,7 @@ import { socketService } from '@/lib/socket';
 import { useAuth } from '@/context/AuthContext';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connecting' | 'connected' | 'reconnecting';
+export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connected' | 'reconnecting';
 
 interface CallContextType {
   callStatus: CallStatus;
@@ -256,18 +256,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // ── Remote audio track ──
     pc.ontrack = (event) => {
       console.log('[Call] 🔊 Remote track received! streams:', event.streams.length,
-        'tracks:', event.streams[0]?.getTracks().map(t => `${t.kind}:${t.readyState}`) || 'built from event.track');
+        'tracks:', event.streams[0]?.getTracks().map(t => `${t.kind}:${t.readyState}`));
 
       const audio = remoteAudioRef.current;
-      
-      // Fallback: if browser doesn't provide streams array, build one from the track directly
-      let stream = event.streams[0];
-      if (!stream) {
-        stream = new MediaStream([event.track]);
-      }
-
-      if (audio && stream) {
-        audio.srcObject = stream;
+      if (audio && event.streams[0]) {
+        audio.srcObject = event.streams[0];
         console.log('[Call] Set srcObject on audio element');
 
         // Try to play — should succeed because we pre-warmed in user gesture
@@ -298,10 +291,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
       console.log('[Call] ICE connection state:', state);
 
       if (state === 'connected' || state === 'completed') {
-        if (callStatusRef.current === 'reconnecting' || callStatusRef.current === 'calling' || callStatusRef.current === 'connecting') {
+        if (callStatusRef.current === 'reconnecting' || callStatusRef.current === 'calling') {
           setCallStatus('connected');
           callStatusRef.current = 'connected';
-          startCallTimer();
           console.log('[Call] ✅ ICE connected — P2P audio active!');
         }
       } else if (state === 'disconnected') {
@@ -450,7 +442,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       // 6. Set status
       setCallStatus('calling'); callStatusRef.current = 'calling';
-      startRingBeep(); // Give caller a ringback tone so they aren't in silence
 
       // Timeout
       if (callingTimeoutRef.current) clearTimeout(callingTimeoutRef.current);
@@ -522,8 +513,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
       socketService.getSocket()?.emit('call:answer', { sessionId, answer: serializedAnswer });
       console.log('[Call] 📤 Answer sent via socket');
 
-      // 8. Wait for ICE to establish connection
-      setCallStatus('connecting' as any); callStatusRef.current = 'connecting' as any;
+      // 8. Connected — restore mute state if it was active
+      setCallStatus('connected'); callStatusRef.current = 'connected';
+      startCallTimer();
       if (muteRef.current) {
         stream.getAudioTracks().forEach(t => { t.enabled = false; });
         console.log('[Call] 🔇 Mute restored after accept');
@@ -669,9 +661,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer as RTCSessionDescriptionInit));
           flushIceCandidates();
-          stopRingBeep();
-          setCallStatus('connecting' as any); callStatusRef.current = 'connecting' as any;
-          console.log('[Call] ✅ SDP Answer received — waiting for ICE to connect and audio to flow');
+          setCallStatus('connected'); callStatusRef.current = 'connected';
+          startCallTimer();
+          console.log('[Call] ✅ Connected — remote description set, waiting for audio');
         } catch (err) {
           console.error('[Call] Failed to set remote answer:', err);
         }

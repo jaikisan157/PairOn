@@ -1318,10 +1318,10 @@ export function CollaborationPage() {
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-all shadow-sm active:scale-95">
                     <Phone className="w-3.5 h-3.5" /> Call
                   </button>
-                ) : (callStatus === 'calling' || callStatus === 'connecting') ? (
+                ) : callStatus === 'calling' ? (
                   <button onClick={() => globalEndCall(true)} title="Cancel call"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-400 hover:bg-red-500 text-white text-xs font-semibold transition-all animate-pulse">
-                    <PhoneOff className="w-3.5 h-3.5" /> {callStatus === 'connecting' ? 'Connecting...' : 'Calling...'}
+                    <PhoneOff className="w-3.5 h-3.5" /> Calling...
                   </button>
                 ) : callStatus === 'reconnecting' ? (
                   <button disabled title="Call reconnecting..."
