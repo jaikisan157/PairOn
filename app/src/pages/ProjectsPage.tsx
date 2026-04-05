@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, FolderOpen, CheckCircle, Clock, Download, ExternalLink, Users, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import JSZip from 'jszip';
 
 interface SavedProject {
@@ -32,6 +33,7 @@ const MODE_LABEL: Record<string, string> = {
 
 export function ProjectsPage() {
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +60,7 @@ export function ProjectsPage() {
           // Re-fetch to include the newly migrated projects
           const { projects: refreshed } = await api.getProjects();
           setProjects(refreshed);
+          refreshUser(); // Sync any earned reputation from these delayed submissions
           // Clear localStorage now that everything is in the DB
           localStorage.removeItem('saved_projects');
         }

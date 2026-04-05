@@ -119,6 +119,15 @@ const connectDB = async () => {
     const mongoURI = process.env.MONGODB_URI!;
     await mongoose.connect(mongoURI);
     console.log('✅ MongoDB connected successfully');
+
+    // Reset online statuses to prevent ghost sessions after server crash/restart
+    if (mongoose.connection.db) {
+      await mongoose.connection.db.collection('users').updateMany(
+        { isOnline: true },
+        { $set: { isOnline: false } }
+      );
+    }
+    console.log('🔄 Reset stale online sessions');
   } catch (error) {
     console.error('❌ MongoDB connection error:', error);
     process.exit(1);

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 
 export interface Notification {
   id: string;
-  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner' | 'session-completed' | 'time-up';
+  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner' | 'session-completed' | 'time-up' | 'project-edit' | 'partner-submitted';
   title: string;
   body: string;
   timestamp: number;
@@ -18,6 +18,7 @@ interface NotificationContextType {
   markRead: (id: string) => void;
   markAllRead: () => void;
   remove: (id: string) => void;
+  markReadByData: (dataId: string, field?: string) => void;
   clearAll: () => void;
 }
 
@@ -102,6 +103,15 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
+  const markReadByData = useCallback((dataId: string, field = 'id') => {
+    setNotifications(prev => prev.map(n => {
+      if (!n.read && n.data && n.data[field] === dataId) {
+        return { ...n, read: true };
+      }
+      return n;
+    }));
+  }, []);
+
   const clearAll = useCallback(() => {
     setNotifications([]);
   }, []);
@@ -109,7 +119,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <NotificationContext.Provider value={{ notifications, unreadCount, add, markRead, markAllRead, remove, clearAll }}>
+    <NotificationContext.Provider value={{ notifications, unreadCount, add, markRead, markAllRead, remove, markReadByData, clearAll }}>
       {children}
     </NotificationContext.Provider>
   );

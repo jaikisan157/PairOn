@@ -216,7 +216,8 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                     // KICKED — end session, penalize, award partner
                     const partnerId = session.participants.find(p => p !== userId);
 
-                    session.status = 'abandoned' as any;
+                    session.status = 'partner_skipped' as any;
+                    (session as any).quitterId = userId;
                     (session as any).endedAt = new Date();
                     await session.save();
 
@@ -523,29 +524,28 @@ export function setupChallengeHandlers(io: Server, socket: Socket) {
                 submittedAt: new Date(),
                 submittedBy: userId,
             };
-            // Mark as partner_skipped so the other user can still work
-            // but the submitter is done. If no partner, mark completed.
-            session.status = partnerId ? 'partner_skipped' : 'completed';
-            (session as any).endedAt = partnerId ? undefined : new Date();
+            // If session is already partner_skipped, we are the second user finishing, so it's fully completed.
+            const isSecondSubmit = session.status === 'partner_skipped';
+            session.status = (partnerId && !isSecondSubmit) ? 'partner_skipped' : 'completed';
+            (session as any).endedAt = (partnerId && !isSecondSubmit) ? undefined : new Date();
             await session.save();
 
-            // Award credits & increment completedProjects only for the submitter
-            await User.findByIdAndUpdate(userId, { $inc: { completedProjects: 1 } });
+            // Reputation and project counting is handled exclusively by the auto-save POST /api/projects route
 
             // End session for the submitter
             io.to(`user:${userId}`).emit('challenge:submitted', session.submission);
             io.to(`user:${userId}`).emit('challenge:ended', sessionId);
             socket.leave(`challenge:${sessionId}`);
 
-            // Put the partner into solo mode (they can keep working or submit their own)
-            if (partnerId) {
+            // Put the partner into solo mode if they haven't submitted yet
+            if (partnerId && !isSecondSubmit) {
                 io.to(`user:${partnerId}`).emit('challenge:partner-submitted', {
                     sessionId,
                     submitterName: (await User.findById(userId).select('name').lean())?.name || 'Partner',
                 });
                 // Pre-persist isSolo flag via a system message (partner handles solo flag themselves)
             } else {
-                // No partner — fully close the session
+                // No partner or second partner just submitted — fully close the session
                 clearSessionTimer(sessionId);
             }
         } catch (error) {

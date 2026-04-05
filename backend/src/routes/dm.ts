@@ -76,6 +76,20 @@ router.get('/thread/:friendId', authMiddleware, async (req: Request, res: Respon
                 messages: [],
                 lastMessageAt: new Date(),
             });
+        } else {
+            let updated = false;
+            for (const m of thread.messages) {
+                if (m.senderId !== userId && !m.read) {
+                    m.read = true;
+                    updated = true;
+                }
+            }
+            if (updated) {
+                await DirectMessage.updateOne(
+                    { _id: thread._id },
+                    { $set: { messages: thread.messages } }
+                );
+            }
         }
 
         const partner = await User.findById(friendId).select('name reputation').lean();

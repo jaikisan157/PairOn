@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { Project } from '../models/Project';
+import { User } from '../models/User';
 
 const router = Router();
 
@@ -94,6 +95,10 @@ router.post('/', authMiddleware, async (req: any, res: any) => {
       return res.status(400).json({ message: 'sessionId is required' });
     }
 
+    // Check if this is the first time the project is being submitted
+    const existingProject = await Project.findOne({ userId, sessionId });
+    const isFirstSubmission = !existingProject;
+
     // Upsert: update if exists, insert if not, using userId + sessionId as key
     const project = await Project.findOneAndUpdate(
       { userId, sessionId },
@@ -119,6 +124,15 @@ router.post('/', authMiddleware, async (req: any, res: any) => {
       },
       { upsert: true, new: true }
     );
+
+    // Reward user if it's their first time submitting this project
+    if (isFirstSubmission) {
+      const isSolo = mode === 'solo';
+      const reputationGain = isSolo ? 10 : 15;
+      await User.findByIdAndUpdate(userId, {
+        $inc: { reputation: reputationGain, completedProjects: 1 },
+      });
+    }
 
     res.status(201).json({
       project: {

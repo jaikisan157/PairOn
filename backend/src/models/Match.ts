@@ -74,8 +74,8 @@ const TaskSchema = new Schema({
 });
 
 const SubmissionSchema = new Schema({
-  link: { type: String, required: true },
-  description: { type: String, required: true },
+  link: { type: String, default: '' },
+  description: { type: String, default: '' },
   submittedAt: { type: Date, default: Date.now },
   submittedBy: { type: String, required: true },
 });

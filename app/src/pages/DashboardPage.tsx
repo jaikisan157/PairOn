@@ -75,8 +75,7 @@ export function DashboardPage() {
   const [matchTimeout, setMatchTimeout] = useState(false);
   const matchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Proposals
-  const [proposals, setProposals] = useState<any[]>([]);
+
 
   // Online collaborators count
   const [onlineCount, setOnlineCount] = useState(0);
@@ -289,18 +288,7 @@ export function DashboardPage() {
       setIsSearching(false);
     });
 
-    // Proposals
-    socketService.onProposalReceived((proposal: any) => {
-      if (!proposal.isSent) {
-        setProposals(prev => [proposal, ...prev]);
-      }
-    });
-
     // Note: proposal acceptance now emits 'challenge:matched' which is handled above
-
-    socketService.onProposalDeclined((proposalId: string) => {
-      setProposals(prev => prev.filter(p => p.id !== proposalId));
-    });
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
@@ -690,81 +678,7 @@ export function DashboardPage() {
 
           </motion.div>
 
-          {/* Incoming Proposals */}
-          {proposals.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.25 }}
-              className="bg-white dark:bg-gray-800 rounded-[28px] shadow-card p-8 mb-8"
-            >
-              <h2 className="font-display text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                <Handshake className="w-5 h-5 text-pairon-accent" />
-                Collaboration Proposals
-                <span className="ml-2 px-2 py-0.5 bg-pairon-accent/10 text-pairon-accent text-sm rounded-full">
-                  {proposals.length}
-                </span>
-              </h2>
 
-              <div className="space-y-4">
-                {proposals.map((p) => (
-                  <div
-                    key={p.id}
-                    className="border border-gray-200 dark:border-gray-700 rounded-2xl p-5"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-pairon-accent/10 flex items-center justify-center">
-                          <span className="font-bold text-pairon-accent">
-                            {p.proposer?.name?.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">{p.proposer?.name}</p>
-                          <p className="text-xs text-gray-500">{p.proposer?.experienceLevel} · ⭐ {p.proposer?.reputation}</p>
-                        </div>
-                      </div>
-                      <span className="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full">
-                        {p.matchScore}% match
-                      </span>
-                    </div>
-
-                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 mb-3">
-                      <p className="font-medium text-sm text-gray-900 dark:text-white">{p.projectIdea?.title}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{p.projectIdea?.description}</p>
-                    </div>
-
-                    {p.message && (
-                      <p className="text-sm text-gray-600 dark:text-gray-400 italic mb-3">"{p.message}"</p>
-                    )}
-
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => socketService.acceptProposal(p.id)}
-                        className="flex-1 bg-green-500 hover:bg-green-600 text-white flex items-center justify-center gap-1 rounded-xl"
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                        Accept
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          socketService.declineProposal(p.id);
-                          setProposals(prev => prev.filter(pr => pr.id !== p.id));
-                        }}
-                        className="flex-1 flex items-center justify-center gap-1 rounded-xl"
-                      >
-                        <XCircle className="w-4 h-4" />
-                        Decline
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
 
           {/* Recent Sessions */}
           <motion.div
@@ -805,9 +719,9 @@ export function DashboardPage() {
               <div className="space-y-3">
                 {sessionHistory.filter((sess: any) => {
                   if (sessionFilter === 'all') return true;
-                  if (sessionFilter === 'completed') return sess.status === 'completed';
-                  if (sessionFilter === 'skipped') return sess.status === 'partner_skipped';
-                  if (sessionFilter === 'abandoned') return sess.status === 'abandoned';
+                  if (sessionFilter === 'completed') return sess.status === 'completed' || (sess.status === 'partner_skipped' && sess.submittedBy === user?.id);
+                  if (sessionFilter === 'skipped') return sess.status === 'partner_skipped' && sess.submittedBy !== user?.id && sess.quitterId !== user?.id;
+                  if (sessionFilter === 'abandoned') return sess.status === 'abandoned' || (sess.status === 'completed' && sess.quitterId === user?.id) || (sess.status === 'partner_skipped' && sess.quitterId === user?.id);
                   return true;
                 }).map((sess: any) => {
                   const modeLabels: Record<string, string> = { sprint: 'Sprint', challenge: '24hr', build: '7-Day' };
@@ -827,13 +741,21 @@ export function DashboardPage() {
                     if (sess.quitterId === user?.id) {
                       displayStatus = 'abandoned';
                       displayLabel = '🚪 Abandoned';
+                    } else if (sess.submittedBy === user?.id) {
+                      displayStatus = 'completed';
+                      displayLabel = '✅ Completed';
                     } else {
                       displayLabel = '⚠️ Partner Skipped';
                     }
                   } else if (sess.status === 'mutual_quit') {
                     displayLabel = '🤝 Mutual Quit';
                   } else if (sess.status === 'completed') {
-                    displayLabel = '✅ Completed';
+                    if (sess.quitterId === user?.id) {
+                      displayStatus = 'abandoned';
+                      displayLabel = '🚪 Abandoned';
+                    } else {
+                      displayLabel = '✅ Completed';
+                    }
                   } else if (sess.status === 'abandoned') {
                     displayLabel = '❌ Abandoned';
                   } else if (sess.status === 'ended') {
@@ -842,7 +764,7 @@ export function DashboardPage() {
 
                   const isActive = sess.status === 'active' && new Date(sess.endsAt) > new Date();
                   // Don't show continue for the person who force-quit
-                  const canContinue = isActive && !(sess.status === 'partner_skipped' && sess.quitterId === user?.id);
+                  const canContinue = isActive && !(sess.status === 'partner_skipped' && (sess.quitterId === user?.id || sess.submittedBy === user?.id));
 
                   // Color-coded left border
                   const leftBorderColor = displayStatus === 'completed' ? 'border-l-green-500' : displayStatus === 'partner_skipped' ? 'border-l-orange-500' : displayStatus === 'abandoned' ? 'border-l-red-500' : displayStatus === 'mutual_quit' ? 'border-l-yellow-500' : 'border-l-gray-500';

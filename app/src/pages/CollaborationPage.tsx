@@ -85,7 +85,7 @@ const MODE_LABELS: Record<ChallengeMode, string> = {
 
 export function CollaborationPage() {
   const navigate = useNavigate();
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, refreshUser } = useAuth();
 
   // Refs for rejoin guard — using refs (NOT sessionStorage) avoids React Strict Mode
   // double-invoke creating two orphaned timeouts where only one gets cancelled.
@@ -828,9 +828,9 @@ export function CollaborationPage() {
         files,
       };
 
-      // ── Primary: save to DB (per-user, cross-device) ──
       try {
         await api.saveProject(projectEntry);
+        await refreshUser(); // Force UI to update reputation and completed projects state
       } catch (dbErr) {
         console.warn('[autoSave] DB save failed, falling back to localStorage only:', dbErr);
       }
@@ -1102,16 +1102,37 @@ export function CollaborationPage() {
       <div className="md:hidden flex items-center gap-2 px-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0" style={{ height: 48 }}>
         {/* Back */}
         <button
-          onClick={() => { gracefulEndRef.current = true; navigate('/dashboard'); }}
+          onClick={() => { if (mySubmission) { cleanupAndLeave(); } else { gracefulEndRef.current = true; } navigate('/dashboard'); }}
           className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
         >
           <ArrowLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
         </button>
 
         {/* Partner + mode */}
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-gray-900 dark:text-white truncate leading-tight">{session.partnerName}</p>
-          <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">{session.mode.toUpperCase()}</p>
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          <div className="flex items-center gap-1 overflow-hidden">
+            <p className="text-xs font-semibold text-gray-900 dark:text-white truncate leading-tight">{session.partnerName}</p>
+            <span className={`flex-shrink-0 w-1.5 h-1.5 rounded-full ${partnerStatus === 'online' ? 'bg-green-500' : partnerStatus === 'away' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`} />
+          </div>
+          <div className="flex items-center gap-1 mt-0.5 min-w-0">
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight truncate flex-1 min-w-0">
+              {session.mode.toUpperCase()}
+              {session.projectIdea && ` • ${session.projectIdea.title}`}
+            </p>
+            {session.projectIdea && !isSoloMode && (
+              <button
+                onClick={() => {
+                  setEditProjectTitle(session.projectIdea.title);
+                  setEditProjectDesc(session.projectIdea.description || '');
+                  setEditingProject(true);
+                }}
+                className="flex-shrink-0 text-gray-400 hover:text-pairon-accent p-2 -my-1 -ml-1 cursor-pointer"
+                title="Edit Project Idea"
+              >
+                <Edit3 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Timer */}
@@ -1200,7 +1221,7 @@ export function CollaborationPage() {
               <button
                 onClick={() => {
                   // ALL modes: go back to dashboard, session persists
-                  gracefulEndRef.current = true;
+                  if (mySubmission) { cleanupAndLeave(); } else { gracefulEndRef.current = true; }
                   navigate('/dashboard');
                 }}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -1222,6 +1243,19 @@ export function CollaborationPage() {
                   <span className={`inline-block w-2 h-2 rounded-full ml-1 ${partnerStatus === 'online' ? 'bg-green-500' : partnerStatus === 'away' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`} title={`Partner is ${partnerStatus}`} />
                   <span className="text-yellow-500"> ⭐ {session.partnerReputation}</span>
                   {session.projectIdea && ` • ${session.projectIdea.title}`}
+                  {session.projectIdea && !isSoloMode && (
+                    <button
+                      onClick={() => {
+                        setEditProjectTitle(session.projectIdea.title);
+                        setEditProjectDesc(session.projectIdea.description || '');
+                        setEditingProject(true);
+                      }}
+                      className="ml-1.5 inline-flex items-center justify-center p-0.5 rounded text-gray-400 hover:text-pairon-accent hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors align-text-bottom"
+                      title="Propose project topic edit"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                    </button>
+                  )}
                 </p>
               </div>
             </div>
@@ -1454,8 +1488,6 @@ export function CollaborationPage() {
                       <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
                       <a href={mySubmission.link} target="_blank" rel="noopener noreferrer"
                         className="text-[10px] text-pairon-accent hover:underline break-all">{mySubmission.link}</a>
-                      <button onClick={() => { setSubmissionLink(mySubmission.link); setSubmissionDescription(mySubmission.description); setShowSubmitModal(true); }}
-                        className="text-[10px] text-gray-400 hover:text-pairon-accent mt-1 block">Edit submission</button>
                     </div>
                   ) : (
                     <button
@@ -1727,8 +1759,6 @@ export function CollaborationPage() {
                   <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
                   <a href={mySubmission.link} target="_blank" rel="noopener noreferrer"
                     className="text-xs text-pairon-accent hover:underline break-all">{mySubmission.link}</a>
-                  <button onClick={() => { setSubmissionLink(mySubmission.link); setSubmissionDescription(mySubmission.description); setShowSubmitModal(true); }}
-                    className="text-xs text-gray-400 hover:text-pairon-accent mt-1 block">Edit submission</button>
                 </div>
               ) : (
                 <Button onClick={() => setShowSubmitModal(true)} className="w-full pairon-btn-primary">
@@ -1753,6 +1783,9 @@ export function CollaborationPage() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300 rounded-xl text-sm border border-yellow-200 dark:border-yellow-700 font-medium">
+                ⚠️ You can only submit once. You will not be able to edit this submission afterward. Please make sure your project is final.
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Project link</label>
                 <Input type="url" value={submissionLink} onChange={(e) => setSubmissionLink(e.target.value)} placeholder="https://github.com/..." className="rounded-xl" required />
@@ -1771,7 +1804,7 @@ export function CollaborationPage() {
       {/* Exit Request Modal */}
       <AnimatePresence>
         {showExitModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="w-6 h-6 text-yellow-500" />
@@ -1798,7 +1831,7 @@ export function CollaborationPage() {
       {/* Incoming Exit Request Modal */}
       <AnimatePresence>
         {incomingExitRequest && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">Partner wants to leave</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-2">
@@ -1819,7 +1852,7 @@ export function CollaborationPage() {
       {/* Solo Leave Confirm */}
       <AnimatePresence>
         {showSoloLeaveConfirm && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <FolderOpen className="w-6 h-6 text-green-500" />
@@ -1849,7 +1882,7 @@ export function CollaborationPage() {
                   onClick={() => { setShowSoloLeaveConfirm(false); cleanupAndLeave(); navigate('/dashboard'); }}
                   className="w-full rounded-xl text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm"
                 >
-                  <LogOut className="w-4 h-4 mr-2" /> Leave without submitting
+                  <LogOut className="w-4 h-4 mr-2" /> {mySubmission ? 'Leave session' : 'Leave without submitting'}
                 </Button>
               </div>
             </motion.div>
@@ -1860,7 +1893,7 @@ export function CollaborationPage() {
       {/* Force Quit Confirm */}
       <AnimatePresence>
         {showForceQuitConfirm && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="w-6 h-6 text-red-500" />
@@ -1908,7 +1941,7 @@ export function CollaborationPage() {
       {/* Incoming Project Edit Proposal */}
       <AnimatePresence>
         {incomingProjectEdit && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-2xl">📝</span>
@@ -2058,7 +2091,7 @@ export function CollaborationPage() {
       {/* ── Session Complete Modal (shown after submission, auto-saved) ── */}
       <AnimatePresence>
         {showSessionCompleteModal && savedProjectSession && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.85, y: 20 }} animate={{ scale: 1, y: 0 }} transition={{ type: 'spring', damping: 18 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               {/* Success header */}
               <div className="text-center mb-5">
@@ -2131,14 +2164,14 @@ export function CollaborationPage() {
                   <Download className="w-4 h-4" /> Download Code (.zip)
                 </Button>
                 <Button
-                  onClick={() => { setShowSessionCompleteModal(false); setFriendRequestSent(false); navigate('/projects'); }}
+                  onClick={() => { cleanupAndLeave(); setShowSessionCompleteModal(false); setFriendRequestSent(false); navigate('/projects'); }}
                   className="w-full bg-pairon-accent hover:bg-pairon-accent/90 text-white rounded-xl py-3 h-auto font-medium flex items-center justify-center gap-2"
                 >
                   <FolderOpen className="w-4 h-4" /> View My Projects
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => { setShowSessionCompleteModal(false); setFriendRequestSent(false); navigate('/dashboard'); }}
+                  onClick={() => { cleanupAndLeave(); setShowSessionCompleteModal(false); setFriendRequestSent(false); navigate('/dashboard'); }}
                   className="w-full rounded-xl py-3 h-auto"
                 >
                   Go to Dashboard

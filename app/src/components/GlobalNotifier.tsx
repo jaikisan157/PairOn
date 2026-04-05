@@ -14,7 +14,7 @@ interface FriendNotif {
 
 interface Toast {
   id: string;
-  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner' | 'time-up';
+  type: 'friend-request' | 'friend-accepted' | 'friend-declined' | 'dm' | 'collab-proposal' | 'collab-declined' | 'info' | 'force-quit-partner' | 'time-up' | 'project-edit' | 'partner-submitted';
   title: string;
   body: string;
   data?: any;
@@ -25,10 +25,10 @@ export function GlobalNotifier() {
   const navigate = useNavigate();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [responding, setResponding] = useState<string | null>(null);
-  const { add: addNotification } = useNotifications();
+  const { add: addNotification, markReadByData } = useNotifications();
 
   // Types that require user action — do NOT auto-dismiss
-  const PERSISTENT_TYPES = ['friend-request', 'collab-proposal', 'force-quit-partner', 'time-up'];
+  const PERSISTENT_TYPES = ['friend-request', 'collab-proposal', 'force-quit-partner', 'time-up', 'project-edit', 'partner-submitted'];
 
   const addToast = (t: Omit<Toast, 'id'>) => {
     const id = `toast-${Date.now()}`;
@@ -40,7 +40,7 @@ export function GlobalNotifier() {
     }
 
     // Also save to persistent notification store (bell icon)
-    if (['friend-request', 'friend-accepted', 'friend-declined', 'dm', 'collab-proposal', 'collab-declined', 'force-quit-partner', 'time-up'].includes(t.type)) {
+    if (['friend-request', 'friend-accepted', 'friend-declined', 'dm', 'collab-proposal', 'collab-declined', 'force-quit-partner', 'time-up', 'project-edit', 'partner-submitted'].includes(t.type)) {
       addNotification({ type: t.type, title: t.title, body: t.body, data: t.data });
     }
   };
@@ -150,6 +150,26 @@ export function GlobalNotifier() {
       });
     });
 
+    // ── Partner submitted while user B is on Dashboard/other pages ──
+    socket.on('challenge:partner-submitted', (data: { sessionId: string; submitterName: string }) => {
+      if (window.location.pathname === '/collaborate') return;
+      const stored = localStorage.getItem('challenge_session');
+      if (!stored) return;
+      try {
+        const session = JSON.parse(stored);
+        if (session.sessionId !== data.sessionId) return;
+        // Pre-persist solo flag so when they click the notification they are in solo mode
+        localStorage.setItem('challenge_session', JSON.stringify({ ...session, isSolo: true }));
+      } catch { return; }
+
+      addToast({
+        type: 'partner-submitted',
+        title: '🎉 Partner Submitted!',
+        body: `${data.submitterName} has submitted their project. You can continue solo.`,
+        data: data,
+      });
+    });
+
     // ── Session timer expired while user is on another page ──
     socket.on('challenge:time-up', () => {
       if (window.location.pathname === '/collaborate') return; // collab page handles its own modal
@@ -164,6 +184,24 @@ export function GlobalNotifier() {
       });
     });
 
+    // ── Project edit proposed while user is on another page ──
+    socket.on('challenge:project-edit-proposed', (data: any) => {
+      if (window.location.pathname === '/collaborate') return;
+      const stored = localStorage.getItem('challenge_session');
+      if (!stored) return;
+      try {
+        const session = JSON.parse(stored);
+        if (session.sessionId !== data.sessionId) return;
+      } catch { return; }
+
+      addToast({
+        type: 'project-edit',
+        title: '📝 Project Edit Request',
+        body: `${data.proposerName} wants to change the project title to "${data.title}"`,
+        data: data,
+      });
+    });
+
     return () => {
       socket.off('force_terminate');
       socket.off('friend:request-received');
@@ -175,6 +213,8 @@ export function GlobalNotifier() {
       socket.off('dm:new-message');
       socket.off('challenge:partner-force-quit');
       socket.off('challenge:time-up');
+      socket.off('challenge:project-edit-proposed');
+      socket.off('challenge:partner-submitted');
     };
   }, [isAuthenticated, navigate]);
 
@@ -191,6 +231,7 @@ export function GlobalNotifier() {
     } catch { /* best effort */ }
     setResponding(null);
     removeToast(toastId);
+    markReadByData(friendshipId, 'friendshipId');
   };
 
   const respondToProposal = (proposalId: string, action: 'accept' | 'decline', toastId: string) => {
@@ -202,6 +243,7 @@ export function GlobalNotifier() {
       socket.emit('collab:decline', proposalId);
     }
     removeToast(toastId);
+    markReadByData(proposalId, 'id');
   };
 
   const handleForceQuitResponse = (action: 'continue' | 'leave', toastId: string, _data?: any) => {
@@ -231,7 +273,7 @@ export function GlobalNotifier() {
           <div
             key={toast.id}
             style={{
-              background: '#1e2030', border: `1px solid ${toast.type === 'friend-request' ? 'rgba(99,102,241,0.4)' : toast.type === 'friend-accepted' ? 'rgba(16,185,129,0.4)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.3)' : toast.type === 'collab-proposal' ? 'rgba(16,185,129,0.4)' : toast.type === 'info' ? 'rgba(16,185,129,0.3)' : toast.type === 'force-quit-partner' ? 'rgba(245,158,11,0.5)' : 'rgba(99,102,241,0.3)'}`,
+              background: '#1e2030', border: `1px solid ${toast.type === 'friend-request' ? 'rgba(99,102,241,0.4)' : toast.type === 'friend-accepted' ? 'rgba(16,185,129,0.4)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.3)' : toast.type === 'collab-proposal' ? 'rgba(16,185,129,0.4)' : toast.type === 'info' ? 'rgba(16,185,129,0.3)' : toast.type === 'force-quit-partner' ? 'rgba(245,158,11,0.5)' : toast.type === 'project-edit' ? 'rgba(59,130,246,0.5)' : toast.type === 'partner-submitted' ? 'rgba(16,185,129,0.5)' : 'rgba(99,102,241,0.3)'}`,
               borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
               padding: '14px 16px', width: '100%', pointerEvents: 'all',
               animation: 'slideUp 0.3s ease',
@@ -249,9 +291,9 @@ export function GlobalNotifier() {
               {/* Icon */}
               <div style={{
                 width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: 'white',
-                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.2)' : toast.type === 'collab-proposal' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'info' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'force-quit-partner' ? 'linear-gradient(135deg,#f59e0b,#d97706)' : toast.type === 'time-up' ? 'linear-gradient(135deg,#f97316,#ea580c)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
+                background: toast.type === 'friend-request' ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : toast.type === 'friend-accepted' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? 'rgba(239,68,68,0.2)' : toast.type === 'collab-proposal' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'info' ? 'linear-gradient(135deg,#10b981,#059669)' : toast.type === 'force-quit-partner' ? 'linear-gradient(135deg,#f59e0b,#d97706)' : toast.type === 'time-up' ? 'linear-gradient(135deg,#f97316,#ea580c)' : toast.type === 'project-edit' ? 'linear-gradient(135deg,#3b82f6,#2563eb)' : toast.type === 'partner-submitted' ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#6366f1,#06b6d4)',
               }}>
-                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' || toast.type === 'info' ? '✓' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? '✗' : toast.type === 'collab-proposal' ? '🤝' : toast.type === 'force-quit-partner' ? '⚠️' : toast.type === 'time-up' ? '⏰' : '💬'}
+                {toast.type === 'friend-request' ? toast.data.requesterName.charAt(0).toUpperCase() : toast.type === 'friend-accepted' || toast.type === 'info' ? '✓' : toast.type === 'friend-declined' || toast.type === 'collab-declined' ? '✗' : toast.type === 'collab-proposal' ? '🤝' : toast.type === 'force-quit-partner' ? '⚠️' : toast.type === 'time-up' ? '⏰' : toast.type === 'project-edit' ? '📝' : toast.type === 'partner-submitted' ? '🎉' : '💬'}
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -314,6 +356,24 @@ export function GlobalNotifier() {
                   </div>
                 )}
 
+                {/* Actions for partner submitted */}
+                {toast.type === 'partner-submitted' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => handleForceQuitResponse('continue', toast.id, toast.data)}
+                      style={{ padding: '5px 14px', background: '#10b981', color: 'white', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      🚀 Continue Solo
+                    </button>
+                    <button
+                      onClick={() => handleForceQuitResponse('leave', toast.id, toast.data)}
+                      style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Leave Session
+                    </button>
+                  </div>
+                )}
+
                 {/* Actions for time-up */}
                 {toast.type === 'time-up' && (
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -328,6 +388,24 @@ export function GlobalNotifier() {
                       style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
                     >
                       End Session
+                    </button>
+                  </div>
+                )}
+
+                {/* Actions for project edit */}
+                {toast.type === 'project-edit' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => { removeToast(toast.id); navigate('/collaborate'); }}
+                      style={{ padding: '5px 14px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      📝 View Request
+                    </button>
+                    <button
+                      onClick={() => removeToast(toast.id)}
+                      style={{ padding: '5px 12px', background: 'rgba(255,255,255,0.08)', color: '#d1d5db', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Dismiss
                     </button>
                   </div>
                 )}

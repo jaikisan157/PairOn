@@ -58,7 +58,6 @@ const UserSchema = new Schema<IUser>(
       type: Number,
       default: 100,
       min: 0,
-      max: 100,
     },
     completedProjects: {
       type: Number,

@@ -8,6 +8,7 @@ interface AuthContextType extends AuthState {
   register: (credentials: RegisterCredentials) => Promise<void>;
   logout: () => void;
   updateProfile: (updates: Partial<User>) => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -131,6 +132,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }));
   }, [state.user]);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const { user } = await api.getMe();
+      localStorage.setItem('pairon_user', JSON.stringify(user));
+      setState(prev => ({ ...prev, user }));
+    } catch { /* best effort */ }
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -139,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         register,
         logout,
         updateProfile,
+        refreshUser,
       }}
     >
       {terminatedReason && (

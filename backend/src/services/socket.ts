@@ -182,10 +182,10 @@ export function setupSocketHandlers(io: Server) {
         // Fetch only the 5 most recent, with minimal fields
         const recentSessions = await CollaborationSession.find(
           { participants: userId },
-          { matchId: 1, participants: 1, status: 1, startedAt: 1, endsAt: 1, tasks: 1 }
+          { matchId: 1, participants: 1, status: 1, startedAt: 1, endsAt: 1, tasks: 1, quitterId: 1 }
         )
           .sort({ createdAt: -1 })
-          .limit(5)
+          .limit(20)
           .lean();
 
         if (recentSessions.length === 0) {
@@ -220,6 +220,7 @@ export function setupSocketHandlers(io: Server) {
             quitterId: (sess as any).quitterId || null,
             startedAt: sess.startedAt,
             endsAt: sess.endsAt,
+            submittedBy: (sess as any).submission?.submittedBy || null,
             tasksTotal: (sess.tasks as any[])?.length || 0,
             tasksDone: (sess.tasks as any[])?.filter((t: any) => t.status === 'done').length || 0,
           };
@@ -318,7 +319,8 @@ export function setupSocketHandlers(io: Server) {
             const partnerId = session.participants.find((p: string) => p !== userId);
 
             // End session
-            session.status = 'abandoned';
+            session.status = 'partner_skipped';
+            session.quitterId = userId;
             session.endedAt = new Date();
             await session.save();
 
@@ -533,8 +535,9 @@ export function setupSocketHandlers(io: Server) {
         const partnerId = session.participants.find((p: string) => p !== userId);
         if (!partnerId) return;
 
-        // End session
-        session.status = 'abandoned';
+        // End session (mark as partner_skipped with quitterId so UI displays abandoned vs skipped)
+        session.status = 'partner_skipped';
+        session.quitterId = userId;
         session.endedAt = new Date();
         await session.save();
 
