@@ -256,11 +256,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // ── Remote audio track ──
     pc.ontrack = (event) => {
       console.log('[Call] 🔊 Remote track received! streams:', event.streams.length,
-        'tracks:', event.streams[0]?.getTracks().map(t => `${t.kind}:${t.readyState}`));
+        'tracks:', event.streams[0]?.getTracks().map(t => `${t.kind}:${t.readyState}`) || 'built from event.track');
 
       const audio = remoteAudioRef.current;
-      if (audio && event.streams[0]) {
-        audio.srcObject = event.streams[0];
+      
+      // Fallback: if browser doesn't provide streams array natively, build it directly
+      let stream = event.streams[0];
+      if (!stream) {
+        stream = new MediaStream([event.track]);
+      }
+
+      if (audio && stream) {
+        audio.srcObject = stream;
         console.log('[Call] Set srcObject on audio element');
 
         // Try to play — should succeed because we pre-warmed in user gesture
@@ -281,7 +288,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           });
         }
       } else {
-        console.error('[Call] ❌ Cannot play: audio element =', !!audio, ', streams =', event.streams.length);
+        console.error('[Call] ❌ Cannot play: audio element =', !!audio, ', stream built =', !!stream);
       }
     };
 
