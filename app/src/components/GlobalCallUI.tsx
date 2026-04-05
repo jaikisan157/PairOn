@@ -26,9 +26,8 @@ export function GlobalCallUI() {
   const clamp = useCallback((x: number, y: number) => {
     const maxX =  (window.innerWidth  / 2) - PAD - BAR_W / 2;
     const minX = -(window.innerWidth  / 2) + PAD + BAR_W / 2;
-    const maxY =  (window.innerHeight / 2) - PAD - BAR_H / 2 - 24; // 24 = bottom offset
-    // allow going up but not below the bottom
-    const minY = -(window.innerHeight - BAR_H - 24 - PAD) + (window.innerHeight / 2);
+    const maxY =  window.innerHeight - BAR_H - 24 - PAD;
+    const minY =  PAD - 24;
     return {
       x: Math.max(minX, Math.min(maxX, x)),
       y: Math.max(minY, Math.min(maxY, y)),
@@ -192,6 +191,7 @@ export function GlobalCallUI() {
                 boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
                 cursor: isDraggingRef.current ? 'grabbing' : 'grab',
                 userSelect: 'none',
+                touchAction: 'none',
                 width: '100%',
                 boxSizing: 'border-box',
               }}
