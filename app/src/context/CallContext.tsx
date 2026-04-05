@@ -163,25 +163,45 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ── Ring beep ─────────────────────────────────────────────────────────────
+  // ── Ring tone ─────────────────────────────────────────────────────────────
   const startRingBeep = useCallback(() => {
-    const beep = () => {
+    if (ringingBeepRef.current) return; // Prevent double-interval leak
+    
+    const playTone = (freq: number, startOffset: number, duration: number) => {
       try {
-        if (!ringCtxRef.current || ringCtxRef.current.state === 'closed')
-          ringCtxRef.current = new AudioContext();
-        const ctx = ringCtxRef.current;
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        const ctx = ringCtxRef.current!;
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
-        osc.frequency.value = 440; osc.type = 'sine';
-        g.gain.setValueAtTime(0.3, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + startOffset);
+        
+        g.gain.setValueAtTime(0, ctx.currentTime + startOffset);
+        g.gain.linearRampToValueAtTime(0.2, ctx.currentTime + startOffset + 0.05);
+        g.gain.setValueAtTime(0.2, ctx.currentTime + startOffset + duration - 0.1);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startOffset + duration);
+        
         osc.connect(g); g.connect(ctx.destination);
-        osc.start(); osc.stop(ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime + startOffset);
+        osc.stop(ctx.currentTime + startOffset + duration);
+      } catch (e) {}
+    };
+
+    const runSequence = () => {
+      try {
+        if (!ringCtxRef.current || ringCtxRef.current.state === 'closed')
+          ringCtxRef.current = new window.AudioContext();
+        const ctx = ringCtxRef.current;
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        
+        // Modern, pleasant E Major ascending arpeggio
+        playTone(659.25, 0, 0.2);     // E5
+        playTone(830.61, 0.15, 0.2);  // G#5
+        playTone(1108.73, 0.3, 0.4);  // C#6
       } catch {}
     };
-    beep();
-    ringingBeepRef.current = setInterval(beep, 1500);
+
+    runSequence();
+    ringingBeepRef.current = setInterval(runSequence, 2000);
   }, []);
 
   const stopRingBeep = useCallback(() => {
@@ -430,6 +450,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       // 6. Set status
       setCallStatus('calling'); callStatusRef.current = 'calling';
+      startRingBeep(); // Give caller a ringback tone so they aren't in silence
 
       // Timeout
       if (callingTimeoutRef.current) clearTimeout(callingTimeoutRef.current);
@@ -648,6 +669,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer as RTCSessionDescriptionInit));
           flushIceCandidates();
+          stopRingBeep();
           setCallStatus('connecting' as any); callStatusRef.current = 'connecting' as any;
           console.log('[Call] ✅ SDP Answer received — waiting for ICE to connect and audio to flow');
         } catch (err) {
