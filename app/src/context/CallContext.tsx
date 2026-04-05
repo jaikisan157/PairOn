@@ -194,12 +194,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const ctx = ringCtxRef.current!;
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
-        osc.type = 'sine';
+        osc.type = 'sine'; // Softest waveform
         osc.frequency.setValueAtTime(freq, ctx.currentTime + startOffset);
         
         g.gain.setValueAtTime(0, ctx.currentTime + startOffset);
-        g.gain.linearRampToValueAtTime(0.2, ctx.currentTime + startOffset + 0.05);
-        g.gain.setValueAtTime(0.2, ctx.currentTime + startOffset + duration - 0.1);
+        // Very soft, slow attack
+        g.gain.linearRampToValueAtTime(0.15, ctx.currentTime + startOffset + 0.1);
+        // Long, smooth fade out for a soothing ambient feel
         g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startOffset + duration);
         
         osc.connect(g); g.connect(ctx.destination);
@@ -215,15 +216,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const ctx = ringCtxRef.current;
         if (ctx.state === 'suspended') ctx.resume().catch(() => {});
         
-        // Modern, pleasant E Major ascending arpeggio
-        playTone(659.25, 0, 0.2);     // E5
-        playTone(830.61, 0.15, 0.2);  // G#5
-        playTone(1108.73, 0.3, 0.4);  // C#6
+        // Gentle, soothing ambient double ping (F4 and A4)
+        playTone(349.23, 0.0, 1.2); // F4
+        playTone(440.00, 0.2, 1.5); // A4
       } catch {}
     };
 
     runSequence();
-    ringingBeepRef.current = setInterval(runSequence, 2000);
+    ringingBeepRef.current = setInterval(runSequence, 3000); // Slower, calmer repeat
   }, []);
 
   const stopRingBeep = useCallback(() => {
