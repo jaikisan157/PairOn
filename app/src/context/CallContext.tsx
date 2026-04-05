@@ -672,7 +672,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
       // ── ICE candidates ──
       socket.on('call:ice-candidate', (data: { candidate: RTCIceCandidateInit }) => {
         const pc = pcRef.current;
-        if (!pc) return;
+        if (!pc) {
+          iceCandidateQueue.current.push(data.candidate);
+          console.log('[Call] 📥 Early ICE candidate queued (while ringing/no pc yet), queue size:', iceCandidateQueue.current.length);
+          return;
+        }
         if (pc.remoteDescription) {
           pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch((err) => {
             console.warn('[Call] Failed to add ICE candidate:', err.message);
