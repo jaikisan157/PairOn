@@ -437,38 +437,41 @@ export function QuickConnectPage() {
                             </div>
                         </div>
 
-                        {chatStatus === 'chatting' && (
-                            <div className="flex gap-2">
-                                {!proposalSent && !isPartnerMobile && (
+                        <div className="flex items-center gap-3">
+                            <GlobalThemeToggle />
+                            {chatStatus === 'chatting' && (
+                                <div className="flex gap-2">
+                                    {!proposalSent && !isPartnerMobile && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleOpenProposal}
+                                            className="text-pairon-accent border-pairon-accent/30 hover:bg-pairon-accent/10 flex items-center gap-1"
+                                        >
+                                            <Handshake className="w-4 h-4" />
+                                            Propose Collab
+                                        </Button>
+                                    )}
+                                    {proposalSent && (
+                                        <span className="text-xs text-green-500 flex items-center gap-1 px-3">
+                                            <Sparkles className="w-3 h-3" />
+                                            Proposal sent!
+                                        </span>
+                                    )}
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={handleOpenProposal}
-                                        className="text-pairon-accent border-pairon-accent/30 hover:bg-pairon-accent/10 flex items-center gap-1"
+                                        onClick={handleEndChat}
+                                        className="text-red-600 border-red-200 hover:bg-red-50"
                                     >
-                                        <Handshake className="w-4 h-4" />
-                                        Propose Collab
+                                        End chat
                                     </Button>
-                                )}
-                                {proposalSent && (
-                                    <span className="text-xs text-green-500 flex items-center gap-1 px-3">
-                                        <Sparkles className="w-3 h-3" />
-                                        Proposal sent!
-                                    </span>
-                                )}
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={handleEndChat}
-                                    className="text-red-600 border-red-200 hover:bg-red-50"
-                                >
-                                    End chat
-                                </Button>
-                            </div>
-                        )}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
-            <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
+            </header>
 
             {/* Warning Banner */}
             <AnimatePresence>

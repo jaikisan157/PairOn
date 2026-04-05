@@ -70,6 +70,7 @@ export function AdminDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <GlobalThemeToggle />
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
@@ -82,7 +83,7 @@ export function AdminDashboardPage() {
             </div>
           </div>
         </div>
-      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
+      </header>
 
       {/* Tabs */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">

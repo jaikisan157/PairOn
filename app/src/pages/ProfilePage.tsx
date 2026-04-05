@@ -127,6 +127,7 @@ export function ProfilePage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <GlobalThemeToggle />
               <Button
                 variant="outline"
                 size="sm"
@@ -148,7 +149,7 @@ export function ProfilePage() {
             </div>
           </div>
         </div>
-      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
+      </header>
 
       {/* Main Content */}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">

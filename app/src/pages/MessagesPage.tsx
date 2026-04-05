@@ -124,20 +124,23 @@ export function MessagesPage() {
     return (
         <div className="flex flex-col h-screen bg-pairon-bg dark:bg-gray-900 text-gray-900 dark:text-white font-sans">
             {/* ── Header ── */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-white/7 bg-white dark:bg-gray-900 shrink-0">
-                <button
-                    onClick={() => navigate(-1)}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
-                >
-                    <ArrowLeft size={20} />
-                </button>
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pairon-accent to-emerald-600 flex items-center justify-center text-white font-bold text-base shrink-0">
-                    {avatarLetter}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-white/7 bg-white dark:bg-gray-900 shrink-0">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                    >
+                        <ArrowLeft size={20} />
+                    </button>
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pairon-accent to-emerald-600 flex items-center justify-center text-white font-bold text-base shrink-0">
+                        {avatarLetter}
+                    </div>
+                    <div>
+                        <div className="font-semibold text-sm text-gray-900 dark:text-white">{friendName}</div>
+                        <div className="text-[11px] text-gray-400 dark:text-gray-500">Direct Message</div>
+                    </div>
                 </div>
-                <div>
-                    <div className="font-semibold text-sm text-gray-900 dark:text-white">{friendName}</div>
-                    <div className="text-[11px] text-gray-400 dark:text-gray-500">Direct Message</div>
-                </div>
+                <GlobalThemeToggle />
             </div>
 
             {/* ── Error banner ── */}

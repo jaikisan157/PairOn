@@ -217,22 +217,25 @@ export function FriendsPage() {
         <div className="min-h-screen bg-pairon-bg dark:bg-gray-900">
             <div className="max-w-4xl mx-auto p-3 sm:p-6">
                 {/* Header */}
-                <div className="flex items-center gap-4 mb-8">
-                    <button
-                        onClick={() => navigate('/dashboard')}
-                        className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-                    >
-                        <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                    </button>
-                    <div>
-                        <h1 className="font-display text-lg sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                            <Users className="w-6 h-6 text-pairon-accent" />
-                            Friends
-                        </h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {friends.length} friend{friends.length !== 1 ? 's' : ''} · {pending.length} pending request{pending.length !== 1 ? 's' : ''}
-                        </p>
+                <div className="flex items-center justify-between mb-8">
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={() => navigate('/dashboard')}
+                            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                        >
+                            <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        </button>
+                        <div>
+                            <h1 className="font-display text-lg sm:text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                <Users className="w-6 h-6 text-pairon-accent" />
+                                Friends
+                            </h1>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {friends.length} friend{friends.length !== 1 ? 's' : ''} · {pending.length} pending request{pending.length !== 1 ? 's' : ''}
+                            </p>
+                        </div>
                     </div>
+                    <GlobalThemeToggle />
                 </div>
 
                 {/* Tabs */}

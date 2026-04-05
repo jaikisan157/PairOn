@@ -145,14 +145,17 @@ export function CommunityPage() {
             </div>
           </div>
           
-          <Button 
-            onClick={() => setShowCreate(!showCreate)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shrink-0 ml-2"
-          >
-            {showCreate ? <ArrowLeft className="w-4 h-4 sm:mr-2" /> : <Plus className="w-4 h-4 sm:mr-2" />}
-            <span className="hidden sm:inline">{showCreate ? 'Back to Posts' : 'New Post'}</span>
-          </Button>
-        <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
+          <div className="flex items-center gap-3">
+            <GlobalThemeToggle />
+            <Button 
+              onClick={() => setShowCreate(!showCreate)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shrink-0 ml-2"
+            >
+              {showCreate ? <ArrowLeft className="w-4 h-4 sm:mr-2" /> : <Plus className="w-4 h-4 sm:mr-2" />}
+              <span className="hidden sm:inline">{showCreate ? 'Back to Posts' : 'New Post'}</span>
+            </Button>
+          </div>
+        </header>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">

@@ -108,12 +108,15 @@ export function UserProfileViewPage() {
 
   return (
     <div className="min-h-screen bg-pairon-bg dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 sm:px-6 py-4 flex items-center gap-4">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-          <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-        </button>
-        <h1 className="font-display font-semibold text-gray-900 dark:text-white truncate">{profile.name}&apos;s Profile</h1>
-      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
+      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 sm:px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          </button>
+          <h1 className="font-display font-semibold text-gray-900 dark:text-white truncate">{profile.name}&apos;s Profile</h1>
+        </div>
+        <GlobalThemeToggle />
+      </header>
 
       <main className="max-w-2xl mx-auto px-3 sm:px-4 py-6 sm:py-8 space-y-4 sm:space-y-6">
         {/* Profile card */}
