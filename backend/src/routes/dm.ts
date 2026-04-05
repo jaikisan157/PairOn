@@ -13,6 +13,43 @@ function sortedPair(a: string, b: string): [string, string] {
 }
 
 // ─────────────────────────────────────────────
+// GET /api/dm/threads
+// Get all direct message threads for the current user (with unread counts)
+// ─────────────────────────────────────────────
+router.get('/threads', authMiddleware, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const threads = await DirectMessage.find({ participants: userId }).lean();
+        
+        const threadsWithUnread = [];
+        for (const thread of threads) {
+            const partnerId = thread.participants.find((p: string) => p !== userId);
+            if (!partnerId) continue;
+            
+            const partner = await User.findById(partnerId).select('name reputation').lean();
+            const unreadCount = (thread as any).messages?.filter((m: any) => m.senderId !== userId && !m.read).length || 0;
+            
+            threadsWithUnread.push({
+                threadId: thread._id,
+                partner: {
+                    id: partnerId,
+                    name: (partner as any)?.name || 'User',
+                    reputation: (partner as any)?.reputation || 0,
+                },
+                unreadCount,
+            });
+        }
+        
+        res.json(threadsWithUnread);
+    } catch (err: any) {
+        console.error('[DM GET /threads]', err.message);
+        res.status(500).json({ error: 'Failed to load threads' });
+    }
+});
+
+// ─────────────────────────────────────────────
 // GET /api/dm/thread/:friendId
 // Get or create the direct-message thread between current user and friendId
 // ─────────────────────────────────────────────

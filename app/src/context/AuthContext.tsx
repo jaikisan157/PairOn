@@ -56,60 +56,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!state.isAuthenticated) return;
 
     const handleConnectError = (err: Error) => {
-      if (err.message === 'SESSION_EXPIRED') {
-        socketService.disconnect();
-        localStorage.removeItem('pairon_token');
-        localStorage.removeItem('pairon_user');
-        localStorage.removeItem('challenge_session');
-        setState({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-          isLoading: false,
-        });
-        setTerminatedReason('You logged in from another device. To prevent conflicts, this session has been disconnected.');
-      }
+      // (SESSION_EXPIRED handling removed)
     };
 
     const handleForceTerminate = () => {
-      socketService.disconnect();
-      localStorage.removeItem('pairon_token');
-      localStorage.removeItem('pairon_user');
-      localStorage.removeItem('challenge_session');
-      setState({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-          isLoading: false,
-      });
-      setTerminatedReason('A new tab or device connected to this session. To prevent conflicts, this old session has been disconnected.');
+      // (CONCURRENT_LOGIN disconnect removed)
     };
 
     socketService.onConnectError(handleConnectError);
-    // Bind force_terminate here instead of GlobalNotifier
-    const socket = socketService.getSocket();
-    if (socket) {
-      socket.on('force_terminate', handleForceTerminate);
-    } else {
-      // wait until connected
-      const checkSocket = setInterval(() => {
-        const s = socketService.getSocket();
-        if (s) {
-          s.on('force_terminate', handleForceTerminate);
-          clearInterval(checkSocket);
-        }
-      }, 500);
-      return () => {
-        clearInterval(checkSocket);
-        const s = socketService.getSocket();
-        if (s) s.off('force_terminate', handleForceTerminate);
-      };
-    }
-
-    return () => {
-      const s = socketService.getSocket();
-      if (s) s.off('force_terminate', handleForceTerminate);
-    };
   }, [state.isAuthenticated]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {

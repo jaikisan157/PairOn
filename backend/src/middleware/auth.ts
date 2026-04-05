@@ -31,14 +31,7 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET) as JWTPayload;
 
-    // Single-device login enforcement
-    if (decoded.loginSessionId) {
-      const dbUser = await User.findById(decoded.userId).select('loginSessionId').lean();
-      if (!dbUser || dbUser.loginSessionId !== decoded.loginSessionId) {
-        res.status(401).json({ message: 'Session expired. You logged in from another device.' });
-        return;
-      }
-    }
+    // Single-device login enforcement (removed)
 
     req.user = decoded;
     next();

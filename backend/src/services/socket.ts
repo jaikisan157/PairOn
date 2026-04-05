@@ -38,7 +38,7 @@ interface EnvRealStore {
 const sessionEnvStore = new Map<string, EnvRealStore>();
 
 // ── Active User Sockets (userId -> socketId) ────────
-const userSockets: Map<string, string> = new Map();
+// Removed logic that kept only one active socket.
 
 export function setupSocketHandlers(io: Server) {
   // Start quickchat inactivity checker (5 min timeout)
@@ -58,14 +58,7 @@ export function setupSocketHandlers(io: Server) {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET) as JWTPayload;
 
-      // Single-device login enforcement
-      if (decoded.loginSessionId) {
-        const dbUser = await User.findById(decoded.userId).select('loginSessionId').lean();
-        if (!dbUser || dbUser.loginSessionId !== decoded.loginSessionId) {
-          // We can send a specific error string so the UI knows
-          return next(new Error('SESSION_EXPIRED'));
-        }
-      }
+      // Single-device login enforcement (removed)
 
       socket.data.userId = decoded.userId;
       socket.data.email = decoded.email;
@@ -84,20 +77,7 @@ export function setupSocketHandlers(io: Server) {
     const userId = socket.data.userId;
     console.log('User connected:', socket.id, '| userId:', userId);
 
-    // Track active user sockets for single-session enforcement
-    const previousSocketId = userSockets.get(userId);
-    if (previousSocketId && previousSocketId !== socket.id) {
-      // Force terminate the older socket
-      io.to(previousSocketId).emit('force_terminate', { reason: 'CONCURRENT_LOGIN' });
-      // Disconnect it forcefully from server side too
-      const oldSocket = io.sockets.sockets.get(previousSocketId);
-      if (oldSocket) {
-        oldSocket.disconnect(true);
-      }
-    }
-    
-    // Register new socket
-    userSockets.set(userId, socket.id);
+    // (Removed strict singleton active socket enforcement here)
 
     // Auto-join user's personal room and set online
     socket.join(`user:${userId}`);
@@ -975,10 +955,7 @@ export function setupSocketHandlers(io: Server) {
       // Remove from matchmaking queue
       matchmakingQueue.delete(userId);
 
-      // Clean up user socket
-      if (userSockets.get(userId) === socket.id) {
-        userSockets.delete(userId);
-      }
+      // Clean up user socket (removed)
 
       // ── Handle active call graceful reconnection ──
       for (const [sessionId, call] of activeCalls.entries()) {
@@ -1002,13 +979,16 @@ export function setupSocketHandlers(io: Server) {
         break;
       }
 
-      // Update user offline status
+      // Update user offline status only if no other sockets are connected
       try {
-        await User.findByIdAndUpdate(userId, {
-          isOnline: false,
-          lastActive: new Date(),
-        });
-        io.emit('user:status-change', userId, false);
+        const userRoom = io.sockets.adapter.rooms.get(`user:${userId}`);
+        if (!userRoom || userRoom.size === 0) {
+          await User.findByIdAndUpdate(userId, {
+            isOnline: false,
+            lastActive: new Date(),
+          });
+          io.emit('user:status-change', userId, false);
+        }
       } catch (error) {
         console.error('Error updating offline status:', error);
       }
@@ -1196,11 +1176,9 @@ async function findMatch(
   io.to(`user:${userId}`).emit('match:found', matchData1);
   io.to(`user:${bestMatch.userId}`).emit('match:found', matchData2);
 
-  // Also auto-join both to session room
-  const user1Socket = io.sockets.sockets.get(socket.id);
-  if (user1Socket) user1Socket.join(`session:${session._id.toString()}`);
-  const user2Socket = io.sockets.sockets.get(bestMatch.socketId);
-  if (user2Socket) user2Socket.join(`session:${session._id.toString()}`);
+  // Also auto-join all active sockets to session room
+  io.in(`user:${userId}`).socketsJoin(`session:${session._id.toString()}`);
+  io.in(`user:${bestMatch.userId}`).socketsJoin(`session:${session._id.toString()}`);
 
   // Start session timer
   startSessionTimer(io, session._id.toString(), session.endsAt, session.participants);
