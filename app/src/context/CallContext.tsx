@@ -43,12 +43,34 @@ export function useCall(): CallContextType {
   return ctx;
 }
 
-// ─── Free ICE Servers ────────────────────────────────────────────────────────
+// ─── ICE Servers (STUN + free TURN for NAT traversal) ────────────────────────
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
+  // Free TURN servers from Open Relay Project (metered.ca)
+  {
+    urls: 'turn:a.relay.metered.ca:80',
+    username: 'e8dd65b92f70b4da673ba6a4',
+    credential: '3IVcuFCrsMsnqN+3',
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+    username: 'e8dd65b92f70b4da673ba6a4',
+    credential: '3IVcuFCrsMsnqN+3',
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:443',
+    username: 'e8dd65b92f70b4da673ba6a4',
+    credential: '3IVcuFCrsMsnqN+3',
+  },
+  {
+    urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+    username: 'e8dd65b92f70b4da673ba6a4',
+    credential: '3IVcuFCrsMsnqN+3',
+  },
+  // Optional custom TURN from environment
   ...(import.meta.env.VITE_TURN_URL ? [{
     urls: import.meta.env.VITE_TURN_URL as string,
     username: (import.meta.env.VITE_TURN_USERNAME || '') as string,
@@ -222,13 +244,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── Create RTCPeerConnection ──────────────────────────────────────────────
-  const createPeerConnection = useCallback((sessionId: string) => {
+  const createPeerConnection = useCallback((sessionId: string, preserveIceQueue = false) => {
     // Clean up old connection
     if (pcRef.current) {
       try { pcRef.current.close(); } catch {}
       pcRef.current = null;
     }
-    iceCandidateQueue.current = [];
+    // Only clear ICE queue for fresh outgoing calls.
+    // When accepting an incoming call, candidates arrived during ringing must be kept!
+    if (!preserveIceQueue) {
+      iceCandidateQueue.current = [];
+    }
+    console.log('[Call] ICE queue preserved:', preserveIceQueue, ', queued candidates:', iceCandidateQueue.current.length);
 
     console.log('[Call] Creating RTCPeerConnection with', ICE_SERVERS.length, 'ICE servers');
     const pc = new RTCPeerConnection({
@@ -493,8 +520,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       localStreamRef.current = stream;
       console.log('[Call] Microphone acquired');
 
-      // 2. Create peer connection
-      const pc = createPeerConnection(sessionId);
+      // 2. Create peer connection (PRESERVE ICE candidates queued during ringing!)
+      const pc = createPeerConnection(sessionId, true);
 
       // 3. Add local audio tracks BEFORE setRemoteDescription
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
