@@ -72,7 +72,6 @@ function AppRoutes() {
     <>
       <GlobalNotifier />
       <GlobalCallUI />
-      <GlobalThemeToggle />
       <Routes>
         <Route path="/" element={<PublicRoute><LandingPage /></PublicRoute>} />
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />

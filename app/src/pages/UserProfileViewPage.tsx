@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Star, Zap, CheckCircle, Award, UserPlus, MessageCircle, Check, Loader2, Calendar, Heart } from 'lucide-react';
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
@@ -112,7 +113,7 @@ export function UserProfileViewPage() {
           <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
         </button>
         <h1 className="font-display font-semibold text-gray-900 dark:text-white truncate">{profile.name}&apos;s Profile</h1>
-      </header>
+      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
 
       <main className="max-w-2xl mx-auto px-3 sm:px-4 py-6 sm:py-8 space-y-4 sm:space-y-6">
         {/* Profile card */}

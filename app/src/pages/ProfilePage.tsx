@@ -1,3 +1,4 @@
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -147,7 +148,7 @@ export function ProfilePage() {
             </div>
           </div>
         </div>
-      </header>
+      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
 
       {/* Main Content */}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">

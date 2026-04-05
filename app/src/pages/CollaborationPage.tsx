@@ -1,3 +1,4 @@
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1311,6 +1312,7 @@ export function CollaborationPage() {
                 </Button>
               )}
 
+              <GlobalThemeToggle />
               {/* Voice Call Button — WebRTC P2P, handled by CallContext */}
               {session && (
                 callStatus === 'idle' ? (

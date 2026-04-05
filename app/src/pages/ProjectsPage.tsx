@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, FolderOpen, CheckCircle, Clock, Download, ExternalLink, Users, Trash2, RefreshCw } from 'lucide-react';
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -162,7 +163,7 @@ export function ProjectsPage() {
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
-      </header>
+      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
         {error && (

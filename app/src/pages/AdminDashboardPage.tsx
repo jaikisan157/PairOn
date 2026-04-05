@@ -1,3 +1,4 @@
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -81,7 +82,7 @@ export function AdminDashboardPage() {
             </div>
           </div>
         </div>
-      </header>
+      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
 
       {/* Tabs */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">

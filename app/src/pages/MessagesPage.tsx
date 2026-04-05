@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Send, ArrowLeft } from 'lucide-react';
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { socketService } from '@/lib/socket';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';

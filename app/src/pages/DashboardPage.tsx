@@ -1,3 +1,4 @@
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -431,7 +432,7 @@ export function DashboardPage() {
               </span>
             </div>
             <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 hidden sm:block" />
-            <NotificationBell />
+            <div className="flex items-center gap-2"><GlobalThemeToggle /><NotificationBell /></div>
             <button
               onClick={() => setShowLogoutConfirm(true)}
               className="sm:hidden p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"

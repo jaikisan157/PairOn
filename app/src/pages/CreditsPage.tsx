@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Sparkles, Lock, Zap, Gift, BarChart2, ShieldCheck, Clock } from 'lucide-react';
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { Button } from '@/components/ui/button';
 
 const upcomingFeatures = [
@@ -29,7 +30,7 @@ export function CreditsPage() {
           <h1 className="font-bold text-gray-900 dark:text-white text-lg">Credits & Rewards</h1>
           <p className="text-xs text-pairon-accent">Coming soon</p>
         </div>
-      </header>
+      <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
 
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-16">
         {/* Hero */}

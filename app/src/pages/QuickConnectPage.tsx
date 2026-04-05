@@ -1,3 +1,4 @@
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -467,7 +468,7 @@ export function QuickConnectPage() {
                         )}
                     </div>
                 </div>
-            </header>
+            <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
 
             {/* Warning Banner */}
             <AnimatePresence>

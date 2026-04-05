@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardSidebar } from '@/components/DashboardSidebar';
 import { MessageSquare, ThumbsUp, Plus, Trash2, Tag, ArrowLeft } from 'lucide-react';
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
@@ -151,7 +152,7 @@ export function CommunityPage() {
             {showCreate ? <ArrowLeft className="w-4 h-4 sm:mr-2" /> : <Plus className="w-4 h-4 sm:mr-2" />}
             <span className="hidden sm:inline">{showCreate ? 'Back to Posts' : 'New Post'}</span>
           </Button>
-        </header>
+        <div className="ml-auto flex items-center gap-2"><GlobalThemeToggle /></div></header>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
