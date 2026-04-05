@@ -158,7 +158,7 @@ export function GlobalCallUI() {
 
       {/* ── Active call / calling / reconnecting bar ──────────────────── */}
       <AnimatePresence>
-        {(callStatus === 'connected' || callStatus === 'calling' || callStatus === 'reconnecting') && (
+        {(callStatus === 'connected' || callStatus === 'connecting' || callStatus === 'calling' || callStatus === 'reconnecting') && (
           <motion.div
             key="call-bar"
             initial={{ opacity: 0, y: 40 }}
@@ -183,7 +183,7 @@ export function GlobalCallUI() {
               style={{
                 background: callStatus === 'reconnecting'
                   ? 'linear-gradient(135deg, #d97706, #b45309)'
-                  : callStatus === 'calling'
+                  : (callStatus === 'calling' || callStatus === 'connecting')
                     ? 'linear-gradient(135deg, #6366f1, #4f46e5)'
                     : 'linear-gradient(135deg, #10b981, #059669)',
                 borderRadius: 50,
@@ -210,7 +210,7 @@ export function GlobalCallUI() {
                   }} />
                 ) : (
                   <Phone style={{ width: 16, height: 16, color: 'white',
-                    ...(callStatus === 'calling' ? { animation: 'callPulse 1.5s ease-in-out infinite' } : {}) }} />
+                    ...((callStatus === 'calling' || callStatus === 'connecting') ? { animation: 'callPulse 1.5s ease-in-out infinite' } : {}) }} />
                 )}
               </div>
 
@@ -223,6 +223,7 @@ export function GlobalCallUI() {
                 <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, margin: 0 }}>
                   {callStatus === 'reconnecting' ? 'Reconnecting...'
                     : callStatus === 'calling' ? 'Calling...'
+                    : callStatus === 'connecting' ? 'Connecting...'
                     : fmt(callDuration)}
                 </p>
               </div>
