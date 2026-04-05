@@ -1126,8 +1126,8 @@ export function CollaborationPage() {
                   setEditProjectDesc(session.projectIdea.description || '');
                   setEditingProject(true);
                 }}
-                className="flex-shrink-0 text-gray-400 hover:text-pairon-accent p-2 -my-1 -ml-1 cursor-pointer"
-                title="Edit Project Idea"
+                className="ml-1.5 inline-flex items-center justify-center p-1 rounded text-gray-400 hover:text-pairon-accent hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Propose project topic edit"
               >
                 <Edit3 className="w-3 h-3" />
               </button>
