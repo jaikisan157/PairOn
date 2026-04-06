@@ -1120,7 +1120,7 @@ export function CollaborationPage() {
               {session.mode.toUpperCase()}
               {session.projectIdea && ` • ${session.projectIdea.title}`}
             </p>
-            {session.projectIdea && !isSoloMode && (
+            {session.projectIdea && !isSoloMode && isMobileScreen && (
               <button
                 onClick={() => {
                   setEditProjectTitle(session.projectIdea.title);
@@ -1174,7 +1174,7 @@ export function CollaborationPage() {
               onClick={() => setShowMobileMenu(false)}
             >
               {/* Call button */}
-              {session && (
+              {session && !isSoloMode && (
                 callStatus === 'idle' ? (
                   <button onClick={() => globalStartCall(session.sessionId, session.partnerName, user?.name ?? 'Partner')}
                     className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors">
@@ -1244,7 +1244,7 @@ export function CollaborationPage() {
                   <span className={`inline-block w-2 h-2 rounded-full ml-1 ${partnerStatus === 'online' ? 'bg-green-500' : partnerStatus === 'away' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`} title={`Partner is ${partnerStatus}`} />
                   <span className="text-yellow-500"> ⭐ {session.partnerReputation}</span>
                   {session.projectIdea && ` • ${session.projectIdea.title}`}
-                  {session.projectIdea && !isSoloMode && (
+                  {false && session.projectIdea && !isSoloMode && (
                     <button
                       onClick={() => {
                         setEditProjectTitle(session.projectIdea.title);
@@ -1314,7 +1314,7 @@ export function CollaborationPage() {
 
               <GlobalThemeToggle />
               {/* Voice Call Button — WebRTC P2P, handled by CallContext */}
-              {session && (
+              {session && !isSoloMode && (
                 callStatus === 'idle' ? (
                   <button onClick={() => globalStartCall(session.sessionId, session.partnerName, user?.name ?? 'Partner')} title="Start voice call"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-all shadow-sm active:scale-95">
@@ -1802,6 +1802,46 @@ export function CollaborationPage() {
           </motion.div>
         </div>
       )}
+
+      {/* Mobile Project Edit Modal */}
+      <AnimatePresence>
+        {isMobileScreen && editingProject && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden border border-gray-200 dark:border-gray-700">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900 dark:text-white">Edit Project Idea</h3>
+                <button onClick={() => setEditingProject(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 mb-1.5 block">Title</label>
+                  <Input
+                    value={editProjectTitle}
+                    onChange={(e) => setEditProjectTitle(e.target.value)}
+                    placeholder="Project title"
+                    className="rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 mb-1.5 block">Description</label>
+                  <textarea
+                    value={editProjectDesc}
+                    onChange={(e) => setEditProjectDesc(e.target.value)}
+                    placeholder="Project description"
+                    className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white resize-none h-24 focus:outline-none focus:ring-2 focus:ring-pairon-accent"
+                  />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" onClick={() => setEditingProject(false)} className="flex-1 rounded-xl">Cancel</Button>
+                  <Button onClick={handleSaveProjectEdit} className="flex-1 pairon-btn-primary rounded-xl">Save</Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Exit Request Modal */}
       <AnimatePresence>

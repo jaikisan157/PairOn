@@ -1,4 +1,5 @@
 import type { IUser } from '../types';
+import { TOPICS } from './topics';
 
 /**
  * Matching Algorithm for PairOn
@@ -232,38 +233,38 @@ export function generateProjectIdeas(
   user2: IUser,
   count: number = 3
 ): Array<{ title: string; description: string; category: string; difficulty: string }> {
-  const allSkills = [...user1.skills, ...user2.skills].map((s) => s.toLowerCase());
-  const allInterests = [...user1.interests, ...user2.interests].map((i) => i.toLowerCase());
-
-  const scored = PROJECT_TEMPLATES.map((template) => {
-    let score = 0;
-    for (const skill of template.skills) {
-      if (allSkills.some((s) => s.includes(skill) || skill.includes(s))) score += 10;
-    }
-    if (allInterests.some((i) => template.category.toLowerCase().includes(i) || i.includes(template.category.toLowerCase()))) {
-      score += 5;
-    }
-    return { template, score };
-  });
-
-  // Strong randomisation so each match session picks differently
-  scored.sort((a, b) => b.score + Math.random() * 12 - (a.score + Math.random() * 12));
-
   const experienceLevels = ['beginner', 'intermediate', 'advanced', 'expert'];
-  const user1Level = experienceLevels.indexOf(user1.experienceLevel);
-  const user2Level = experienceLevels.indexOf(user2.experienceLevel);
+  const user1Level = experienceLevels.indexOf(user1.experienceLevel) || 0;
+  const user2Level = experienceLevels.indexOf(user2.experienceLevel) || 0;
   const avgLevel = Math.round((user1Level + user2Level) / 2);
   const difficulty = avgLevel <= 0 ? 'easy' : avgLevel >= 3 ? 'hard' : 'medium';
 
-  return scored.slice(0, count).map(({ template }) => {
+  const ideas = [];
+  
+  // Create a copy of topics to pick random ones without duplicates in the same round
+  const shuffledTopics = [...TOPICS].sort(() => 0.5 - Math.random());
+
+  for (let i = 0; i < count; i++) {
+    const rawTitle = shuffledTopics[i % shuffledTopics.length];
+    
+    // Attempt to guess category from title
+    let category = 'Web App';
+    if (rawTitle.toLowerCase().includes('game')) category = 'Games';
+    else if (rawTitle.toLowerCase().includes('data') || rawTitle.toLowerCase().includes('chart') || rawTitle.toLowerCase().includes('visual')) category = 'Data';
+    else if (rawTitle.toLowerCase().includes('tool') || rawTitle.toLowerCase().includes('generator')) category = 'Tools';
+    else if (rawTitle.toLowerCase().includes('server') || rawTitle.toLowerCase().includes('api')) category = 'Backend';
+    
     const prefix = TITLE_PREFIXES[Math.floor(Math.random() * TITLE_PREFIXES.length)];
     const suffix = TITLE_SUFFIXES[Math.floor(Math.random() * TITLE_SUFFIXES.length)];
     const hasVariation = Math.random() > 0.4;
-    return {
-      title: hasVariation ? `${prefix}${template.title}${suffix}`.trim() : template.title,
-      description: template.description,
-      category: template.category,
+    
+    ideas.push({
+      title: hasVariation ? `${prefix}${rawTitle}${suffix}`.trim() : rawTitle,
+      description: `Collaboratively build a ${rawTitle.toLowerCase()} using Node and WebContainer compatible NPM packages.`,
+      category,
       difficulty,
-    };
-  });
+    });
+  }
+
+  return ideas;
 }

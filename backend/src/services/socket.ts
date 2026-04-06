@@ -182,7 +182,7 @@ export function setupSocketHandlers(io: Server) {
         // Fetch only the 5 most recent, with minimal fields
         const recentSessions = await CollaborationSession.find(
           { participants: userId },
-          { matchId: 1, participants: 1, status: 1, startedAt: 1, endsAt: 1, tasks: 1, quitterId: 1 }
+          { matchId: 1, participants: 1, status: 1, startedAt: 1, endsAt: 1, tasks: 1, quitterId: 1, submission: 1 }
         )
           .sort({ createdAt: -1 })
           .limit(20)

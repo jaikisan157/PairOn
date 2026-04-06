@@ -745,8 +745,11 @@ export function DashboardPage() {
                     } else if (sess.submittedBy === user?.id) {
                       displayStatus = 'completed';
                       displayLabel = '✅ Completed';
+                    } else if (sess.submittedBy) {
+                      displayStatus = 'completed';
+                      displayLabel = '✅ Partner Submitted';
                     } else {
-                      displayLabel = '⚠️ Partner Skipped';
+                      displayLabel = '⚠️ Partner Left';
                     }
                   } else if (sess.status === 'mutual_quit') {
                     displayLabel = '🤝 Mutual Quit';
