@@ -1,4 +1,4 @@
-﻿import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
+import { GlobalThemeToggle } from '@/components/GlobalThemeToggle';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -79,16 +79,16 @@ interface ChallengeSession {
 }
 
 const MODE_LABELS: Record<ChallengeMode, string> = {
-  sprint: 'âš¡ Sprint',
-  challenge: 'ðŸ† Challenge',
-  build: 'ðŸ”¨ Build Week',
+  sprint: '⚡ Sprint',
+  challenge: '🏆 Challenge',
+  build: '🔨 Build Week',
 };
 
 export function CollaborationPage() {
   const navigate = useNavigate();
   const { user, updateProfile, refreshUser } = useAuth();
 
-  // Refs for rejoin guard â€” using refs (NOT sessionStorage) avoids React Strict Mode
+  // Refs for rejoin guard — using refs (NOT sessionStorage) avoids React Strict Mode
   // double-invoke creating two orphaned timeouts where only one gets cancelled.
   const rejoinGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rejoinRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,7 +108,7 @@ export function CollaborationPage() {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submissionLink, setSubmissionLink] = useState('');
   const [submissionDescription, setSubmissionDescription] = useState('');
-  // Per-user local submission â€” independent of partner's submission
+  // Per-user local submission — independent of partner's submission
   const [mySubmission, setMySubmission] = useState<{ link: string; description: string } | null>(null);
 
   // Exit request state
@@ -200,7 +200,7 @@ export function CollaborationPage() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Voice call (global â€” from CallContext, WebRTC P2P)
+  // Voice call (global — from CallContext, WebRTC P2P)
   const { callStatus, startCall: globalStartCall, endCall: globalEndCall } = useCall();
 
   // Keep sessionRef in sync
@@ -272,7 +272,7 @@ export function CollaborationPage() {
 
     // Waiting
     socket.on('challenge:waiting', () => {
-  // Still searching â€” no action needed
+  // Still searching — no action needed
     });
 
     // Error
@@ -341,10 +341,10 @@ export function CollaborationPage() {
       setTimeRemaining(remaining);
     });
 
-    // Project submitted â€” only update OUR local submission, not a shared field
+    // Project submitted — only update OUR local submission, not a shared field
     // (so each user's submission is independent and editable)
     socket.on('challenge:submitted', (_submission: any) => {
-      // The submitter's own submission is already set via handleSubmit â†’ setMySubmission.
+      // The submitter's own submission is already set via handleSubmit → setMySubmission.
       // We intentionally do NOT push the partner's submission into our state.
     });
 
@@ -356,14 +356,14 @@ export function CollaborationPage() {
       handleSessionEnded();
     });
 
-  // Time's up â€” show modal instead of auto-submitting
+  // Time's up — show modal instead of auto-submitting
     socket.on('challenge:time-up', () => {
       setTimeRemaining(0);
       if (timerRef.current) clearInterval(timerRef.current);
       setShowTimeUpModal(true);
     });
 
-    // Partner force-quit â€” dedicated event with credits info
+    // Partner force-quit — dedicated event with credits info
     socket.on('challenge:partner-force-quit', (data: { sessionId: string; creditsEarned: number; message: string }) => {
       setPartnerForceQuit({ creditsEarned: data.creditsEarned, message: data.message });
       // Pre-mark solo in localStorage so that if user refreshes before clicking "Continue Alone" it's still solo
@@ -377,7 +377,7 @@ export function CollaborationPage() {
       } catch { /* ignore */ }
     });
 
-    // Now in solo mode â€” persist so refresh keeps it
+    // Now in solo mode — persist so refresh keeps it
     socket.on('challenge:now-solo', () => {
       setIsSoloMode(true);
       setPartnerForceQuit(null);
@@ -392,7 +392,7 @@ export function CollaborationPage() {
       } catch { /* ignore */ }
     });
 
-    // Partner submitted â€” put remaining user into solo mode
+    // Partner submitted — put remaining user into solo mode
     socket.on('challenge:partner-submitted', (data: { sessionId: string; submitterName: string }) => {
       // Show the same partner-force-quit style popup reusing that state
       setPartnerForceQuit({
@@ -501,7 +501,7 @@ export function CollaborationPage() {
       setIncomingProjectEdit({ proposerName: data.proposerName, title: data.title, description: data.description });
     });
 
-    // Project edit approved by partner â€” update session for both users
+    // Project edit approved by partner — update session for both users
     socket.on('challenge:project-updated', (data: any) => {
       setSession(prev => prev ? { ...prev, projectIdea: { ...prev.projectIdea, title: data.title, description: data.description } } : prev);
       setIncomingProjectEdit(null);
@@ -513,7 +513,7 @@ export function CollaborationPage() {
       setTimeout(() => setProjectEditNotification(null), 5000);
     });
 
-    // Project edit declined (proposer receives this) â€” show banner
+    // Project edit declined (proposer receives this) — show banner
     socket.on('challenge:project-edit-declined', () => {
       setProjectEditNotification({ type: 'declined' });
       setTimeout(() => setProjectEditNotification(null), 5000);
@@ -646,7 +646,7 @@ export function CollaborationPage() {
               navigate('/dashboard');
             }, 12_000);
           }
-          // Solo mode or fresh connects: no guard â€” session is self-sufficient from localStorage
+          // Solo mode or fresh connects: no guard — session is self-sufficient from localStorage
         }, 500);
 
         // Restore active view
@@ -778,7 +778,7 @@ export function CollaborationPage() {
     setStatus('idle');
     setTimeRemaining(0);
     localStorage.removeItem('challenge_session');
-    // Navigate to dashboard â€” auto-save is handled at submission time
+    // Navigate to dashboard — auto-save is handled at submission time
     navigate('/dashboard');
   }
 
@@ -794,7 +794,7 @@ export function CollaborationPage() {
     localStorage.removeItem('challenge_session');
   }
 
-  // â”€â”€â”€ Auto-save project to My Projects (DB-backed + localStorage cache) â”€â”€â”€â”€
+  // ─── Auto-save project to My Projects (DB-backed + localStorage cache) ────
   async function autoSaveToProjects(snap: any, submissionLink?: string, submissionDesc?: string) {
     if (!snap?.sessionId) return;
     try {
@@ -836,7 +836,7 @@ export function CollaborationPage() {
         console.warn('[autoSave] DB save failed, falling back to localStorage only:', dbErr);
       }
 
-      // â”€â”€ Secondary: also write to localStorage as local cache â”€â”€
+      // ── Secondary: also write to localStorage as local cache ──
       try {
         const existing = JSON.parse(localStorage.getItem('saved_projects') || '[]');
         const filtered = existing.filter((p: any) => p.sessionId !== projectEntry.sessionId);
@@ -853,7 +853,7 @@ export function CollaborationPage() {
   // Sessions only end via: force-quit button, approved exit request, or timer expiry.
   useEffect(() => {
     return () => {
-      // Do nothing â€” session stays alive in backend & localStorage
+      // Do nothing — session stays alive in backend & localStorage
       // User can resume from Dashboard "Recent Sessions"
     };
   }, []);
@@ -863,7 +863,7 @@ export function CollaborationPage() {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (status === 'matched' && session) {
         e.preventDefault();
-        e.returnValue = 'You have an active session. Your progress is saved â€” you can resume from the Dashboard.';
+        e.returnValue = 'You have an active session. Your progress is saved — you can resume from the Dashboard.';
         return e.returnValue;
       }
     };
@@ -878,7 +878,7 @@ export function CollaborationPage() {
 
     const msg = newMessage.trim();
 
-    // Optimistic update â€” show message instantly
+    // Optimistic update — show message instantly
     const optimisticMsg: ChallengeMessage = {
       id: `opt-${Date.now()}`,
       senderId: user?.id || '',
@@ -946,7 +946,7 @@ export function CollaborationPage() {
     e.preventDefault();
     if (!session) return;
     const snap = sessionRef.current;
-    // Store MY submission locally â€” independent of partner
+    // Store MY submission locally — independent of partner
     const sub = { link: submissionLink, description: submissionDescription };
     setMySubmission(sub);
     socketService.getSocket()?.emit('challenge:submit', session.sessionId, submissionLink, submissionDescription);
@@ -970,7 +970,7 @@ export function CollaborationPage() {
     setIsSoloMode(true);
   }, [session]);
 
-  // End session after time-up â€” auto-save and end
+  // End session after time-up — auto-save and end
   const handleEndAfterTimeout = useCallback(async () => {
     if (!session) return;
     const snap = sessionRef.current;
@@ -1040,7 +1040,7 @@ export function CollaborationPage() {
 
   const handleSaveProjectEdit = useCallback(() => {
     if (!session) return;
-    // Send proposal to partner â€” DON'T update local state until partner approves
+    // Send proposal to partner — DON'T update local state until partner approves
     socketService.getSocket()?.emit('challenge:propose-project-edit', {
       sessionId: session.sessionId,
       title: editProjectTitle,
@@ -1054,7 +1054,7 @@ export function CollaborationPage() {
       setProjectEditNotification(null);
       // Use a brief timeout so React picks up the null then the new value
       setTimeout(() => {
-        setProjectEditNotification({ type: 'accepted', title: 'ðŸ“¨ Request sent â€” waiting for partner\'s approval' });
+        setProjectEditNotification({ type: 'accepted', title: '📨 Request sent — waiting for partner\'s approval' });
         setTimeout(() => setProjectEditNotification(null), 5000);
       }, 50);
     }
@@ -1089,7 +1089,7 @@ export function CollaborationPage() {
   return (
     <div className="bg-pairon-bg dark:bg-gray-900 flex flex-col overflow-hidden" style={{ height: '100svh' }}>
 
-      {/* â”€â”€ Small-screen tip banner (dismissable, non-blocking) â”€â”€ */}
+      {/* ── Small-screen tip banner (dismissable, non-blocking) ── */}
       {isMobileScreen && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700 flex-shrink-0">
           <Monitor className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
@@ -1099,7 +1099,7 @@ export function CollaborationPage() {
         </div>
       )}
 
-      {/* â”€â”€ Mobile-only header bar (< md) â”€â”€ */}
+      {/* ── Mobile-only header bar (< md) ── */}
       <div className="md:hidden flex items-center gap-2 px-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0" style={{ height: 48 }}>
         {/* Back */}
         <button
@@ -1118,13 +1118,13 @@ export function CollaborationPage() {
           <div className="flex items-center gap-1 mt-0.5 min-w-0">
             <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight truncate flex-1 min-w-0">
               {session.mode.toUpperCase()}
-              {session.projectIdea && ` â€¢ ${session?.projectIdea?.title}`}
+              {session.projectIdea && ` • ${session.projectIdea.title}`}
             </p>
             {session.projectIdea && !isSoloMode && isMobileScreen && (
               <button
                 onClick={() => {
-                  setEditProjectTitle(session?.projectIdea?.title);
-                  setEditProjectDesc(session?.projectIdea?.description || '');
+                  setEditProjectTitle(session.projectIdea.title);
+                  setEditProjectDesc(session.projectIdea.description || '');
                   setEditingProject(true);
                 }}
                 className="ml-1.5 inline-flex items-center justify-center p-1 rounded text-gray-400 hover:text-pairon-accent hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -1160,7 +1160,7 @@ export function CollaborationPage() {
           >Code</button>
         </div>
 
-        {/* â‹¯ Actions menu */}
+        {/* ⋯ Actions menu */}
         <div className="relative flex-shrink-0">
           <button
             onClick={() => setShowMobileMenu(v => !v)}
@@ -1214,7 +1214,7 @@ export function CollaborationPage() {
         </div>
       </div>
 
-      {/* Header â€” desktop only */}
+      {/* Header — desktop only */}
       <header className="hidden md:block bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -1242,12 +1242,12 @@ export function CollaborationPage() {
                     title="View profile & add friend"
                   >{session.partnerName}</strong>
                   <span className={`inline-block w-2 h-2 rounded-full ml-1 ${partnerStatus === 'online' ? 'bg-green-500' : partnerStatus === 'away' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-400'}`} title={`Partner is ${partnerStatus}`} />
-                  <span className="text-yellow-500"> â­ {session.partnerReputation}</span>
-                  {session.projectIdea && ` â€¢ ${session?.projectIdea?.title}`}
+                  <span className="text-yellow-500"> ⭐ {session.partnerReputation}</span>
+                  {session.projectIdea && ` • ${session.projectIdea.title}`}
                   {false && session?.projectIdea && !isSoloMode && (
                     <button
                       onClick={() => {
-                        setEditProjectTitle(session?.projectIdea?.title);
+                        setEditProjectTitle(session?.projectIdea?.title || '');
                         setEditProjectDesc(session?.projectIdea?.description || '');
                         setEditingProject(true);
                       }}
@@ -1275,14 +1275,14 @@ export function CollaborationPage() {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${activeView === 'code' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
               >
-                <span className="text-sm">ðŸ’»</span> Code
+                <span className="text-sm">💻</span> Code
               </button>
             </div>
 
             <div className="flex items-center gap-3">
               {/* Solo mode indicator (inline, not blocking) */}
               {isSoloMode && (
-                <span className="text-xs bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full font-medium">âš¡ Solo</span>
+                <span className="text-xs bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full font-medium">⚡ Solo</span>
               )}
               {/* Timer */}
               <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full ${timeRemaining < 300 ? 'bg-red-100 text-red-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
@@ -1291,7 +1291,7 @@ export function CollaborationPage() {
                 <span className="font-mono text-sm font-semibold">{formatTime(timeRemaining)}</span>
               </div>
 
-              {/* Exit buttons â€” solo mode shows Leave only, collaborative shows Request + Force */}
+              {/* Exit buttons — solo mode shows Leave only, collaborative shows Request + Force */}
               {isSoloMode ? (
                 <Button variant="outline" size="sm" onClick={() => setShowSoloLeaveConfirm(true)} className="text-gray-600 border-gray-200 hover:bg-gray-50">
                   <LogOut className="w-4 h-4 mr-1" /> Leave
@@ -1313,7 +1313,7 @@ export function CollaborationPage() {
               )}
 
               <GlobalThemeToggle />
-              {/* Voice Call Button â€” WebRTC P2P, handled by CallContext */}
+              {/* Voice Call Button — WebRTC P2P, handled by CallContext */}
               {session && !isSoloMode && (
                 callStatus === 'idle' ? (
                   <button onClick={() => globalStartCall(session.sessionId, session.partnerName, user?.name ?? 'Partner')} title="Start voice call"
@@ -1348,7 +1348,7 @@ export function CollaborationPage() {
 
 
 
-        {/* IDE â€” always mounted so WebContainer/sockets/polling stay alive.
+        {/* IDE — always mounted so WebContainer/sockets/polling stay alive.
             Hidden with CSS when in chat view so it doesn't re-boot on tab switch.
             On mobile: use absolute positioning so CollabIDEMobile fills the area
             below the mobile header without fighting for flex height. */}
@@ -1377,7 +1377,7 @@ export function CollaborationPage() {
           </div>
         </div>
 
-        {/* Chat Panel â€” always mounted, hidden when code view active */}
+        {/* Chat Panel — always mounted, hidden when code view active */}
         <div className={`flex-1 flex flex-col min-w-0 border-r border-gray-200 dark:border-gray-700${activeView !== 'chat' ? ' hidden' : ''}`}>
             {/* Warning toast */}
             <AnimatePresence>
@@ -1404,12 +1404,12 @@ export function CollaborationPage() {
             {/* Exit request banners */}
             {exitRequestSent && (
               <div className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 text-sm text-yellow-700">
-                â³ Exit request sent. Waiting for partner's response...
+                ⏳ Exit request sent. Waiting for partner's response...
               </div>
             )}
             {exitDeclined && (
               <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 text-sm text-red-700">
-                âŒ Your exit request was declined.
+                ❌ Your exit request was declined.
               </div>
             )}
 
@@ -1479,7 +1479,7 @@ export function CollaborationPage() {
               </div>
             </form>
 
-            {/* â”€â”€ Mobile-only: Submission section â”€â”€ */}
+            {/* ── Mobile-only: Submission section ── */}
             {isMobileScreen && (
               <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
                 {/* Submission */}
@@ -1487,7 +1487,7 @@ export function CollaborationPage() {
                   <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Submission</p>
                   {mySubmission ? (
                     <div className="p-2.5 bg-green-50 dark:bg-green-900/20 rounded-xl">
-                      <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">âœ… Submitted</p>
+                      <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
                       <a href={mySubmission.link} target="_blank" rel="noopener noreferrer"
                         className="text-[10px] text-pairon-accent hover:underline break-all">{mySubmission.link}</a>
                     </div>
@@ -1504,7 +1504,7 @@ export function CollaborationPage() {
             )}
           </div>
 
-        {/* Kanban + Sidebar â€” only in chat view, hidden on mobile */}
+        {/* Kanban + Sidebar — only in chat view, hidden on mobile */}
         {activeView === 'chat' && sidebarOpen && (<>
           <div className="hidden md:flex w-96 bg-gray-50 dark:bg-gray-900/50 flex-col border-r border-gray-200 dark:border-gray-700">
             {/* Task Header with + and AI buttons */}
@@ -1666,7 +1666,7 @@ export function CollaborationPage() {
                         <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
                           <button onClick={() => handleTaskStatusChange(task.id, 'todo')}
                             className="p-1 text-gray-400 hover:text-blue-500" title="Undo (back to todo)">
-                            â†©
+                            ↩
                           </button>
                           <button onClick={() => socketService.getSocket()?.emit('challenge:delete-task', session.sessionId, task.id)}
                             className="p-1 text-red-400 hover:text-red-600" title="Delete">
@@ -1695,7 +1695,7 @@ export function CollaborationPage() {
                         <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 transition-all">
                           <button onClick={() => handleTaskStatusChange(task.id, 'in-progress')}
                             className="p-1 text-gray-400 hover:text-blue-500" title="Undo (back to in-progress)">
-                            â†©
+                            ↩
                           </button>
                           <button onClick={() => socketService.getSocket()?.emit('challenge:delete-task', session.sessionId, task.id)}
                             className="p-1 text-red-400 hover:text-red-600" title="Delete">
@@ -1717,7 +1717,7 @@ export function CollaborationPage() {
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Project Idea</h3>
                 {session.projectIdea && !editingProject && (
                   <button
-                    onClick={() => { setEditProjectTitle(session?.projectIdea?.title); setEditProjectDesc(session?.projectIdea?.description || ''); setEditingProject(true); }}
+                    onClick={() => { setEditProjectTitle(session.projectIdea.title); setEditProjectDesc(session.projectIdea.description || ''); setEditingProject(true); }}
                     className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                     title="Edit project"
                   >
@@ -1746,8 +1746,8 @@ export function CollaborationPage() {
                 </div>
               ) : session.projectIdea ? (
                 <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">{session?.projectIdea?.title}</p>
-                  <p className="text-xs text-gray-500 mt-1">{session?.projectIdea?.description}</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{session.projectIdea.title}</p>
+                  <p className="text-xs text-gray-500 mt-1">{session.projectIdea.description}</p>
                 </div>
               ) : (
                 <p className="text-xs text-gray-400">No project idea set</p>
@@ -1758,7 +1758,7 @@ export function CollaborationPage() {
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Submission</h3>
               {mySubmission ? (
                 <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
-                  <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">âœ… Submitted</p>
+                  <p className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">✅ Submitted</p>
                   <a href={mySubmission.link} target="_blank" rel="noopener noreferrer"
                     className="text-xs text-pairon-accent hover:underline break-all">{mySubmission.link}</a>
                 </div>
@@ -1786,7 +1786,7 @@ export function CollaborationPage() {
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300 rounded-xl text-sm border border-yellow-200 dark:border-yellow-700 font-medium">
-                âš ï¸ You can only submit once. You will not be able to edit this submission afterward. Please make sure your project is final.
+                ⚠️ You can only submit once. You will not be able to edit this submission afterward. Please make sure your project is final.
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Project link</label>
@@ -1951,7 +1951,7 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
-      {/* Project edit notification â€” fixed floating toast (shows in BOTH code + chat views) */}
+      {/* Project edit notification — fixed floating toast (shows in BOTH code + chat views) */}
       <AnimatePresence>
         {projectEditNotification && (
           <motion.div
@@ -1964,14 +1964,14 @@ export function CollaborationPage() {
                 : 'bg-orange-50 dark:bg-orange-900 border-orange-300 dark:border-orange-700'
             }`}
           >
-            <span className="text-xl flex-shrink-0">{projectEditNotification.type === 'accepted' ? 'âœ…' : 'âŒ'}</span>
+            <span className="text-xl flex-shrink-0">{projectEditNotification.type === 'accepted' ? '✅' : '❌'}</span>
             <p className={`text-sm font-medium flex-1 ${
               projectEditNotification.type === 'accepted'
                 ? 'text-green-800 dark:text-green-300'
                 : 'text-orange-800 dark:text-orange-300'
             }`}>
               {projectEditNotification.type === 'accepted'
-                ? `âœ¨ Name changed to "${projectEditNotification.title}"`
+                ? `✨ Name changed to "${projectEditNotification.title}"`
                 : 'Your rename request was declined.'}
             </p>
             <button onClick={() => setProjectEditNotification(null)} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
@@ -1986,7 +1986,7 @@ export function CollaborationPage() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
               <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">ðŸ“</span>
+                <span className="text-2xl">📝</span>
               </div>
               <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white text-center mb-2">Project Edit Proposal</h3>
               <p className="text-sm text-gray-500 text-center mb-3">
@@ -2021,7 +2021,7 @@ export function CollaborationPage() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
               <div className="w-12 h-12 bg-pairon-accent/10 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-2xl">ðŸŽ¯</span>
+                <span className="text-2xl">🎯</span>
               </div>
               <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white mb-1">Activity Check</h3>
               <p className="text-sm text-gray-500 mb-4">Slide to the <strong className="text-green-500">green zone</strong> to verify</p>
@@ -2045,9 +2045,9 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
-      {/* Solo mode indicator moved to header â€” no fixed overlay */}
+      {/* Solo mode indicator moved to header — no fixed overlay */}
 
-      {/* â”€â”€ Partner Force-Quit Popup â”€â”€ */}
+      {/* ── Partner Force-Quit Popup ── */}
       <AnimatePresence>
         {partnerForceQuit && session && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -2057,7 +2057,7 @@ export function CollaborationPage() {
               <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <LogOut className="w-8 h-8 text-yellow-400" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Partner Left ðŸ”’â€¹</h3>
+              <h3 className="text-xl font-bold text-white mb-2">Partner Left 🔒‹</h3>
               <p className="text-gray-400 text-sm mb-2">{partnerForceQuit.message}</p>
               <div className="inline-flex items-center gap-1.5 bg-green-500/10 border border-green-500/20 rounded-full px-3 py-1 mb-6">
                 <span className="text-green-400 text-xs font-semibold">+{partnerForceQuit.creditsEarned} credits added to your account</span>
@@ -2077,7 +2077,7 @@ export function CollaborationPage() {
         )}
       </AnimatePresence>
 
-      {/* â”€â”€ Time's Up Modal â”€â”€ */}
+      {/* ── Time's Up Modal ── */}
       <AnimatePresence>
         {showTimeUpModal && session && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -2091,12 +2091,12 @@ export function CollaborationPage() {
                   <Clock className="w-9 h-9 text-orange-400" />
                 </div>
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">â° Time's Up!</h3>
+              <h3 className="text-2xl font-bold text-white mb-2">⏰ Time's Up!</h3>
               <p className="text-gray-400 text-sm mb-2">Your {session.mode === 'sprint' ? '3-hour sprint' : session.mode === 'challenge' ? '24-hour challenge' : '7-day build'} has ended.</p>
               <p className="text-gray-500 text-xs mb-7">Submit your work or keep going in overtime.</p>
 
               <div className="flex flex-col gap-3">
-                {/* Submit & Save â€” primary action */}
+                {/* Submit & Save — primary action */}
                 {!mySubmission ? (
                   <button onClick={handleTimeUpSubmit}
                     className="w-full py-3.5 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-xl transition-all hover:scale-[1.02] flex items-center justify-center gap-2 shadow-lg shadow-green-900/30">
@@ -2108,7 +2108,7 @@ export function CollaborationPage() {
                   </div>
                 )}
 
-                {/* Continue in overtime â€” secondary action */}
+                {/* Continue in overtime — secondary action */}
                 <button onClick={() => setShowTimeUpModal(false)}
                   className="w-full py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/40 text-gray-300 hover:text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
                   <Clock className="w-4 h-4 text-indigo-400" /> Continue Overtime
@@ -2130,7 +2130,7 @@ export function CollaborationPage() {
         />
       )}
 
-      {/* â”€â”€ Session Complete Modal (shown after submission, auto-saved) â”€â”€ */}
+      {/* ── Session Complete Modal (shown after submission, auto-saved) ── */}
       <AnimatePresence>
         {showSessionCompleteModal && savedProjectSession && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -2140,7 +2140,7 @@ export function CollaborationPage() {
                 <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-pairon-accent rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
                   <CheckCircle2 className="w-9 h-9 text-white" />
                 </div>
-                <h3 className="font-display text-xl font-bold text-gray-900 dark:text-white mb-1">Project Submitted! ðŸŽ‰</h3>
+                <h3 className="font-display text-xl font-bold text-gray-900 dark:text-white mb-1">Project Submitted! 🎉</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   <strong className="text-gray-800 dark:text-white">{savedProjectSession.projectIdea?.title || 'Your project'}</strong> has been submitted and saved to your Projects.
                 </p>
@@ -2163,7 +2163,7 @@ export function CollaborationPage() {
                     <p className="text-[11px] text-blue-500 dark:text-blue-400">You worked great together!</p>
                   </div>
                   {friendRequestSent ? (
-                    <span className="text-xs text-green-500 font-semibold whitespace-nowrap">âœ“ Sent!</span>
+                    <span className="text-xs text-green-500 font-semibold whitespace-nowrap">✓ Sent!</span>
                   ) : (
                     <button
                       onClick={async () => {
